@@ -19,8 +19,14 @@ type Store struct {
 }
 
 // Open opens (or creates) a SQLite file at path.
+//
+// PRAGMAs are passed via DSN so modernc.org/sqlite applies them per-connection.
+// This is required because PRAGMA foreign_keys / journal_mode are connection-scoped:
+// setting them once via Migrate() would not propagate to other pooled connections,
+// leaving FK constraints unenforced and WAL inactive on most queries.
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite at %s: %w", path, err)
 	}
@@ -28,8 +34,11 @@ func Open(path string) (*Store, error) {
 }
 
 // OpenReadOnly opens a SQLite file in read-only mode (used by serve/mcp).
+// FK pragma is enforced per-connection via DSN; WAL is omitted because read-only
+// mode cannot mutate journal state.
 func OpenReadOnly(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?mode=ro&immutable=1")
+	dsn := path + "?mode=ro&immutable=1&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite ro at %s: %w", path, err)
 	}

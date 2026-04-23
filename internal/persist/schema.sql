@@ -1,5 +1,7 @@
+-- PRAGMAs are applied per-connection via DSN in Open()/OpenReadOnly()
+-- (sqlite PRAGMAs are connection-scoped, not database-scoped). The line below
+-- is retained as documentation of intent — actual enforcement comes from the DSN.
 PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
 
 CREATE TABLE IF NOT EXISTS nodes (
   id             TEXT PRIMARY KEY,

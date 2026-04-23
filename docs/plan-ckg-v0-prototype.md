@@ -30,7 +30,7 @@
 ## Conventions used in this plan
 
 - **Module path:** `github.com/0xmhha/code-knowledge-graph` (override at `go mod init` time if user prefers different remote).
-- **Go version:** 1.22 (uses `slog` stdlib, generics maturity, `for range over int`).
+- **Go version:** 1.25 (uses `slog` stdlib, generics maturity, `for range over int`; bumped from 1.22 to satisfy modernc.org/sqlite v1.49.1).
 - **Test framework:** stdlib `testing` + table-driven; no testify.
 - **Fixture pattern:** `testdata/` per package, golden files `*_golden.json` for parser outputs.
 - **Commit cadence:** one commit per task minimum; include test + impl in same commit when small.
@@ -64,7 +64,7 @@ cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
 go mod init github.com/0xmhha/code-knowledge-graph
 ```
 
-Expected: creates `go.mod` with `module github.com/0xmhha/code-knowledge-graph` and `go 1.22`.
+Expected: creates `go.mod` with `module github.com/0xmhha/code-knowledge-graph` and `go 1.22`. (T3's `go get modernc.org/sqlite` will later auto-bump this to `go 1.25` — that is expected.)
 
 - [ ] **Step 2: Add `.gitignore`**
 
@@ -8748,7 +8748,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.22' }
+        with: { go-version: '1.25' }
       - run: go vet ./...
       - run: go test -race ./...
       - uses: actions/setup-node@v4
@@ -8766,7 +8766,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.22' }
+        with: { go-version: '1.25' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: cd web/viewer && npm ci && npx playwright install chromium && node esbuild.config.js
