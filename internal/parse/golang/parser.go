@@ -47,8 +47,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	}, nil
 }
 
-// Resolve runs Pass 2 over the union of ParseResults from the same language.
-// Stub for T7 — full implementation lands in T9 (cross-file resolution via go/types).
-func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, error) {
-	return nil, fmt.Errorf("not yet implemented")
-}
+// Resolve is implemented in resolve.go (Task 9).
+
+// Compile-time check that *Parser satisfies parse.Parser.
+var _ parse.Parser = (*Parser)(nil)
