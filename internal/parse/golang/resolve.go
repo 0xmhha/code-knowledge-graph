@@ -11,8 +11,11 @@ import (
 )
 
 // Resolve unions per-file results and uses go/types to resolve PendingRefs.
-// V0 implementation: resolves call-target qnames to existing function/method nodes
-// by qname suffix match. Unresolved pending refs become AMBIGUOUS edges.
+// V0 implementation: resolves call-target qnames to existing function/method
+// nodes by qname suffix match. Unresolved pending refs are dropped (V0
+// simplification — emitting AMBIGUOUS edges would violate the schema's
+// foreign-key constraint on edges.dst, so full AMBIGUOUS handling is
+// deferred until edge persistence supports nullable dst).
 func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, error) {
 	out := &parse.ResolvedGraph{}
 	qIndex := map[string]string{} // qname -> nodeID (Function/Method only)
@@ -64,7 +67,6 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 			}
 			if !ok {
-				conf = types.ConfAmbiguous
 				continue // V0: drop unresolved edges to avoid foreign-key violations.
 			}
 			src := pr.SrcID
@@ -96,13 +98,11 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 	p := New(root)
 	var results []*parse.ParseResult
 	for _, pkg := range pkgs {
-		for i, file := range pkg.Syntax {
-			path := pkg.GoFiles[i]
+		for _, path := range pkg.GoFiles {
 			src, err := readFile(path)
 			if err != nil {
 				return nil, err
 			}
-			_ = file
 			r, err := p.ParseFile(path, src)
 			if err != nil {
 				return nil, err
