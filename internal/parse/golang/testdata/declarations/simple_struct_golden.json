@@ -1,0 +1,12 @@
+{
+  "node_qnames": [
+    "simple.Counter",
+    "simple.Counter.N",
+    "simple.Counter.Inc"
+  ],
+  "node_types": {
+    "simple.Counter": "Struct",
+    "simple.Counter.N": "Field",
+    "simple.Counter.Inc": "Method"
+  }
+}
