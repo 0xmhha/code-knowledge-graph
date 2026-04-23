@@ -86,13 +86,13 @@ func (v *declVisitor) emitTypeSpec(s *ast.TypeSpec, doc *ast.CommentGroup) {
 		nodeType = types.NodeStruct
 		v.appendNode(id, nodeType, s.Name.Name, qname, startLine, endLine, startByte, endByte, exported(s.Name.Name), commentText(doc), "")
 		for _, f := range t.Fields.List {
-			v.emitFields(qname, f)
+			v.emitFields(id, qname, f)
 		}
 	case *ast.InterfaceType:
 		nodeType = types.NodeInterface
 		v.appendNode(id, nodeType, s.Name.Name, qname, startLine, endLine, startByte, endByte, exported(s.Name.Name), commentText(doc), "")
 		for _, f := range t.Methods.List {
-			v.emitInterfaceMethod(qname, f)
+			v.emitInterfaceMethod(id, qname, f)
 		}
 	default:
 		nodeType = types.NodeTypeAlias
@@ -103,7 +103,7 @@ func (v *declVisitor) emitTypeSpec(s *ast.TypeSpec, doc *ast.CommentGroup) {
 	})
 }
 
-func (v *declVisitor) emitFields(parentQname string, f *ast.Field) {
+func (v *declVisitor) emitFields(parentID, parentQname string, f *ast.Field) {
 	for _, name := range f.Names {
 		qname := parentQname + "." + name.Name
 		startLine, startByte := v.pos(f.Pos())
@@ -112,14 +112,13 @@ func (v *declVisitor) emitFields(parentQname string, f *ast.Field) {
 		v.appendNode(id, types.NodeField, name.Name, qname,
 			startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(f.Doc), "")
-		parentID := MakeID(parentQname, "go", v.lookupStartByte(parentQname))
 		v.edges = append(v.edges, types.Edge{
 			Src: parentID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
 	}
 }
 
-func (v *declVisitor) emitInterfaceMethod(parentQname string, f *ast.Field) {
+func (v *declVisitor) emitInterfaceMethod(parentID, parentQname string, f *ast.Field) {
 	for _, name := range f.Names {
 		qname := parentQname + "." + name.Name
 		startLine, startByte := v.pos(f.Pos())
@@ -128,7 +127,6 @@ func (v *declVisitor) emitInterfaceMethod(parentQname string, f *ast.Field) {
 		v.appendNode(id, types.NodeMethod, name.Name, qname,
 			startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(f.Doc), "")
-		parentID := MakeID(parentQname, "go", v.lookupStartByte(parentQname))
 		v.edges = append(v.edges, types.Edge{
 			Src: parentID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
@@ -199,15 +197,6 @@ func (v *declVisitor) appendNode(id string, t types.NodeType, name, qname string
 		Language: "go", Visibility: vis, DocComment: doc, Signature: sig,
 		Confidence: types.ConfExtracted,
 	})
-}
-
-func (v *declVisitor) lookupStartByte(qname string) int {
-	for _, n := range v.nodes {
-		if n.QualifiedName == qname {
-			return n.StartByte
-		}
-	}
-	return 0
 }
 
 func exported(name string) string {
