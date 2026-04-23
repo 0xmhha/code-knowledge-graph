@@ -184,6 +184,7 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 	v.edges = append(v.edges, types.Edge{
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 	})
+	v.emitFunctionBodyPos(qname, id, d.Body)
 }
 
 // helpers

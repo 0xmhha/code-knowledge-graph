@@ -1,0 +1,10 @@
+{
+  "logic_block_counts": {
+    "IfStmt": 1,
+    "LoopStmt": 2,
+    "SwitchStmt": 1,
+    "ReturnStmt": 2,
+    "CallSite": 4
+  },
+  "goroutine_count": 1
+}
