@@ -1,0 +1,28 @@
+# Binaries
+/bin/
+*.exe
+
+# Test coverage
+coverage.out
+*.coverprofile
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Build outputs
+/web/viewer/dist/
+/web/viewer/node_modules/
+
+# CKG runtime outputs
+/tmp/ckg-*
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Local Claude settings
+.claude/settings.local.json
