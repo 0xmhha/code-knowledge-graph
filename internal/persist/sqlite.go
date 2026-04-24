@@ -241,6 +241,183 @@ func (s *Store) QueryEdgesByType(t string) ([]types.Edge, error) {
 	return out, nil
 }
 
+// HierarchyRow is the wire shape returned by LoadHierarchy. ParentID may be
+// empty for top-level topic communities (resolution=0), so callers must
+// treat "" as a sentinel for "root".
+type HierarchyRow struct {
+	ParentID   string `json:"parent_id"`
+	ChildID    string `json:"child_id"`
+	Level      int    `json:"level"`
+	TopicLabel string `json:"topic_label,omitempty"`
+}
+
+// LoadHierarchy returns the package tree (kind="pkg") or topic tree
+// (kind="topic") as a flat slice. The two trees share the wire shape so the
+// viewer can swap data sources without reshaping.
+func (s *Store) LoadHierarchy(kind string) ([]HierarchyRow, error) {
+	var query string
+	switch kind {
+	case "pkg":
+		query = `SELECT parent_id, child_id, level, '' FROM pkg_tree`
+	case "topic":
+		query = `SELECT COALESCE(parent_id,''), child_id, resolution, COALESCE(topic_label,'') FROM topic_tree`
+	default:
+		return nil, fmt.Errorf("unknown hierarchy kind %q", kind)
+	}
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query hierarchy %q: %w", kind, err)
+	}
+	defer rows.Close()
+	var out []HierarchyRow
+	for rows.Next() {
+		var r HierarchyRow
+		if err := rows.Scan(&r.ParentID, &r.ChildID, &r.Level, &r.TopicLabel); err != nil {
+			return nil, fmt.Errorf("scan hierarchy row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate hierarchy rows: %w", err)
+	}
+	return out, nil
+}
+
+// nodeColumns is the explicit column list used by every SELECT that feeds
+// scanNodes. Keeping it in one place avoids SELECT * surprises if the
+// schema gains a column later.
+const nodeColumns = `id, type, name, qualified_name, file_path,
+	start_line, end_line, start_byte, end_byte, language,
+	COALESCE(visibility,''), COALESCE(signature,''), COALESCE(doc_comment,''),
+	COALESCE(complexity,0), in_degree, out_degree, pagerank, usage_score,
+	confidence, COALESCE(sub_kind,'')`
+
+// QueryNodes returns either top-level packages (when parent is empty) or
+// the children of parent via the pkg_tree join. Limit caps the result set.
+func (s *Store) QueryNodes(parent string, limit int) ([]types.Node, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if parent == "" {
+		rows, err = s.db.Query(`SELECT `+nodeColumns+` FROM nodes WHERE type='Package' LIMIT ?`, limit)
+	} else {
+		rows, err = s.db.Query(`SELECT `+nodeColumns+` FROM nodes n
+			JOIN pkg_tree p ON p.child_id = n.id WHERE p.parent_id = ? LIMIT ?`,
+			parent, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query nodes (parent=%q): %w", parent, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// QueryEdgesForNodes returns every edge that has src OR dst in ids. Used by
+// the viewer to expand a neighbourhood by node selection.
+func (s *Store) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	ph := placeholders(len(ids))
+	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+	      FROM edges WHERE src IN (` + ph + `) OR dst IN (` + ph + `)`
+	args := make([]any, 0, 2*len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query edges for %d nodes: %w", len(ids), err)
+	}
+	defer rows.Close()
+	return scanEdges(rows)
+}
+
+// GetBlob returns the raw source slice persisted for node id. Returns
+// sql.ErrNoRows when no blob exists (e.g. Package nodes have no body).
+func (s *Store) GetBlob(id string) ([]byte, error) {
+	var b []byte
+	err := s.db.QueryRow(`SELECT source FROM blobs WHERE node_id = ?`, id).Scan(&b)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// SearchFTS executes an FTS5 MATCH against nodes_fts and returns the joined
+// node rows. Caller is responsible for forming a valid FTS5 query string.
+func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
+	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes_fts f
+		JOIN nodes n ON n.rowid = f.rowid
+		WHERE nodes_fts MATCH ? LIMIT ?`, q, limit)
+	if err != nil {
+		return nil, fmt.Errorf("fts search %q: %w", q, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// placeholders returns a comma-separated `?,?,?` of length n. n<=0 returns
+// "" so callers can detect the empty case before building a malformed IN().
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	out := make([]byte, 0, 2*n-1)
+	out = append(out, '?')
+	for i := 1; i < n; i++ {
+		out = append(out, ',', '?')
+	}
+	return string(out)
+}
+
+// scanNodes drains rows assuming the SELECT projects nodeColumns in order.
+// All nullable columns are pre-COALESCE'd at the SQL layer so we can scan
+// directly into string/int fields without sql.NullString plumbing.
+func scanNodes(rows *sql.Rows) ([]types.Node, error) {
+	var out []types.Node
+	for rows.Next() {
+		var n types.Node
+		var conf string
+		if err := rows.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
+			&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
+			&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
+			&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
+			&conf, &n.SubKind); err != nil {
+			return nil, fmt.Errorf("scan node row: %w", err)
+		}
+		n.Confidence = types.Confidence(conf)
+		out = append(out, n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate node rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanEdges drains rows produced by QueryEdgesForNodes (file_path/line are
+// COALESCE'd in the SELECT, so direct scan is safe here too).
+func scanEdges(rows *sql.Rows) ([]types.Edge, error) {
+	var out []types.Edge
+	for rows.Next() {
+		var e types.Edge
+		var conf string
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &e.FilePath, &e.Line, &e.Count, &conf); err != nil {
+			return nil, fmt.Errorf("scan edge row: %w", err)
+		}
+		e.Confidence = types.Confidence(conf)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge rows: %w", err)
+	}
+	return out, nil
+}
+
 // InsertEdges bulk-inserts edges (transactional).
 func (s *Store) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()
