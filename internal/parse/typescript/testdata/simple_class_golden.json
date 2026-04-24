@@ -1,0 +1,12 @@
+{
+  "node_qnames_subset": [
+    "WalletService",
+    "WalletService.deposit",
+    "import:./vault"
+  ],
+  "node_types": {
+    "WalletService": "Class",
+    "WalletService.deposit": "Method",
+    "import:./vault": "Import"
+  }
+}

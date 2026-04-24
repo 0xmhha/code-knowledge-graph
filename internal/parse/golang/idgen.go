@@ -1,13 +1,9 @@
 package golang
 
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
-)
+import "github.com/0xmhha/code-knowledge-graph/internal/parse"
 
-// MakeID returns a stable 16-char content-hash for a node identifier triple.
+// MakeID delegates to the shared parse.MakeID so all language parsers compute
+// identical IDs for the same (qname, lang, startByte) tuple.
 func MakeID(qname, lang string, startByte int) string {
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d", qname, lang, startByte)))
-	return hex.EncodeToString(sum[:])[:16]
+	return parse.MakeID(qname, lang, startByte)
 }
