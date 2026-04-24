@@ -1,0 +1,4 @@
+{
+  "expected_node_types": ["Contract", "Mapping", "Event", "Modifier", "Function"],
+  "expected_edge_types": ["emits_event", "has_modifier", "writes_mapping"]
+}
