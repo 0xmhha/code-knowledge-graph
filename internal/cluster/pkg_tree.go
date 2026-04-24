@@ -17,8 +17,19 @@ type Edge struct {
 	Level             int
 }
 
-// PkgTree captures the deterministic package-tree hierarchy
-// (Level 0 pkg → 1 subpkg → 2 file → 3 type/func/var → 4 LogicBlock).
+// PkgTree captures the structural-depth hierarchy derived from package paths.
+// level semantics:
+//   - root pkg (no slash in qname) = 0
+//   - each nested subpkg adds +1
+//   - file = parent_pkg.level + 1
+//   - decl (type/func/var) = file.level + 1
+//   - LogicBlock = function.level + 1
+//
+// IMPORTANT: this is structural depth, NOT the spec §5.4 L0..L4 LOD band.
+// Deep monorepos (a/b/c/d package nesting) produce levels >4 (unbounded above:
+// depth-N package nesting yields file at level N+1, function at level N+2, etc.).
+// The viewer's LOD wiring (T23) must derive the LOD band from node.Type
+// independently rather than reading PkgTree.level directly.
 type PkgTree struct {
 	parent map[string]string
 	level  map[string]int
@@ -125,14 +136,6 @@ func nearestPkgIDForFile(filePath string, pkgs map[string]string) string {
 	for q := range pkgs {
 		if (dir == q || strings.HasPrefix(dir, q+"/")) && len(q) > len(best) {
 			best = q
-		}
-	}
-	if best == "" {
-		// fall back to directory-derived synthetic match
-		for q := range pkgs {
-			if q == dir {
-				best = q
-			}
 		}
 	}
 	return pkgs[best]
