@@ -1,6 +1,7 @@
 // src/main.js
 import { API } from './api.js';
 import { Store } from './store.js';
+import { mountGraph } from './layout.js';
 
 const api = new API('');
 const store = new Store();
@@ -20,6 +21,10 @@ const store = new Store();
   const nodes = await api.nodes('', 5000);
   store.loadNodes(nodes);
   store.setVisible(top.map(t => t.id));
-  // 3D layout wired in Task 23.
   console.log('viewer bootstrap', { nodes: nodes.length, top });
 })();
+
+// Mount the 3D graph once. It reads from `store` reactively (subscribe) and
+// uses `api` for LOD-driven expansion. Safe to mount before bootstrap finishes
+// because the store starts empty and `sync()` re-fires on every `setVisible`.
+mountGraph(document.getElementById('canvas'), store, api);
