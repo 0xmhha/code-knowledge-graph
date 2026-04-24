@@ -2,6 +2,8 @@
 import { API } from './api.js';
 import { Store } from './store.js';
 import { mountGraph } from './layout.js';
+import { wireSearch } from './search.js';
+import { renderPanel } from './panel.js';
 
 const api = new API('');
 const store = new Store();
@@ -27,4 +29,28 @@ const store = new Store();
 // Mount the 3D graph once. It reads from `store` reactively (subscribe) and
 // uses `api` for LOD-driven expansion. Safe to mount before bootstrap finishes
 // because the store starts empty and `sync()` re-fires on every `setVisible`.
-mountGraph(document.getElementById('canvas'), store, api);
+// `fg` is the 3d-force-graph instance — captured for future T26 camera focus.
+const fg = mountGraph(document.getElementById('canvas'), store, api);
+
+const panelEl = document.getElementById('panel');
+const searchEl = document.getElementById('search');
+
+// focusNode: load the node + its edges, dedupe against existing store.edges,
+// render the selection panel. We call store.emit() after appending edges so
+// the layout's `sync()` listener re-pushes graph data into 3d-force-graph;
+// without it the new edges sit in the store but never reach the canvas.
+const focusNode = async (id) => {
+  const node = store.nodes.get(id);
+  if (!node) return;
+  const edges = await api.edges([id]);
+  const fresh = edges.filter(
+    e => !store.edges.some(x => x.src === e.src && x.dst === e.dst && x.type === e.type)
+  );
+  if (fresh.length) {
+    store.edges = [...store.edges, ...fresh];
+    store.emit();
+  }
+  renderPanel(panelEl, api, node, edges);
+};
+
+wireSearch(searchEl, api, store, focusNode);
