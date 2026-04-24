@@ -7,6 +7,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -102,6 +103,108 @@ func (s *Store) GetNode(id string) (types.Node, error) {
 	}
 	n.Confidence = types.Confidence(conf)
 	return n, nil
+}
+
+// ClusterEdge mirrors cluster.Edge to avoid making persist's exported surface
+// reach across packages. cluster.PersistClusterEdge is a structurally identical
+// type defined in the cluster package; InsertPkgTreeFromCluster bridges them.
+type ClusterEdge struct {
+	ParentID, ChildID string
+	Level             int
+}
+
+// TopicTreeInput abstracts the per-resolution view of a topic tree so persist
+// can consume it without importing cluster types directly. *cluster.TopicTree
+// satisfies this interface (see internal/cluster/persist_adapter.go).
+type TopicTreeInput interface {
+	ResolutionsCount() int
+	ResolutionGamma(i int) float64
+	ResolutionMembers(i int) map[string][]string // label -> []nodeID
+}
+
+// InsertPkgTree bulk-inserts package-tree edges.
+func (s *Store) InsertPkgTree(edges []ClusterEdge) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO pkg_tree (parent_id, child_id, level) VALUES (?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, e := range edges {
+		if _, err := stmt.Exec(e.ParentID, e.ChildID, e.Level); err != nil {
+			return fmt.Errorf("insert pkg_tree %s->%s: %w", e.ParentID, e.ChildID, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// InsertPkgTreeFromCluster adapts cluster.PersistClusterEdge slices to the
+// internal ClusterEdge type and delegates to InsertPkgTree.
+func (s *Store) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) error {
+	out := make([]ClusterEdge, len(edges))
+	for i, e := range edges {
+		out[i] = ClusterEdge(e)
+	}
+	return s.InsertPkgTree(out)
+}
+
+// InsertTopicTree persists multi-resolution Leiden communities. Existing rows
+// are dropped first so a full rebuild matches V0 expectations.
+func (s *Store) InsertTopicTree(t TopicTreeInput) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM topic_tree`); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO topic_tree (parent_id, child_id, resolution, topic_label) VALUES (?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for i := 0; i < t.ResolutionsCount(); i++ {
+		members := t.ResolutionMembers(i)
+		for label, ids := range members {
+			for _, id := range ids {
+				if _, err := stmt.Exec(nil, id, i, label); err != nil {
+					return fmt.Errorf("insert topic_tree %s@%d: %w", id, i, err)
+				}
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// InsertBlobs stores per-node source slices keyed by node ID.
+func (s *Store) InsertBlobs(blobs map[string][]byte) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO blobs (node_id, source) VALUES (?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for id, b := range blobs {
+		if _, err := stmt.Exec(id, b); err != nil {
+			return fmt.Errorf("insert blob %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// RebuildFTS reloads the FTS5 virtual table from the nodes content table.
+func (s *Store) RebuildFTS() error {
+	_, err := s.db.Exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')`)
+	return err
 }
 
 // InsertEdges bulk-inserts edges (transactional).

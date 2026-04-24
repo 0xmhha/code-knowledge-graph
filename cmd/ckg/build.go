@@ -1,9 +1,13 @@
 package main
 
 import (
-	"errors"
+	"fmt"
+	"log/slog"
+	"os"
 
 	"github.com/spf13/cobra"
+
+	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 )
 
 func newBuildCmd() *cobra.Command {
@@ -13,7 +17,20 @@ func newBuildCmd() *cobra.Command {
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return errors.New("build not yet implemented (Task 16)")
+			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			m, err := buildpipe.Run(buildpipe.Options{
+				SrcRoot:    src,
+				OutDir:     out,
+				Languages:  langs,
+				Logger:     log,
+				CKGVersion: ckgVersion,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "ckg: built %d nodes / %d edges into %s\n",
+				m.Stats["nodes"], m.Stats["edges"], out)
+			return nil
 		},
 	}
 	cmd.Flags().StringVar(&src, "src", "", "source root (required)")
