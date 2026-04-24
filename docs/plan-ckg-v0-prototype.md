@@ -7246,6 +7246,8 @@ func newMCPCmd() *cobra.Command {
 
 `internal/mcp/integration_test.go`:
 
+> **Note**: `mcp-go@v0.49.0` stdio transport uses **newline-delimited JSON (NDJSON)**, NOT LSP-style `Content-Length` framing. `send` must write `fmt.Fprintf(w, "%s\n", buf)` and `read` must share a `*bufio.Reader` calling `ReadString('\n')` per message. The `Content-Length`-based helpers below are a plan defect — see the implementation commit for the corrected NDJSON helpers.
+
 ```go
 //go:build e2e
 
