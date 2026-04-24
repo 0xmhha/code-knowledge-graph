@@ -16,8 +16,11 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
+	"github.com/0xmhha/code-knowledge-graph/internal/link"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
+	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
+	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/internal/score"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -62,7 +65,27 @@ func Run(opt Options) (persist.Manifest, error) {
 		parseErrs += n
 		resolved = append(resolved, rg)
 	}
-	// TS / Sol pipelines wired in Phase 5.
+	// solParser is retained across the language passes so that the
+	// cross-language linker (T20) can read Solidity ABI sigs after graph.Build.
+	// nil signals "no Sol pipeline ran" — xlang stage is skipped in that case.
+	var solParser *solp.Parser
+	if shouldRun("ts", opt.Languages) && len(files.TS) > 0 {
+		rg, n, err := runTSPipeline(opt.SrcRoot, files.TS, log)
+		if err != nil {
+			return persist.Manifest{}, fmt.Errorf("ts pipeline: %w", err)
+		}
+		parseErrs += n
+		resolved = append(resolved, rg)
+	}
+	if shouldRun("sol", opt.Languages) && len(files.Sol) > 0 {
+		rg, n, p, err := runSolPipeline(opt.SrcRoot, files.Sol, log)
+		if err != nil {
+			return persist.Manifest{}, fmt.Errorf("sol pipeline: %w", err)
+		}
+		parseErrs += n
+		solParser = p
+		resolved = append(resolved, rg)
+	}
 
 	// (4) graph build + validate
 	g, err := graph.Build(resolved)
@@ -71,6 +94,18 @@ func Run(opt Options) (persist.Manifest, error) {
 	}
 	if err := graph.Validate(g); err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
+	}
+
+	// (4b) cross-language linking: Sol -> TS binds_to edges (spec §4.7.3).
+	// Re-validate after appending so any dangling refs are caught defensively.
+	if solParser != nil {
+		abi := convertABI(solParser.ABI())
+		xlEdges := link.SolToTS(g.Nodes, abi)
+		g.Edges = append(g.Edges, xlEdges...)
+		if err := graph.Validate(g); err != nil {
+			return persist.Manifest{}, fmt.Errorf("validate after xlang: %w", err)
+		}
+		log.Info("xlang linked", "binds_to", len(xlEdges))
 	}
 
 	// (5) cluster
@@ -176,6 +211,77 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 	}
 	rg, err := p.Resolve(results)
 	return rg, errs, err
+}
+
+// runTSPipeline drives Pass 1 + Pass 2 for TypeScript / JavaScript.
+// Returns the resolved graph, count of files that failed to read or parse,
+// and any fatal Resolve error. Mirrors runGoPipeline.
+func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
+	p := tsp.New(srcRoot)
+	results := []*parse.ParseResult{}
+	errs := 0
+	for _, rel := range files {
+		full := filepath.Join(srcRoot, rel)
+		src, err := os.ReadFile(full)
+		if err != nil {
+			log.Warn("ts read", "path", full, "err", err)
+			errs++
+			continue
+		}
+		r, err := p.ParseFile(full, src)
+		if err != nil {
+			log.Warn("ts parse", "path", full, "err", err)
+			errs++
+			continue
+		}
+		results = append(results, r)
+	}
+	rg, err := p.Resolve(results)
+	return rg, errs, err
+}
+
+// runSolPipeline drives Pass 1 + Pass 2 for Solidity. Returns the parser
+// instance so callers can read the accumulated ABI for cross-language linking.
+func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, *solp.Parser, error) {
+	p := solp.New(srcRoot)
+	results := []*parse.ParseResult{}
+	errs := 0
+	for _, rel := range files {
+		full := filepath.Join(srcRoot, rel)
+		src, err := os.ReadFile(full)
+		if err != nil {
+			log.Warn("sol read", "path", full, "err", err)
+			errs++
+			continue
+		}
+		r, err := p.ParseFile(full, src)
+		if err != nil {
+			log.Warn("sol parse", "path", full, "err", err)
+			errs++
+			continue
+		}
+		results = append(results, r)
+	}
+	rg, err := p.Resolve(results)
+	return rg, errs, p, err
+}
+
+// convertABI bridges solidity.ABISig (parser output) and link.ABISig (linker
+// input) to keep the link package free of any per-language parser imports.
+func convertABI(in map[string][]solp.ABISig) map[string][]link.ABISig {
+	out := make(map[string][]link.ABISig, len(in))
+	for k, v := range in {
+		converted := make([]link.ABISig, len(v))
+		for i, s := range v {
+			converted[i] = link.ABISig{
+				ContractName: s.ContractName,
+				FunctionName: s.FunctionName,
+				ParamTypes:   s.ParamTypes,
+			}
+		}
+		out[k] = converted
+	}
+	return out
 }
 
 // extractBlobs reads every node's source slice (StartByte..EndByte) into a

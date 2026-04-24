@@ -207,6 +207,40 @@ func (s *Store) RebuildFTS() error {
 	return err
 }
 
+// QueryEdgesByType returns all edges whose type matches t. Used by tests
+// and downstream consumers (eval/MCP) that want to pull edges by relation
+// kind without scanning the full table.
+func (s *Store) QueryEdgesByType(t string) ([]types.Edge, error) {
+	rows, err := s.db.Query(`SELECT id, src, dst, type, file_path, line, count, confidence
+		FROM edges WHERE type = ?`, t)
+	if err != nil {
+		return nil, fmt.Errorf("query edges by type %q: %w", t, err)
+	}
+	defer rows.Close()
+	var out []types.Edge
+	for rows.Next() {
+		var e types.Edge
+		var fp sql.NullString
+		var line sql.NullInt64
+		var conf string
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf); err != nil {
+			return nil, fmt.Errorf("scan edge row: %w", err)
+		}
+		if fp.Valid {
+			e.FilePath = fp.String
+		}
+		if line.Valid {
+			e.Line = int(line.Int64)
+		}
+		e.Confidence = types.Confidence(conf)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge rows: %w", err)
+	}
+	return out, nil
+}
+
 // InsertEdges bulk-inserts edges (transactional).
 func (s *Store) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()
