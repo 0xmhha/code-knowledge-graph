@@ -8,7 +8,8 @@ const (
 	queryFunction  = `(function_declaration name: (identifier) @name) @decl`
 	queryMethod    = `(method_definition name: (property_identifier) @name) @decl`
 	queryImport    = `(import_statement source: (string) @path) @decl`
-	queryExport    = `(export_statement) @decl`
+	// TODO(T18+): export_statement support requires a distinct visitor (no @name capture).
+	// queryExport = `(export_statement) @decl`
 	queryDecorator = `(decorator (call_expression function: (identifier) @name)) @decl`
 	queryTypeAlias = `(type_alias_declaration name: (type_identifier) @name) @decl`
 	queryEnum      = `(enum_declaration name: (identifier) @name) @decl`

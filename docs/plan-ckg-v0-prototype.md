@@ -4494,6 +4494,8 @@ const (
 )
 ```
 
+> **V0 note (T18 defect):** Plan listed `(export_statement) @decl` query but the verbatim `runQuery` only handles `@name` captures. Export node emission requires a distinct `runExports()` handler — deferred to V1+. The constant has been dropped from `queries.go`; track Export support as known scope gap.
+
 `internal/parse/typescript/parser.go`:
 
 ```go
