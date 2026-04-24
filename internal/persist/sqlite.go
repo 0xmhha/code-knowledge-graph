@@ -350,8 +350,17 @@ func (s *Store) GetBlob(id string) ([]byte, error) {
 
 // SearchFTS executes an FTS5 MATCH against nodes_fts and returns the joined
 // node rows. Caller is responsible for forming a valid FTS5 query string.
+//
+// The projection is fully qualified with the n.* alias because nodes_fts
+// shares column names (name, qualified_name, signature, doc_comment) with
+// the nodes content table — bare references would be ambiguous.
 func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
-	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes_fts f
+	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
+		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
+		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
+		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
+		n.confidence, COALESCE(n.sub_kind,'')
+		FROM nodes_fts f
 		JOIN nodes n ON n.rowid = f.rowid
 		WHERE nodes_fts MATCH ? LIMIT ?`, q, limit)
 	if err != nil {
@@ -416,6 +425,175 @@ func scanEdges(rows *sql.Rows) ([]types.Edge, error) {
 		return nil, fmt.Errorf("iterate edge rows: %w", err)
 	}
 	return out, nil
+}
+
+// FindSymbol returns nodes whose qualified_name matches name. When exact is
+// true, only equality matches are returned; when false, a LIKE '%.<name>'
+// suffix match is also accepted (so "Foo" hits "pkg.Foo"). lang optionally
+// filters by language. Capped at 100 rows to bound MCP response size.
+func (s *Store) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
+	args := []any{}
+	q := `SELECT ` + nodeColumns + ` FROM nodes WHERE 1=1 `
+	if exact {
+		q += `AND qualified_name = ? `
+		args = append(args, name)
+	} else {
+		q += `AND (qualified_name = ? OR qualified_name LIKE ?) `
+		args = append(args, name, "%."+name)
+	}
+	if lang != "" {
+		q += `AND language = ? `
+		args = append(args, lang)
+	}
+	q += `LIMIT 100`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find symbol %q: %w", name, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// NeighborhoodByQname returns BFS expansion up to depth starting from any
+// node whose qualified_name == qname. When reverse is true, expansion follows
+// edges backwards (callers); otherwise it follows them forwards (callees).
+// Result includes the seed nodes plus all nodes reachable within depth hops.
+func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool) ([]types.Node, []types.Edge, error) {
+	roots, err := s.FindSymbol(qname, "", true)
+	if err != nil {
+		return nil, nil, err
+	}
+	seen := map[string]types.Node{}
+	for _, r := range roots {
+		seen[r.ID] = r
+	}
+	var allEdges []types.Edge
+	frontier := mapKeys(seen)
+	for d := 0; d < depth; d++ {
+		if len(frontier) == 0 {
+			break
+		}
+		var es []types.Edge
+		var err error
+		if reverse {
+			es, err = s.edgesPointingTo(frontier)
+		} else {
+			es, err = s.edgesFrom(frontier)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		next := []string{}
+		ids := []string{}
+		for _, e := range es {
+			allEdges = append(allEdges, e)
+			id := e.Dst
+			if reverse {
+				id = e.Src
+			}
+			if _, ok := seen[id]; !ok {
+				ids = append(ids, id)
+				next = append(next, id)
+			}
+		}
+		ns, _ := s.NodesByIDs(ids)
+		for _, n := range ns {
+			seen[n.ID] = n
+		}
+		frontier = next
+	}
+	out := make([]types.Node, 0, len(seen))
+	for _, n := range seen {
+		out = append(out, n)
+	}
+	return out, allEdges, nil
+}
+
+// SubgraphByQname returns BFS expansion in BOTH directions up to depth. Node
+// set is the union of forward and reverse traversals from qname's roots.
+func (s *Store) SubgraphByQname(qname string, depth int) ([]types.Node, []types.Edge, error) {
+	fwdN, fwdE, err := s.NeighborhoodByQname(qname, depth, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	revN, revE, err := s.NeighborhoodByQname(qname, depth, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	merged := map[string]types.Node{}
+	for _, n := range fwdN {
+		merged[n.ID] = n
+	}
+	for _, n := range revN {
+		merged[n.ID] = n
+	}
+	out := make([]types.Node, 0, len(merged))
+	for _, n := range merged {
+		out = append(out, n)
+	}
+	return out, append(fwdE, revE...), nil
+}
+
+// edgesFrom returns every edge whose src is in ids.
+func (s *Store) edgesFrom(ids []string) ([]types.Edge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		FROM edges WHERE src IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("edges from %d ids: %w", len(ids), err)
+	}
+	defer rows.Close()
+	return scanEdges(rows)
+}
+
+// edgesPointingTo returns every edge whose dst is in ids.
+func (s *Store) edgesPointingTo(ids []string) ([]types.Edge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		FROM edges WHERE dst IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("edges pointing to %d ids: %w", len(ids), err)
+	}
+	defer rows.Close()
+	return scanEdges(rows)
+}
+
+// NodesByIDs fetches nodes by primary key. Empty input yields a nil slice
+// without hitting the database.
+func (s *Store) NodesByIDs(ids []string) ([]types.Node, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes WHERE id IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("nodes by %d ids: %w", len(ids), err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// mapKeys is a generic helper that returns the keys of a map as a slice.
+// Used by NeighborhoodByQname to convert the seen-set into a frontier.
+func mapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// anys converts a []string into []any so it can be spread as variadic args
+// to (*sql.DB).Query without callers writing the conversion every time.
+func anys(ss []string) []any {
+	out := make([]any, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
 }
 
 // InsertEdges bulk-inserts edges (transactional).
