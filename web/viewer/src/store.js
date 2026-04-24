@@ -1,0 +1,17 @@
+// src/store.js — single source of truth for what's currently visible.
+export class Store {
+  constructor() {
+    this.nodes = new Map(); // id -> node
+    this.edges = [];
+    this.visibleIds = new Set();
+    this.lod = 0;
+    this.hierarchyKind = 'pkg';
+    this.listeners = new Set();
+  }
+  subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  emit() { this.listeners.forEach(fn => fn(this)); }
+  loadNodes(arr) { for (const n of arr) this.nodes.set(n.id, n); this.emit(); }
+  setVisible(ids) { this.visibleIds = new Set(ids); this.emit(); }
+  setLOD(n) { this.lod = n; this.emit(); }
+  setHierarchy(k) { this.hierarchyKind = k; this.emit(); }
+}
