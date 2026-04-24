@@ -89,12 +89,12 @@ func (v *declVisitor) runDecl(q string, nt types.NodeType) {
 	}
 }
 
-// runStateVarDecl walks every state_variable_declaration. Mappings are
-// emitted as Mapping nodes (and a writes_mapping pending ref is queued
-// against any function inside the same contract that references the var
-// name on the LHS — V0 simplification). Non-mapping state vars become
-// Field nodes via runDecl(queryStateVar) is intentionally not used: doing
-// both passes here keeps mapping detection and field emission in one place.
+// runStateVarDecl walks all state_variable_declaration nodes once. Non-mapping
+// state vars become Field nodes; declarations whose type_name has key_type +
+// value_type fields are emitted as Mapping nodes. Unifying both kinds in one
+// pass lets us avoid a separate queryMappingDecl (which the grammar doesn't
+// expose as a distinct node type) and keeps mapping detection adjacent to its
+// type-introspection logic.
 func (v *declVisitor) runStateVarDecl() {
 	query, err := sitter.NewQuery([]byte(queryStateVarAll), v.lang)
 	if err != nil {
@@ -142,7 +142,9 @@ func (v *declVisitor) runStateVarDecl() {
 				Count: 1, Confidence: types.ConfExtracted,
 			})
 			if isMapping {
-				v.queueMappingWrites(name, id)
+				// TODO(T19+): pass `id` here once writes_mapping can be emitted as
+				// a same-file resolved edge directly (skip pending pipeline).
+				v.queueMappingWrites(name)
 			}
 		}
 	}
@@ -152,7 +154,7 @@ func (v *declVisitor) runStateVarDecl() {
 // augmented_assignment_expression whose LHS array_access targets the given
 // mapping name, and queues a pending writes_mapping edge. V0 simplification:
 // we treat any `name[...] = ...` or `name[...] += ...` as a write.
-func (v *declVisitor) queueMappingWrites(mappingName, mappingID string) {
+func (v *declVisitor) queueMappingWrites(mappingName string) {
 	q := `(augmented_assignment_expression
 	         (expression (array_access (expression (identifier) @arr))))
 	      @stmt`
@@ -185,18 +187,17 @@ func (v *declVisitor) queueMappingWrites(mappingName, mappingID string) {
 		if fnQ == "" {
 			continue
 		}
-		// The mapping target ID is known; emit a resolved edge directly with
-		// EXTRACTED confidence rather than going through the pending pipeline,
-		// because the mapping definition lives in the same file and we
-		// already hold the ID. The function ID is unknown until Resolve, so
-		// queue it as pending using the function qname.
+		// The function ID is unknown until Resolve, so queue this as a pending
+		// ref using the function qname. The mapping target lives in the same
+		// file and could in principle be emitted as a resolved edge directly,
+		// but we route through the pending pipeline to keep emit/modifier/
+		// writes_mapping handling uniform.
 		v.pending = append(v.pending, parse.PendingRef{
 			SrcID:       parse.MakeID(fnQ, "sol", 0),
 			EdgeType:    types.EdgeWritesMapping,
 			TargetQName: mappingName + ":mapping",
 			Line:        int(stmtNode.StartPoint().Row) + 1,
 		})
-		_ = mappingID
 	}
 }
 

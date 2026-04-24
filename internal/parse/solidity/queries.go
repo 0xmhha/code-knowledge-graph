@@ -20,7 +20,9 @@ const (
 	queryEvent       = `(event_definition name: (identifier) @name) @decl`
 	queryStruct      = `(struct_declaration name: (identifier) @name) @decl`
 	queryEnum        = `(enum_declaration name: (identifier) @name) @decl`
-	queryStateVar    = `(state_variable_declaration name: (identifier) @name) @decl`
+	// TODO(T19+): queryStateVar replaced by queryStateVarAll + runStateVarDecl
+	// (mapping detection unified into one visitor pass).
+	// queryStateVar = `(state_variable_declaration name: (identifier) @name) @decl`
 	queryStateVarAll = `(state_variable_declaration) @decl`
 	queryEmit        = `(emit_statement name: (expression (identifier) @event)) @stmt`
 	queryHasModifier = `(modifier_invocation (identifier) @mod) @stmt`

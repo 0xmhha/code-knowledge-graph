@@ -1,5 +1,5 @@
 // Package binding wraps the tree-sitter-solidity grammar (vendored from
-// github.com/JoranHonig/tree-sitter-solidity v1.2.13, MIT-licensed) into a
+// github.com/JoranHonig/tree-sitter-solidity v1.2.11, MIT-licensed) into a
 // *sitter.Language usable by github.com/smacker/go-tree-sitter.
 //
 // We vendor instead of importing because the upstream repo ships only C/Node/
