@@ -1,11 +1,15 @@
 // src/main.js
-import { API } from './api.js';
+import { API, StaticAPI, detectMode } from './api.js';
 import { Store } from './store.js';
 import { mountGraph } from './layout.js';
 import { wireSearch } from './search.js';
 import { renderPanel } from './panel.js';
 
-const api = new API('');
+// Transport selection happens once at boot. detectMode probes ./manifest.json
+// — present in static export bundles, absent under `ckg serve`. Anything
+// downstream sees the same API surface and stays transport-agnostic.
+const mode = await detectMode();
+const api = mode === 'static' ? new StaticAPI() : new API('');
 const store = new Store();
 
 (async () => {

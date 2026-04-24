@@ -1606,6 +1606,80 @@ var API = class {
     return fetch(`${this.base}/api/search?q=${encodeURIComponent(q2)}`).then((r3) => r3.json());
   }
 };
+async function detectMode() {
+  try {
+    const r3 = await fetch("./manifest.json", { cache: "no-store" });
+    if (r3.ok) return "static";
+  } catch (_3) {
+  }
+  return "serve";
+}
+var StaticAPI = class {
+  constructor() {
+    this._nodesCache = null;
+    this._edgesCache = null;
+    this._pkgTreeCache = null;
+  }
+  async manifest() {
+    return fetch("./manifest.json", { cache: "no-store" }).then((r3) => r3.json());
+  }
+  async hierarchy(kind = "pkg") {
+    const file = kind === "topic" ? "topic_tree.json" : "pkg_tree.json";
+    return fetch(`./hierarchy/${file}`).then((r3) => r3.json()).then((v3) => v3 || []);
+  }
+  async _allNodes() {
+    if (!this._nodesCache) this._nodesCache = await concatChunks("nodes");
+    return this._nodesCache;
+  }
+  async _allEdges() {
+    if (!this._edgesCache) this._edgesCache = await concatChunks("edges");
+    return this._edgesCache;
+  }
+  async _pkgTree() {
+    if (!this._pkgTreeCache) this._pkgTreeCache = await this.hierarchy("pkg");
+    return this._pkgTreeCache;
+  }
+  async nodes(parentId = "", limit = 5e3) {
+    const all2 = await this._allNodes();
+    if (!parentId) {
+      return all2.filter((n3) => n3.type === "Package").slice(0, limit);
+    }
+    const tree = await this._pkgTree();
+    const childIds = new Set(
+      tree.filter((r3) => r3.parent_id === parentId).map((r3) => r3.child_id)
+    );
+    return all2.filter((n3) => childIds.has(n3.id)).slice(0, limit);
+  }
+  async edges(nodeIds) {
+    const ids = new Set(nodeIds);
+    const all2 = await this._allEdges();
+    return all2.filter((e3) => ids.has(e3.src) || ids.has(e3.dst));
+  }
+  async blob(nodeId) {
+    return fetch(`./blobs/${nodeId}.txt`).then((r3) => r3.ok ? r3.text() : "");
+  }
+  // V0: FTS is server-only; static bundle has no index, and shipping one is
+  // V1 work. Return empty so the search box fails gracefully.
+  async search(_q2) {
+    return [];
+  }
+};
+async function concatChunks(prefix) {
+  const out = [];
+  for (let i3 = 0; ; i3++) {
+    const path = `./${prefix}/chunk_${String(i3).padStart(4, "0")}.json`;
+    let r3;
+    try {
+      r3 = await fetch(path);
+    } catch (_3) {
+      break;
+    }
+    if (!r3.ok) break;
+    const arr = await r3.json();
+    if (Array.isArray(arr)) out.push(...arr);
+  }
+  return out;
+}
 
 // src/store.js
 var Store = class {
@@ -23143,28 +23217,28 @@ function WebGLBindingStates(gl, attributes) {
   };
 }
 function WebGLBufferRenderer(gl, extensions, info) {
-  let mode;
+  let mode2;
   function setMode(value) {
-    mode = value;
+    mode2 = value;
   }
   function render3(start, count) {
-    gl.drawArrays(mode, start, count);
-    info.update(count, mode, 1);
+    gl.drawArrays(mode2, start, count);
+    info.update(count, mode2, 1);
   }
   function renderInstances(start, count, primcount) {
     if (primcount === 0) return;
-    gl.drawArraysInstanced(mode, start, count, primcount);
-    info.update(count, mode, primcount);
+    gl.drawArraysInstanced(mode2, start, count, primcount);
+    info.update(count, mode2, primcount);
   }
   function renderMultiDraw(starts, counts, drawCount) {
     if (drawCount === 0) return;
     const extension = extensions.get("WEBGL_multi_draw");
-    extension.multiDrawArraysWEBGL(mode, starts, 0, counts, 0, drawCount);
+    extension.multiDrawArraysWEBGL(mode2, starts, 0, counts, 0, drawCount);
     let elementCount = 0;
     for (let i3 = 0; i3 < drawCount; i3++) {
       elementCount += counts[i3];
     }
-    info.update(elementCount, mode, 1);
+    info.update(elementCount, mode2, 1);
   }
   function renderMultiDrawInstances(starts, counts, drawCount, primcount) {
     if (drawCount === 0) return;
@@ -23174,12 +23248,12 @@ function WebGLBufferRenderer(gl, extensions, info) {
         renderInstances(starts[i3], counts[i3], primcount[i3]);
       }
     } else {
-      extension.multiDrawArraysInstancedWEBGL(mode, starts, 0, counts, 0, primcount, 0, drawCount);
+      extension.multiDrawArraysInstancedWEBGL(mode2, starts, 0, counts, 0, primcount, 0, drawCount);
       let elementCount = 0;
       for (let i3 = 0; i3 < drawCount; i3++) {
         elementCount += counts[i3] * primcount[i3];
       }
-      info.update(elementCount, mode, 1);
+      info.update(elementCount, mode2, 1);
     }
   }
   this.setMode = setMode;
@@ -24282,9 +24356,9 @@ function WebGLGeometries(gl, attributes, info, bindingStates) {
   };
 }
 function WebGLIndexedBufferRenderer(gl, extensions, info) {
-  let mode;
+  let mode2;
   function setMode(value) {
-    mode = value;
+    mode2 = value;
   }
   let type, bytesPerElement;
   function setIndex(value) {
@@ -24292,23 +24366,23 @@ function WebGLIndexedBufferRenderer(gl, extensions, info) {
     bytesPerElement = value.bytesPerElement;
   }
   function render3(start, count) {
-    gl.drawElements(mode, count, type, start * bytesPerElement);
-    info.update(count, mode, 1);
+    gl.drawElements(mode2, count, type, start * bytesPerElement);
+    info.update(count, mode2, 1);
   }
   function renderInstances(start, count, primcount) {
     if (primcount === 0) return;
-    gl.drawElementsInstanced(mode, count, type, start * bytesPerElement, primcount);
-    info.update(count, mode, primcount);
+    gl.drawElementsInstanced(mode2, count, type, start * bytesPerElement, primcount);
+    info.update(count, mode2, primcount);
   }
   function renderMultiDraw(starts, counts, drawCount) {
     if (drawCount === 0) return;
     const extension = extensions.get("WEBGL_multi_draw");
-    extension.multiDrawElementsWEBGL(mode, counts, 0, type, starts, 0, drawCount);
+    extension.multiDrawElementsWEBGL(mode2, counts, 0, type, starts, 0, drawCount);
     let elementCount = 0;
     for (let i3 = 0; i3 < drawCount; i3++) {
       elementCount += counts[i3];
     }
-    info.update(elementCount, mode, 1);
+    info.update(elementCount, mode2, 1);
   }
   function renderMultiDrawInstances(starts, counts, drawCount, primcount) {
     if (drawCount === 0) return;
@@ -24318,12 +24392,12 @@ function WebGLIndexedBufferRenderer(gl, extensions, info) {
         renderInstances(starts[i3] / bytesPerElement, counts[i3], primcount[i3]);
       }
     } else {
-      extension.multiDrawElementsInstancedWEBGL(mode, counts, 0, type, starts, 0, primcount, 0, drawCount);
+      extension.multiDrawElementsInstancedWEBGL(mode2, counts, 0, type, starts, 0, primcount, 0, drawCount);
       let elementCount = 0;
       for (let i3 = 0; i3 < drawCount; i3++) {
         elementCount += counts[i3] * primcount[i3];
       }
-      info.update(elementCount, mode, 1);
+      info.update(elementCount, mode2, 1);
     }
   }
   this.setMode = setMode;
@@ -24345,9 +24419,9 @@ function WebGLInfo(gl) {
     points: 0,
     lines: 0
   };
-  function update5(count, mode, instanceCount) {
+  function update5(count, mode2, instanceCount) {
     render3.calls++;
-    switch (mode) {
+    switch (mode2) {
       case gl.TRIANGLES:
         render3.triangles += instanceCount * (count / 3);
         break;
@@ -24364,7 +24438,7 @@ function WebGLInfo(gl) {
         render3.points += instanceCount * count;
         break;
       default:
-        console.error("THREE.WebGLInfo: Unknown draw mode:", mode);
+        console.error("THREE.WebGLInfo: Unknown draw mode:", mode2);
         break;
     }
   }
@@ -63437,26 +63511,26 @@ var WebGLBufferRenderer2 = class {
     this.object = null;
   }
   render(start, count) {
-    const { gl, mode, object, type, info, index: index5 } = this;
+    const { gl, mode: mode2, object, type, info, index: index5 } = this;
     if (index5 !== 0) {
-      gl.drawElements(mode, count, type, start);
+      gl.drawElements(mode2, count, type, start);
     } else {
-      gl.drawArrays(mode, start, count);
+      gl.drawArrays(mode2, start, count);
     }
     info.update(object, count, 1);
   }
   renderInstances(start, count, primcount) {
-    const { gl, mode, type, index: index5, object, info } = this;
+    const { gl, mode: mode2, type, index: index5, object, info } = this;
     if (primcount === 0) return;
     if (index5 !== 0) {
-      gl.drawElementsInstanced(mode, count, type, start, primcount);
+      gl.drawElementsInstanced(mode2, count, type, start, primcount);
     } else {
-      gl.drawArraysInstanced(mode, start, count, primcount);
+      gl.drawArraysInstanced(mode2, start, count, primcount);
     }
     info.update(object, count, primcount);
   }
   renderMultiDraw(starts, counts, drawCount) {
-    const { extensions, mode, object, info } = this;
+    const { extensions, mode: mode2, object, info } = this;
     if (drawCount === 0) return;
     const extension = extensions.get("WEBGL_multi_draw");
     if (extension === null) {
@@ -63465,9 +63539,9 @@ var WebGLBufferRenderer2 = class {
       }
     } else {
       if (this.index !== 0) {
-        extension.multiDrawElementsWEBGL(mode, counts, 0, this.type, starts, 0, drawCount);
+        extension.multiDrawElementsWEBGL(mode2, counts, 0, this.type, starts, 0, drawCount);
       } else {
-        extension.multiDrawArraysWEBGL(mode, starts, 0, counts, 0, drawCount);
+        extension.multiDrawArraysWEBGL(mode2, starts, 0, counts, 0, drawCount);
       }
       let elementCount = 0;
       for (let i3 = 0; i3 < drawCount; i3++) {
@@ -63477,7 +63551,7 @@ var WebGLBufferRenderer2 = class {
     }
   }
   renderMultiDrawInstances(starts, counts, drawCount, primcount) {
-    const { extensions, mode, object, info } = this;
+    const { extensions, mode: mode2, object, info } = this;
     if (drawCount === 0) return;
     const extension = extensions.get("WEBGL_multi_draw");
     if (extension === null) {
@@ -63486,9 +63560,9 @@ var WebGLBufferRenderer2 = class {
       }
     } else {
       if (this.index !== 0) {
-        extension.multiDrawElementsInstancedWEBGL(mode, counts, 0, this.type, starts, 0, primcount, 0, drawCount);
+        extension.multiDrawElementsInstancedWEBGL(mode2, counts, 0, this.type, starts, 0, primcount, 0, drawCount);
       } else {
-        extension.multiDrawArraysInstancedWEBGL(mode, starts, 0, counts, 0, primcount, 0, drawCount);
+        extension.multiDrawArraysInstancedWEBGL(mode2, starts, 0, counts, 0, primcount, 0, drawCount);
       }
       let elementCount = 0;
       for (let i3 = 0; i3 < drawCount; i3++) {
@@ -72528,13 +72602,13 @@ var OrbitControls = class extends Controls {
   }
   //
   _customWheelEvent(event) {
-    const mode = event.deltaMode;
+    const mode2 = event.deltaMode;
     const newEvent = {
       clientX: event.clientX,
       clientY: event.clientY,
       deltaY: event.deltaY
     };
-    switch (mode) {
+    switch (mode2) {
       case 1:
         newEvent.deltaY *= 16;
         break;
@@ -78049,7 +78123,8 @@ function renderPanel(el, api2, node, edges) {
 }
 
 // src/main.js
-var api = new API("");
+var mode = await detectMode();
+var api = mode === "static" ? new StaticAPI() : new API("");
 var store = new Store();
 (async () => {
   const manifest = await api.manifest();
