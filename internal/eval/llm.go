@@ -2,12 +2,15 @@ package eval
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
+
+// ErrNoAPIKey is returned by NewLLMClient when ANTHROPIC_API_KEY is unset.
+var ErrNoAPIKey = errors.New("ANTHROPIC_API_KEY not set")
 
 // LLMResult bundles a single completion's output text and usage counters.
 type LLMResult struct {
@@ -28,7 +31,7 @@ type LLMClient struct {
 func NewLLMClient(model string) (*LLMClient, error) {
 	key := os.Getenv("ANTHROPIC_API_KEY")
 	if key == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set")
+		return nil, ErrNoAPIKey
 	}
 	c := anthropic.NewClient(option.WithAPIKey(key))
 	return &LLMClient{c: &c, model: model}, nil
