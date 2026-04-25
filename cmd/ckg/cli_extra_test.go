@@ -161,7 +161,14 @@ func TestServeCmd_PortInUse(t *testing.T) {
 // TestServeCmd_PortInUseWithOpen is the same as TestServeCmd_PortInUse but
 // additionally passes --open=true to exercise the goroutine branch that
 // launches the browser and cover openBrowser.
+//
+// To avoid actually launching a real browser on the developer's machine, we
+// set PATH="" so exec.Command("open"|"xdg-open"|"rundll32") fails to locate
+// the binary. openBrowser silently swallows the Start() error, so all of its
+// statements still execute (preserving coverage) but no GUI window appears.
 func TestServeCmd_PortInUseWithOpen(t *testing.T) {
+	t.Setenv("PATH", "")
+
 	graphDir := t.TempDir()
 	buildGraph(t, graphDir)
 
@@ -182,7 +189,7 @@ func TestServeCmd_PortInUseWithOpen(t *testing.T) {
 	cmd.SetErr(io.Discard)
 
 	// Expect an error (port in use). The --open goroutine fires asynchronously;
-	// the OS-level "open" process may fail silently but that's fine.
+	// the OS-level "open" lookup fails because PATH is empty — that's fine.
 	if err := cmd.Execute(); err == nil {
 		t.Errorf("expected error when port is already in use")
 	}
