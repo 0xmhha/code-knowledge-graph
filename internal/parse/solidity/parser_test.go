@@ -115,3 +115,20 @@ func keysET(m map[types.EdgeType]bool) []string {
 	}
 	return out
 }
+
+func TestSolParser_Extensions(t *testing.T) {
+	p := sol.New(".")
+	exts := p.Extensions()
+	if len(exts) == 0 {
+		t.Fatal("Extensions() returned empty slice")
+	}
+	found := false
+	for _, e := range exts {
+		if e == ".sol" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Extensions() does not contain \".sol\": %v", exts)
+	}
+}

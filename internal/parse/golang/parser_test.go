@@ -68,3 +68,20 @@ func equalStr(a, b []string) bool {
 	}
 	return true
 }
+
+func TestGoParser_Extensions(t *testing.T) {
+	p := gop.New(".")
+	exts := p.Extensions()
+	if len(exts) == 0 {
+		t.Fatal("Extensions() returned empty slice")
+	}
+	found := false
+	for _, e := range exts {
+		if e == ".go" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("Extensions() does not contain \".go\": %v", exts)
+	}
+}
