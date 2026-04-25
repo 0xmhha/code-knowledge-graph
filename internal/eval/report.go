@@ -29,7 +29,7 @@ func WriteReport(path string, results []Result) error {
 		rows = append(rows, row{B: b,
 			AvgTokens: a.Tokens / a.N, AvgScore: a.Score / a.N})
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].B < rows[j].B })
+	sort.Slice(rows, func(i, j int) bool { return baselineOrder(rows[i].B) < baselineOrder(rows[j].B) })
 
 	var sb strings.Builder
 	sb.WriteString("# CKG eval report\n\n")
@@ -38,8 +38,8 @@ func WriteReport(path string, results []Result) error {
 		fmt.Fprintf(&sb, "| %s | %.0f | %.3f |\n", r.B, r.AvgTokens, r.AvgScore)
 	}
 	sb.WriteString("\n## Hypothesis check\n\n")
-	if a, ok := avg[BaselineAlpha]; ok {
-		if d, ok := avg[BaselineDelta]; ok {
+	if a, ok := avg[BaselineAlpha]; ok && a.N > 0 && a.Tokens > 0 {
+		if d, ok := avg[BaselineDelta]; ok && d.N > 0 {
 			savings := 1 - (d.Tokens/d.N)/(a.Tokens/a.N)
 			fmt.Fprintf(&sb, "- **H1** δ vs α token savings: **%.1f%%** (target ≥ 50%%)\n", savings*100)
 			scoreDelta := d.Score/d.N - a.Score/a.N
@@ -47,4 +47,20 @@ func WriteReport(path string, results []Result) error {
 		}
 	}
 	return os.WriteFile(path, []byte(sb.String()), 0o644)
+}
+
+// baselineOrder gives the canonical α/β/γ/δ index for stable report ordering.
+// Unknown baselines sort last.
+func baselineOrder(b Baseline) int {
+	switch b {
+	case BaselineAlpha:
+		return 0
+	case BaselineBeta:
+		return 1
+	case BaselineGamma:
+		return 2
+	case BaselineDelta:
+		return 3
+	}
+	return 4
 }

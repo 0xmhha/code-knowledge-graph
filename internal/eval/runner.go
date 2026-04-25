@@ -53,6 +53,12 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 			results = append(results, res)
 		}
 	}
+
+	expected := len(tasks) * len(baselines)
+	if dropped := expected - len(results); dropped > 0 {
+		fmt.Fprintf(os.Stderr, "ckg eval: %d/%d (task,baseline) pairs failed; report H1/H2 may be biased\n", dropped, expected)
+	}
+
 	if err := writeCSV(filepath.Join(outDir, "results.csv"), results); err != nil {
 		return results, err
 	}
