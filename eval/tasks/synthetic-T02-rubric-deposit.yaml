@@ -1,0 +1,15 @@
+id: T02
+corpus: synthetic
+corpus_path: testdata/synthetic
+description: |
+  Add a withdraw function to the Solidity Vault that follows the same
+  pattern as deposit (uses balances mapping, emits an event, has a
+  non-zero modifier on the amount).
+expected_kind: rubric
+expected:
+  rubric:
+    - "uses balances mapping"
+    - "emits an event"
+    - "applies nonZero modifier on amount"
+scoring:
+  type: rubric

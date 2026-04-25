@@ -1,0 +1,17 @@
+id: T01
+corpus: synthetic
+corpus_path: testdata/synthetic
+description: |
+  List all functions in this codebase that ultimately call Vault.deposit.
+  Include qualified names like "service.Vault.Deposit", "VaultService.depositFn", etc.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - "service.Vault.Deposit"
+    - "VaultService.depositFn"
+    - "api.Handler.HandleDeposit"
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7
