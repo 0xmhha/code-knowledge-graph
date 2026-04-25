@@ -1,0 +1,53 @@
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [amd64, arm64]
+        exclude:
+          - { os: windows-latest, arch: arm64 }
+          - { os: ubuntu-latest,  arch: arm64 }
+    runs-on: ${{ matrix.os }}
+    env:
+      GOOS:   ${{ matrix.os == 'macos-latest' && 'darwin' || matrix.os == 'windows-latest' && 'windows' || 'linux' }}
+      GOARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: cd web/viewer && npm ci && node esbuild.config.js
+      - run: |
+          mkdir -p internal/server/web_assets/assets
+          cp web/viewer/index.html internal/server/web_assets/index.html
+          cp web/viewer/dist/viewer.js internal/server/web_assets/assets/viewer.js
+      - run: go build -o bin/ckg ./cmd/ckg
+
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: cd web/viewer && npm ci && npx playwright install chromium && node esbuild.config.js
+      - run: |
+          mkdir -p internal/server/web_assets/assets
+          cp web/viewer/index.html internal/server/web_assets/index.html
+          cp web/viewer/dist/viewer.js internal/server/web_assets/assets/viewer.js
+          go build -o bin/ckg ./cmd/ckg
+          ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-smoke
+          ./bin/ckg serve --graph=/tmp/ckg-smoke --port=8787 &
+          sleep 3
+          cd web/viewer && npx playwright test
