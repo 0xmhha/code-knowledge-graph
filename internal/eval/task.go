@@ -48,7 +48,7 @@ func LoadTasks(glob string) ([]Task, error) {
 	for _, p := range paths {
 		buf, err := os.ReadFile(p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read %s: %w", p, err)
 		}
 		var t Task
 		if err := yaml.Unmarshal(buf, &t); err != nil {
