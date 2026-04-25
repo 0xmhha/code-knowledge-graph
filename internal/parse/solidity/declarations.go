@@ -342,16 +342,6 @@ func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool
 	return "", 0, false
 }
 
-// nearestFunctionQname is the qname-only form, retained for callers (like
-// future statement-level extractors) that don't need the start byte.
-func nearestFunctionQname(n *sitter.Node, src []byte) string {
-	q, _, ok := nearestFunctionQnameAndStart(n, src)
-	if ok {
-		return q
-	}
-	return strings.TrimSpace(string(src[n.StartByte():n.EndByte()]))
-}
-
 // typeNameIsMapping reports whether a type_name node represents a mapping
 // declaration. The grammar models mappings as a hidden _mapping rule inlined
 // into type_name, so we detect them by the presence of `key_type` /
