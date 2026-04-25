@@ -183,17 +183,16 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 		if arrName != mappingName || stmtNode == nil {
 			continue
 		}
-		fnQ := nearestFunctionQname(stmtNode, v.src)
-		if fnQ == "" {
+		fnQ, fnStart, ok := nearestFunctionQnameAndStart(stmtNode, v.src)
+		if !ok {
 			continue
 		}
-		// The function ID is unknown until Resolve, so queue this as a pending
-		// ref using the function qname. The mapping target lives in the same
-		// file and could in principle be emitted as a resolved edge directly,
-		// but we route through the pending pipeline to keep emit/modifier/
-		// writes_mapping handling uniform.
+		// SrcID must match the function node ID emitted in runDecl, which
+		// hashes (qname, "sol", name-node startByte). Using offset 0 here would
+		// produce an ID that never resolves to a real node and graph.Validate
+		// would reject the resulting edge as dangling.
 		v.pending = append(v.pending, parse.PendingRef{
-			SrcID:       parse.MakeID(fnQ, "sol", 0),
+			SrcID:       parse.MakeID(fnQ, "sol", fnStart),
 			EdgeType:    types.EdgeWritesMapping,
 			TargetQName: mappingName + ":mapping",
 			Line:        int(stmtNode.StartPoint().Row) + 1,
@@ -215,19 +214,21 @@ func (v *declVisitor) runEmits() {
 		}
 		var event string
 		var fnQ string
+		var fnStart int
+		var fnOK bool
 		var line int
 		for _, c := range m.Captures {
 			if query.CaptureNameForId(c.Index) == "event" {
 				event = c.Node.Content(v.src)
-				fnQ = nearestFunctionQname(c.Node, v.src)
+				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(c.Node, v.src)
 				line = int(c.Node.StartPoint().Row) + 1
 			}
 		}
-		if event == "" || fnQ == "" {
+		if event == "" || !fnOK {
 			continue
 		}
 		v.pending = append(v.pending, parse.PendingRef{
-			SrcID:       parse.MakeID(fnQ, "sol", 0),
+			SrcID:       parse.MakeID(fnQ, "sol", fnStart),
 			EdgeType:    types.EdgeEmitsEvent,
 			TargetQName: event,
 			Line:        line,
@@ -249,19 +250,21 @@ func (v *declVisitor) runHasModifier() {
 		}
 		var mod string
 		var fnQ string
+		var fnStart int
+		var fnOK bool
 		var line int
 		for _, c := range m.Captures {
 			if query.CaptureNameForId(c.Index) == "mod" {
 				mod = c.Node.Content(v.src)
-				fnQ = nearestFunctionQname(c.Node, v.src)
+				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(c.Node, v.src)
 				line = int(c.Node.StartPoint().Row) + 1
 			}
 		}
-		if mod == "" || fnQ == "" {
+		if mod == "" || !fnOK {
 			continue
 		}
 		v.pending = append(v.pending, parse.PendingRef{
-			SrcID:       parse.MakeID(fnQ, "sol", 0),
+			SrcID:       parse.MakeID(fnQ, "sol", fnStart),
 			EdgeType:    types.EdgeHasModifier,
 			TargetQName: mod,
 			Line:        line,
@@ -309,23 +312,42 @@ func nearestContractName(n *sitter.Node, src []byte) string {
 	return ""
 }
 
-// nearestFunctionQname returns the qualified name (Contract.Func) of the
-// enclosing function_definition, or just the function name if outside a
-// contract. Falls back to the source slice when no enclosing function is
-// found (defensive — every emit/modifier_invocation in valid Solidity sits
-// inside a function).
-func nearestFunctionQname(n *sitter.Node, src []byte) string {
+// nearestFunctionQnameAndStart walks the parent chain to the enclosing
+// function_definition and returns its qualified name (Contract.Func or just
+// Func) plus the StartByte of the function's name identifier — the same
+// (qname, startByte) pair that runDecl(NodeFunction) uses to mint the
+// function node ID. Pending refs that build SrcID via parse.MakeID(fnQ,
+// "sol", fnStart) will therefore resolve to a real node, avoiding dangling
+// edges in graph.Validate.
+//
+// Returns ok=false when no enclosing function_definition exists or its
+// name field is missing (defensive — every emit / modifier_invocation /
+// mapping write in valid Solidity sits inside a function with a name).
+func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool) {
 	cn := nearestContractName(n, src)
 	for cur := n; cur != nil; cur = cur.Parent() {
 		if cur.Type() == "function_definition" {
 			id := cur.ChildByFieldName("name")
-			if id != nil {
-				if cn == "" {
-					return id.Content(src)
-				}
-				return cn + "." + id.Content(src)
+			if id == nil {
+				return "", 0, false
 			}
+			ident := id.Content(src)
+			qname := ident
+			if cn != "" {
+				qname = cn + "." + ident
+			}
+			return qname, int(id.StartByte()), true
 		}
+	}
+	return "", 0, false
+}
+
+// nearestFunctionQname is the qname-only form, retained for callers (like
+// future statement-level extractors) that don't need the start byte.
+func nearestFunctionQname(n *sitter.Node, src []byte) string {
+	q, _, ok := nearestFunctionQnameAndStart(n, src)
+	if ok {
+		return q
 	}
 	return strings.TrimSpace(string(src[n.StartByte():n.EndByte()]))
 }

@@ -63,6 +63,22 @@ func TestSolParseVault(t *testing.T) {
 		}
 	}
 
+	// Every edge.Src must reference a real node ID. This catches the class
+	// of bug where pending refs are queued with a synthetic SrcID (e.g.
+	// MakeID(qname, "sol", 0)) that never matches the function node minted
+	// from runDecl with the real name-node startByte. graph.Validate enforces
+	// the same invariant at build time, but checking here keeps the parser
+	// honest in isolation.
+	nodeIDs := make(map[string]struct{}, len(resolved.Nodes))
+	for _, n := range resolved.Nodes {
+		nodeIDs[n.ID] = struct{}{}
+	}
+	for _, e := range resolved.Edges {
+		if _, ok := nodeIDs[e.Src]; !ok {
+			t.Errorf("dangling edge.Src for %s edge: %s -> %s", e.Type, e.Src, e.Dst)
+		}
+	}
+
 	// ABI side-product: the Vault contract should have at least one entry
 	// (deposit) collected during ParseFile.
 	abi := p.ABI()
