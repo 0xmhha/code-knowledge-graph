@@ -1,38 +1,72 @@
 // src/layout.js
-// Wires either `3d-force-graph` (3D, Three.js) or `force-graph` (2D, Canvas2D)
-// to the same store. Both share: linkSource('src')/linkTarget('dst') field
-// mapping, edge styling via EDGE_STYLE, the rich hover tooltip, and the
-// click handler. They differ in how nodes are drawn (THREE meshes vs. Canvas
-// circles) and in the LOD trigger (3D uses camera Z, 2D uses zoom factor).
+// Renders either 3D (3d-force-graph + Three.js) or 2D (force-graph +
+// Canvas2D) on top of the same store. Both modes implement the
+// "focus + halo" rendering pattern (docs/VIEWER-ROADMAP.md Phase B):
+//
+//   - the user's selected node is the brightest                       (d=0)
+//   - its 1-hop neighbours are vivid                                  (d=1)
+//   - its 2-hop neighbours are dimmed but legible                     (d=2)
+//   - everything else fades to background                             (d=∞)
+//
+// Without that, a click on a hub package buries the relevant call path
+// in 100+ equally-bright sibling nodes — defeating the purpose of the
+// viewer. The distances are precomputed by store.computeFocusDistance
+// during focusNode and re-applied here every time the store emits.
 import ForceGraph3D from '3d-force-graph';
 import ForceGraph2D from 'force-graph';
 import { nodeMesh, EDGE_STYLE } from './encoding.js';
 
-// LANG_COLOR mirrors encoding.js but keyed by string for Canvas2D fillStyle.
+// Canvas2D-friendly mirror of encoding.LANG_COLOR.
 const LANG_COLOR_2D = { go: '#00add8', ts: '#3178c6', sol: '#3c3c3d' };
 const ALPHA_BY_CONF = { EXTRACTED: 1.0, INFERRED: 0.7, AMBIGUOUS: 0.4 };
 
-// Camera Z thresholds → LOD bucket (3D only). Larger Z = farther = lower LOD.
-function lodFromZ(z) {
-  if (z < 400) return 3;
-  if (z < 800) return 2;
-  if (z < 1500) return 1;
-  return 0;
-}
-// Zoom thresholds → LOD bucket (2D). Larger zoom = closer = higher LOD.
-function lodFromZoom(z) {
-  if (z > 4) return 3;
-  if (z > 2) return 2;
-  if (z > 1) return 1;
-  return 0;
+// Distance → opacity. Index past length-1 (i.e. distance > 2 or undefined)
+// uses the last entry as the dim default.
+const FOCUS_OPACITY = [1.0, 0.92, 0.55, 0.18];
+const FOCUS_LINK_BRIGHTNESS = [1.0, 1.0, 0.55, 0.10];
+
+function focusOpacity(id, store) {
+  if (store.focusDistance.size === 0) return 1.0;       // no focus → flat
+  const d = store.focusDistance.get(id);
+  if (d === undefined) return FOCUS_OPACITY[FOCUS_OPACITY.length - 1];
+  return FOCUS_OPACITY[Math.min(d, FOCUS_OPACITY.length - 1)];
 }
 
-function edgeColor(link) {
-  const c = EDGE_STYLE[link.type]?.color ?? 0x999999;
-  return '#' + c.toString(16).padStart(6, '0');
+// edgeOnFocusPath: both endpoints inside the focus ball.
+function edgeFocusBrightness(e, store) {
+  if (store.focusDistance.size === 0) return 1.0;
+  const a = store.focusDistance.get(e.src);
+  const b = store.focusDistance.get(e.dst);
+  if (a === undefined || b === undefined) return FOCUS_LINK_BRIGHTNESS[3];
+  // Edges with at least one endpoint at distance 0 (focus) are loudest;
+  // edges between two 1-hop neighbours are still loud (call paths through
+  // the neighbourhood); 2-hop edges fade.
+  return FOCUS_LINK_BRIGHTNESS[Math.min(Math.max(a, b), FOCUS_LINK_BRIGHTNESS.length - 1)];
 }
 
-function tooltipHtml(node) {
+// Hex int → CSS rgb scaled to brightness (1=full, 0=black). Used to fade
+// out-of-focus edges without changing per-type colouring.
+function hexAtBrightness(hex, brightness) {
+  const r = ((hex >> 16) & 0xff) * brightness;
+  const g = ((hex >> 8) & 0xff) * brightness;
+  const b = (hex & 0xff) * brightness;
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+
+function edgeColor(e, store) {
+  const base = EDGE_STYLE[e.type]?.color ?? 0x999999;
+  return hexAtBrightness(base, edgeFocusBrightness(e, store));
+}
+
+function edgeWidth(e, store) {
+  const base = EDGE_STYLE[e.type]?.width ?? 1;
+  const brightness = edgeFocusBrightness(e, store);
+  if (brightness >= 0.9) return base + 0.5;            // emphasise focus path
+  if (brightness >= 0.5) return Math.max(0.7, base);
+  return 0.25;
+}
+
+function tooltipHtml(node, store) {
   const t = node.type || '?';
   const q = node.qualified_name || node.name || node.id;
   const f = node.file_path ? `${node.file_path}:${node.start_line || 0}` : '—';
@@ -43,8 +77,10 @@ function tooltipHtml(node) {
   const usage = (node.usage_score ?? 0).toFixed(2);
   const pr = (node.pagerank ?? 0).toExponential(2);
   const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : '';
+  const dist = store.focusDistance.get(node.id);
+  const distLabel = dist === 0 ? '· FOCUS' : dist === 1 ? '· direct' : dist === 2 ? '· 2-hop' : '';
   return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
-<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span></div>
+<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
 <div style="color:#bbb;">📄 ${f}</div>${sig}
 <div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> · conf: <span style="color:#aaa">${conf}</span></div>
 <div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> · out-edges: <span style="color:#aaa">${outDeg}</span></div>
@@ -53,75 +89,102 @@ function tooltipHtml(node) {
 </div>`;
 }
 
-// drawNode2D: Canvas2D node renderer for the 2D mode. We keep the visual
-// language consistent with 3D (color = source language, size scaled by
-// usage_score) but skip per-NodeType shape variation — Canvas2D makes 29
-// distinct primitives ugly fast. Important hubs get an inline name label
-// at zoom levels where it won't pile up.
-function drawNode2D(node, ctx, globalScale) {
-  const r = 3 + Math.log10((node.usage_score || 0) + 1) * 1.5;
-  ctx.globalAlpha = ALPHA_BY_CONF[node.confidence] ?? 1;
-  ctx.fillStyle = LANG_COLOR_2D[node.language] || '#888';
-  ctx.beginPath();
-  ctx.arc(node.x, node.y, Math.max(2, r), 0, 2 * Math.PI);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  // Label cutoff: only when we've zoomed in AND the node is a hub. Otherwise
-  // 200K nodes' worth of text floods the canvas.
-  const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
-  if (globalScale > 1.5 && deg > 5) {
-    const fontSize = Math.max(8, 10 / globalScale);
-    ctx.font = `${fontSize}px ui-monospace, monospace`;
-    ctx.fillStyle = '#cfd0d3';
-    ctx.textAlign = 'center';
-    ctx.fillText(node.name || '', node.x, node.y - r - 2);
-  }
+// 2D node renderer. Reads opacity from store.focusDistance per frame so
+// the focus halo updates without rebuilding graph data.
+function makeDrawNode2D(store) {
+  return function drawNode2D(node, ctx, globalScale) {
+    const r = 3 + Math.log10((node.usage_score || 0) + 1) * 1.5;
+    const op = focusOpacity(node.id, store) * (ALPHA_BY_CONF[node.confidence] ?? 1);
+    ctx.globalAlpha = op;
+    ctx.fillStyle = LANG_COLOR_2D[node.language] || '#888';
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, Math.max(2, r), 0, 2 * Math.PI);
+    ctx.fill();
+    // Focus node gets a bright ring so it stands out even on monochrome corpora.
+    const dist = store.focusDistance.get(node.id);
+    if (dist === 0) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2 / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, Math.max(2, r) + 2 / globalScale, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // Label only zoomed-in hubs OR nodes inside the focus ball.
+    const inFocusBall = dist !== undefined;
+    const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
+    if (inFocusBall || (globalScale > 1.5 && deg > 5)) {
+      const fontSize = Math.max(8, 10 / globalScale);
+      ctx.font = `${fontSize}px ui-monospace, monospace`;
+      ctx.fillStyle = inFocusBall ? '#e6e7e9' : '#9aa';
+      ctx.textAlign = 'center';
+      ctx.fillText(node.name || '', node.x, node.y - r - 2);
+    }
+  };
 }
 
-// nodePointerArea2D: hit-target so click registration matches the visual
-// circle (not the bounding-box default which would be a 1×1px target).
-function nodePointerArea2D(node, color, ctx) {
-  const r = Math.max(4, 3 + Math.log10((node.usage_score || 0) + 1) * 1.5);
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI);
-  ctx.fill();
+function makePointerArea2D() {
+  return function nodePointerArea2D(node, color, ctx) {
+    const r = Math.max(4, 3 + Math.log10((node.usage_score || 0) + 1) * 1.5);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
+    ctx.fill();
+  };
 }
 
-// mountGraph instantiates either a 3D or 2D force graph and wires it to the
-// store. Returns the graph instance plus a teardown helper for the caller
-// to call on remount.
+// LOD thresholds.
+function lodFromZ(z) {
+  if (z < 400) return 3;
+  if (z < 800) return 2;
+  if (z < 1500) return 1;
+  return 0;
+}
+function lodFromZoom(k) {
+  if (k > 4) return 3;
+  if (k > 2) return 2;
+  if (k > 1) return 1;
+  return 0;
+}
+
 export function mountGraph(container, store, api, mode = '3d') {
-  // Wipe the previous canvas/three context — both libraries inject DOM into
-  // the container so a remount-without-cleanup leaves duplicate canvases.
   container.innerHTML = '';
 
   const Factory = mode === '2d' ? ForceGraph2D : ForceGraph3D;
-  const fg = Factory()(container)
-    .linkSource('src')
+  const fg = Factory()(container);
+
+  fg.linkSource('src')
     .linkTarget('dst')
-    .nodeLabel(tooltipHtml)
+    .nodeLabel(node => tooltipHtml(node, store))
     .nodeVisibility(node => store.visibleIds.has(node.id))
     .linkVisibility(link => !(EDGE_STYLE[link.type]?.hidden))
-    .linkColor(edgeColor)
-    .linkWidth(link => EDGE_STYLE[link.type]?.width ?? 1);
+    .linkColor(e => edgeColor(e, store))
+    .linkWidth(e => edgeWidth(e, store))
+    .linkDirectionalArrowLength(3)
+    .linkDirectionalArrowRelPos(0.95)
+    // Tighter cooldown — Phase A. The default 200 ticks made every expand
+    // visibly lag; 80 settles fast enough for our diff/incremental case.
+    .cooldownTicks(80)
+    .cooldownTime(2500);
 
+  // Per-mode wiring.
+  let meshIndex = null;
   if (mode === '3d') {
-    fg.nodeThreeObject(node => nodeMesh(node))
-      .linkDirectionalArrowLength(3)
-      .linkDirectionalArrowRelPos(0.95)
-      .cooldownTicks(200);
+    meshIndex = new Map();
+    fg.nodeThreeObject(node => {
+      const m = nodeMesh(node);
+      meshIndex.set(node.id, m);
+      return m;
+    });
   } else {
-    fg.nodeCanvasObject(drawNode2D)
-      .nodePointerAreaPaint(nodePointerArea2D)
-      .linkDirectionalArrowLength(3)
-      .linkDirectionalArrowRelPos(0.95)
-      .cooldownTicks(200)
+    fg.nodeCanvasObject(makeDrawNode2D(store))
+      .nodePointerAreaPaint(makePointerArea2D())
       .backgroundColor('#0d0e10');
   }
 
-  // Push current store state into the renderer. Rebuilds the data array; both
-  // libraries diff by `id` internally so positions persist across re-syncs.
+  // Build initial graph data and re-sync on store changes. The diff inside
+  // both libraries is keyed by node.id so positions persist across syncs.
   const sync = () => {
     const visible = store.visibleIds;
     const nodes = [];
@@ -133,12 +196,32 @@ export function mountGraph(container, store, api, mode = '3d') {
       e => visible.has(e.src) && visible.has(e.dst)
     );
     fg.graphData({ nodes, links });
+
+    // Apply 3D focus halo to mesh materials. We mutate material.opacity
+    // directly so the highlight updates without rebuilding the THREE
+    // scene; doing it here in the same listener that syncs graphData
+    // means freshly-created meshes get their final opacity on first frame.
+    if (meshIndex) {
+      // Drop entries for nodes that were just unmounted by the diff.
+      for (const id of meshIndex.keys()) {
+        if (!store.visibleIds.has(id)) meshIndex.delete(id);
+      }
+      const focusActive = store.focusDistance.size > 0;
+      for (const [id, mesh] of meshIndex) {
+        if (!mesh?.material) continue;
+        const op = focusActive
+          ? focusOpacity(id, store) * (ALPHA_BY_CONF[store.nodes.get(id)?.confidence] ?? 1)
+          : (ALPHA_BY_CONF[store.nodes.get(id)?.confidence] ?? 1);
+        mesh.material.opacity = op;
+        mesh.material.transparent = op < 1;
+        mesh.material.needsUpdate = true;
+      }
+    }
   };
   const unsubscribe = store.subscribe(sync);
   sync();
 
-  // LOD trigger — on zoom-in, fetch children of currently visible nodes and
-  // merge them. 3D listens to OrbitControls 'change'; 2D uses .onZoom(...).
+  // LOD trigger.
   let lodFetchInFlight = false;
   const tryLODExpand = (lod) => {
     if (lod === store.lod) return;
@@ -159,10 +242,12 @@ export function mountGraph(container, store, api, mode = '3d') {
       .then(batches => {
         const more = batches.flat().filter(n => n && n.id);
         if (!more.length) return;
-        store.loadNodes(more);
-        const next = new Set(store.visibleIds);
-        for (const n of more) next.add(n.id);
-        store.setVisible([...next]);
+        store.batch(() => {
+          store.loadNodes(more);
+          const next = new Set(store.visibleIds);
+          for (const n of more) next.add(n.id);
+          store.setVisible([...next]);
+        });
       })
       .catch(err => console.warn('LOD expand failed', err))
       .finally(() => { lodFetchInFlight = false; });
@@ -176,9 +261,9 @@ export function mountGraph(container, store, api, mode = '3d') {
     fg.onZoom(({ k }) => tryLODExpand(lodFromZoom(k)));
   }
 
-  // Teardown lets main.js cleanly remount on mode toggle.
   fg._ckgTeardown = () => {
     unsubscribe?.();
+    if (meshIndex) meshIndex.clear();
     container.innerHTML = '';
   };
   return fg;

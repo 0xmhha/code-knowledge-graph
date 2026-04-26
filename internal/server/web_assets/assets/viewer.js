@@ -1689,27 +1689,68 @@ var Store = class {
   constructor() {
     this.nodes = /* @__PURE__ */ new Map();
     this.edges = [];
+    this.edgesBySrc = /* @__PURE__ */ new Map();
+    this.edgesByDst = /* @__PURE__ */ new Map();
     this.visibleIds = /* @__PURE__ */ new Set();
     this.lod = 0;
     this.hierarchyKind = "pkg";
     this.listeners = /* @__PURE__ */ new Set();
     this.searchResults = [];
     this.selectedId = null;
+    this.focusDistance = /* @__PURE__ */ new Map();
     this.expanded = /* @__PURE__ */ new Map();
+    this._batchDepth = 0;
+    this._dirty = false;
   }
   subscribe(fn) {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
   }
   emit() {
-    this.listeners.forEach((fn) => fn(this));
+    if (this._batchDepth > 0) {
+      this._dirty = true;
+      return;
+    }
+    for (const fn of this.listeners) fn(this);
+  }
+  // Run fn() with all emits coalesced. Re-entrant safe via depth counter.
+  batch(fn) {
+    this._batchDepth++;
+    try {
+      fn();
+    } finally {
+      this._batchDepth--;
+      if (this._batchDepth === 0 && this._dirty) {
+        this._dirty = false;
+        this.emit();
+      }
+    }
   }
   loadNodes(arr) {
     if (!Array.isArray(arr)) return;
-    for (const n2 of arr) {
-      if (n2 && n2.id) this.nodes.set(n2.id, n2);
-    }
+    for (const n2 of arr) if (n2 && n2.id) this.nodes.set(n2.id, n2);
     this.emit();
+  }
+  // addEdges: dedup against the index + populate both directions. Emits if
+  // anything was actually added (no churn for repeated focusNode calls on
+  // the same node).
+  addEdges(arr) {
+    if (!Array.isArray(arr)) return 0;
+    let added = 0;
+    for (const e2 of arr) {
+      if (!e2 || !e2.src || !e2.dst) continue;
+      const fromList = this.edgesBySrc.get(e2.src);
+      if (fromList && fromList.some((x3) => x3.dst === e2.dst && x3.type === e2.type)) continue;
+      this.edges.push(e2);
+      added++;
+      if (fromList) fromList.push(e2);
+      else this.edgesBySrc.set(e2.src, [e2]);
+      const toList = this.edgesByDst.get(e2.dst);
+      if (toList) toList.push(e2);
+      else this.edgesByDst.set(e2.dst, [e2]);
+    }
+    if (added) this.emit();
+    return added;
   }
   setVisible(ids) {
     this.visibleIds = new Set(ids);
@@ -1722,6 +1763,43 @@ var Store = class {
   setHierarchy(k2) {
     this.hierarchyKind = k2;
     this.emit();
+  }
+  // BFS undirected over the known edge index, capped at maxDepth. The
+  // result drives the focus+halo render layer; `undefined` for an id means
+  // "outside the focus ball" → renderer dims it heavily. focus itself is
+  // always at distance 0.
+  //
+  // Caller invokes via batch() so the single emit also republishes the new
+  // distance map to subscribers.
+  computeFocusDistance(focusId, maxDepth = 2) {
+    const dist = /* @__PURE__ */ new Map();
+    if (focusId && this.nodes.has(focusId)) {
+      dist.set(focusId, 0);
+      let frontier = [focusId];
+      for (let d2 = 0; d2 < maxDepth; d2++) {
+        const next = [];
+        for (const id2 of frontier) {
+          const outs = this.edgesBySrc.get(id2) || [];
+          const ins = this.edgesByDst.get(id2) || [];
+          for (const e2 of outs) if (!dist.has(e2.dst)) {
+            dist.set(e2.dst, d2 + 1);
+            next.push(e2.dst);
+          }
+          for (const e2 of ins) if (!dist.has(e2.src)) {
+            dist.set(e2.src, d2 + 1);
+            next.push(e2.src);
+          }
+        }
+        frontier = next;
+        if (!frontier.length) break;
+      }
+    }
+    this.focusDistance = dist;
+    this.emit();
+  }
+  // Edges adjacent to `id` (either direction). Used by the detail panel.
+  edgesIncidentTo(id2) {
+    return (this.edgesBySrc.get(id2) || []).concat(this.edgesByDst.get(id2) || []);
   }
 };
 
@@ -82911,23 +82989,39 @@ var EDGE_STYLE = {
 // src/layout.js
 var LANG_COLOR_2D = { go: "#00add8", ts: "#3178c6", sol: "#3c3c3d" };
 var ALPHA_BY_CONF = { EXTRACTED: 1, INFERRED: 0.7, AMBIGUOUS: 0.4 };
-function lodFromZ(z3) {
-  if (z3 < 400) return 3;
-  if (z3 < 800) return 2;
-  if (z3 < 1500) return 1;
-  return 0;
+var FOCUS_OPACITY = [1, 0.92, 0.55, 0.18];
+var FOCUS_LINK_BRIGHTNESS = [1, 1, 0.55, 0.1];
+function focusOpacity(id2, store2) {
+  if (store2.focusDistance.size === 0) return 1;
+  const d2 = store2.focusDistance.get(id2);
+  if (d2 === void 0) return FOCUS_OPACITY[FOCUS_OPACITY.length - 1];
+  return FOCUS_OPACITY[Math.min(d2, FOCUS_OPACITY.length - 1)];
 }
-function lodFromZoom(z3) {
-  if (z3 > 4) return 3;
-  if (z3 > 2) return 2;
-  if (z3 > 1) return 1;
-  return 0;
+function edgeFocusBrightness(e2, store2) {
+  if (store2.focusDistance.size === 0) return 1;
+  const a3 = store2.focusDistance.get(e2.src);
+  const b2 = store2.focusDistance.get(e2.dst);
+  if (a3 === void 0 || b2 === void 0) return FOCUS_LINK_BRIGHTNESS[3];
+  return FOCUS_LINK_BRIGHTNESS[Math.min(Math.max(a3, b2), FOCUS_LINK_BRIGHTNESS.length - 1)];
 }
-function edgeColor(link) {
-  const c3 = EDGE_STYLE[link.type]?.color ?? 10066329;
-  return "#" + c3.toString(16).padStart(6, "0");
+function hexAtBrightness(hex2, brightness) {
+  const r2 = (hex2 >> 16 & 255) * brightness;
+  const g2 = (hex2 >> 8 & 255) * brightness;
+  const b2 = (hex2 & 255) * brightness;
+  return `rgb(${r2 | 0},${g2 | 0},${b2 | 0})`;
 }
-function tooltipHtml(node) {
+function edgeColor(e2, store2) {
+  const base = EDGE_STYLE[e2.type]?.color ?? 10066329;
+  return hexAtBrightness(base, edgeFocusBrightness(e2, store2));
+}
+function edgeWidth(e2, store2) {
+  const base = EDGE_STYLE[e2.type]?.width ?? 1;
+  const brightness = edgeFocusBrightness(e2, store2);
+  if (brightness >= 0.9) return base + 0.5;
+  if (brightness >= 0.5) return Math.max(0.7, base);
+  return 0.25;
+}
+function tooltipHtml(node, store2) {
   const t3 = node.type || "?";
   const q2 = node.qualified_name || node.name || node.id;
   const f2 = node.file_path ? `${node.file_path}:${node.start_line || 0}` : "\u2014";
@@ -82938,8 +83032,10 @@ function tooltipHtml(node) {
   const usage = (node.usage_score ?? 0).toFixed(2);
   const pr = (node.pagerank ?? 0).toExponential(2);
   const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : "";
+  const dist = store2.focusDistance.get(node.id);
+  const distLabel = dist === 0 ? "\xB7 FOCUS" : dist === 1 ? "\xB7 direct" : dist === 2 ? "\xB7 2-hop" : "";
   return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
-<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t3}</strong> <span style="color:#cfd0d3;">${q2}</span></div>
+<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t3}</strong> <span style="color:#cfd0d3;">${q2}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
 <div style="color:#bbb;">\u{1F4C4} ${f2}</div>${sig}
 <div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> \xB7 conf: <span style="color:#aaa">${conf}</span></div>
 <div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> \xB7 out-edges: <span style="color:#aaa">${outDeg}</span></div>
@@ -82947,38 +83043,72 @@ function tooltipHtml(node) {
 <div style="color:#666;margin-top:6px;font-size:10px;">click to expand \xB7 click again to collapse</div>
 </div>`;
 }
-function drawNode2D(node, ctx, globalScale) {
-  const r2 = 3 + Math.log10((node.usage_score || 0) + 1) * 1.5;
-  ctx.globalAlpha = ALPHA_BY_CONF[node.confidence] ?? 1;
-  ctx.fillStyle = LANG_COLOR_2D[node.language] || "#888";
-  ctx.beginPath();
-  ctx.arc(node.x, node.y, Math.max(2, r2), 0, 2 * Math.PI);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
-  if (globalScale > 1.5 && deg > 5) {
-    const fontSize = Math.max(8, 10 / globalScale);
-    ctx.font = `${fontSize}px ui-monospace, monospace`;
-    ctx.fillStyle = "#cfd0d3";
-    ctx.textAlign = "center";
-    ctx.fillText(node.name || "", node.x, node.y - r2 - 2);
-  }
+function makeDrawNode2D(store2) {
+  return function drawNode2D(node, ctx, globalScale) {
+    const r2 = 3 + Math.log10((node.usage_score || 0) + 1) * 1.5;
+    const op = focusOpacity(node.id, store2) * (ALPHA_BY_CONF[node.confidence] ?? 1);
+    ctx.globalAlpha = op;
+    ctx.fillStyle = LANG_COLOR_2D[node.language] || "#888";
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, Math.max(2, r2), 0, 2 * Math.PI);
+    ctx.fill();
+    const dist = store2.focusDistance.get(node.id);
+    if (dist === 0) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2 / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, Math.max(2, r2) + 2 / globalScale, 0, 2 * Math.PI);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    const inFocusBall = dist !== void 0;
+    const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
+    if (inFocusBall || globalScale > 1.5 && deg > 5) {
+      const fontSize = Math.max(8, 10 / globalScale);
+      ctx.font = `${fontSize}px ui-monospace, monospace`;
+      ctx.fillStyle = inFocusBall ? "#e6e7e9" : "#9aa";
+      ctx.textAlign = "center";
+      ctx.fillText(node.name || "", node.x, node.y - r2 - 2);
+    }
+  };
 }
-function nodePointerArea2D(node, color3, ctx) {
-  const r2 = Math.max(4, 3 + Math.log10((node.usage_score || 0) + 1) * 1.5);
-  ctx.fillStyle = color3;
-  ctx.beginPath();
-  ctx.arc(node.x, node.y, r2 + 2, 0, 2 * Math.PI);
-  ctx.fill();
+function makePointerArea2D() {
+  return function nodePointerArea2D(node, color3, ctx) {
+    const r2 = Math.max(4, 3 + Math.log10((node.usage_score || 0) + 1) * 1.5);
+    ctx.fillStyle = color3;
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, r2 + 3, 0, 2 * Math.PI);
+    ctx.fill();
+  };
+}
+function lodFromZ(z3) {
+  if (z3 < 400) return 3;
+  if (z3 < 800) return 2;
+  if (z3 < 1500) return 1;
+  return 0;
+}
+function lodFromZoom(k2) {
+  if (k2 > 4) return 3;
+  if (k2 > 2) return 2;
+  if (k2 > 1) return 1;
+  return 0;
 }
 function mountGraph(container, store2, api2, mode2 = "3d") {
   container.innerHTML = "";
   const Factory = mode2 === "2d" ? forceGraph : _3dForceGraph;
-  const fg2 = Factory()(container).linkSource("src").linkTarget("dst").nodeLabel(tooltipHtml).nodeVisibility((node) => store2.visibleIds.has(node.id)).linkVisibility((link) => !EDGE_STYLE[link.type]?.hidden).linkColor(edgeColor).linkWidth((link) => EDGE_STYLE[link.type]?.width ?? 1);
+  const fg2 = Factory()(container);
+  fg2.linkSource("src").linkTarget("dst").nodeLabel((node) => tooltipHtml(node, store2)).nodeVisibility((node) => store2.visibleIds.has(node.id)).linkVisibility((link) => !EDGE_STYLE[link.type]?.hidden).linkColor((e2) => edgeColor(e2, store2)).linkWidth((e2) => edgeWidth(e2, store2)).linkDirectionalArrowLength(3).linkDirectionalArrowRelPos(0.95).cooldownTicks(80).cooldownTime(2500);
+  let meshIndex = null;
   if (mode2 === "3d") {
-    fg2.nodeThreeObject((node) => nodeMesh(node)).linkDirectionalArrowLength(3).linkDirectionalArrowRelPos(0.95).cooldownTicks(200);
+    meshIndex = /* @__PURE__ */ new Map();
+    fg2.nodeThreeObject((node) => {
+      const m3 = nodeMesh(node);
+      meshIndex.set(node.id, m3);
+      return m3;
+    });
   } else {
-    fg2.nodeCanvasObject(drawNode2D).nodePointerAreaPaint(nodePointerArea2D).linkDirectionalArrowLength(3).linkDirectionalArrowRelPos(0.95).cooldownTicks(200).backgroundColor("#0d0e10");
+    fg2.nodeCanvasObject(makeDrawNode2D(store2)).nodePointerAreaPaint(makePointerArea2D()).backgroundColor("#0d0e10");
   }
   const sync = () => {
     const visible = store2.visibleIds;
@@ -82991,6 +83121,19 @@ function mountGraph(container, store2, api2, mode2 = "3d") {
       (e2) => visible.has(e2.src) && visible.has(e2.dst)
     );
     fg2.graphData({ nodes, links });
+    if (meshIndex) {
+      for (const id2 of meshIndex.keys()) {
+        if (!store2.visibleIds.has(id2)) meshIndex.delete(id2);
+      }
+      const focusActive = store2.focusDistance.size > 0;
+      for (const [id2, mesh] of meshIndex) {
+        if (!mesh?.material) continue;
+        const op = focusActive ? focusOpacity(id2, store2) * (ALPHA_BY_CONF[store2.nodes.get(id2)?.confidence] ?? 1) : ALPHA_BY_CONF[store2.nodes.get(id2)?.confidence] ?? 1;
+        mesh.material.opacity = op;
+        mesh.material.transparent = op < 1;
+        mesh.material.needsUpdate = true;
+      }
+    }
   };
   const unsubscribe = store2.subscribe(sync);
   sync();
@@ -83013,10 +83156,12 @@ function mountGraph(container, store2, api2, mode2 = "3d") {
     ).then((batches) => {
       const more = batches.flat().filter((n2) => n2 && n2.id);
       if (!more.length) return;
-      store2.loadNodes(more);
-      const next = new Set(store2.visibleIds);
-      for (const n2 of more) next.add(n2.id);
-      store2.setVisible([...next]);
+      store2.batch(() => {
+        store2.loadNodes(more);
+        const next = new Set(store2.visibleIds);
+        for (const n2 of more) next.add(n2.id);
+        store2.setVisible([...next]);
+      });
     }).catch((err) => console.warn("LOD expand failed", err)).finally(() => {
       lodFetchInFlight = false;
     });
@@ -83030,6 +83175,7 @@ function mountGraph(container, store2, api2, mode2 = "3d") {
   }
   fg2._ckgTeardown = () => {
     unsubscribe?.();
+    if (meshIndex) meshIndex.clear();
     container.innerHTML = "";
   };
   return fg2;
@@ -83051,21 +83197,24 @@ function wireSearch(input, api2, store2, onPick) {
         const results = await api2.search(q2);
         console.log("search", { q: q2, count: Array.isArray(results) ? results.length : "(non-array)", sample: Array.isArray(results) ? results.slice(0, 3) : results });
         if (Array.isArray(results) && results.length) {
-          store2.loadNodes(results);
-          const next = new Set(store2.visibleIds);
-          for (const r2 of results) next.add(r2.id);
-          store2.setVisible([...next]);
-          store2.searchResults = results;
-          store2.emit();
+          store2.batch(() => {
+            store2.loadNodes(results);
+            const next = new Set(store2.visibleIds);
+            for (const r2 of results) next.add(r2.id);
+            store2.setVisible([...next]);
+            store2.searchResults = results;
+          });
           onPick(results[0].id);
         } else {
-          store2.searchResults = [];
-          store2.emit();
+          store2.batch(() => {
+            store2.searchResults = [];
+          });
         }
       } catch (e2) {
         console.error("search failed", e2);
-        store2.searchResults = [];
-        store2.emit();
+        store2.batch(() => {
+          store2.searchResults = [];
+        });
       }
     }, 200);
   });
@@ -83096,7 +83245,11 @@ function renderList(el, store2, onClick) {
     for (const n2 of items) {
       const item = document.createElement("div");
       item.className = "item";
-      if (n2.id === store2.selectedId) item.style.background = "#2a3140";
+      item.dataset.id = n2.id;
+      if (n2.id === store2.selectedId) {
+        item.classList.add("selected");
+        item.style.background = "#2a3140";
+      }
       item.title = n2.qualified_name || "";
       item.innerHTML = `<div class="head"><span class="type">[${escapeHtml(n2.type)}]</span> ${escapeHtml(n2.name || n2.id)}</div><div class="qname">${escapeHtml(n2.qualified_name || "")}</div>` + (n2.file_path ? `<div class="file">${escapeHtml(n2.file_path)}:${n2.start_line ?? 0}</div>` : "");
       item.addEventListener("click", () => onClick(n2.id));
@@ -83104,6 +83257,18 @@ function renderList(el, store2, onClick) {
     }
   }
   el.replaceChildren(frag);
+}
+function applyListSelection(el, selectedId) {
+  for (const item of el.querySelectorAll(".item")) {
+    const id2 = item.dataset.id;
+    if (id2 === selectedId) {
+      item.classList.add("selected");
+      item.style.background = "#2a3140";
+    } else {
+      item.classList.remove("selected");
+      item.style.background = "";
+    }
+  }
 }
 function renderDetail(el, api2, node, edges) {
   const inN = edges.filter((e2) => e2.dst === node.id).length;
@@ -83132,8 +83297,10 @@ var store = new Store();
     document.body.insertBefore(banner, document.body.firstChild);
   }
   const nodes = await api.nodes("", 5e3);
-  store.loadNodes(nodes);
-  store.setVisible(nodes.map((n2) => n2.id));
+  store.batch(() => {
+    store.loadNodes(nodes);
+    store.setVisible(nodes.map((n2) => n2.id));
+  });
   console.log("viewer bootstrap", { nodes: nodes.length });
 })();
 var viewMode = localStorage.getItem("ckg.viewMode") === "2d" ? "2d" : "3d";
@@ -83143,6 +83310,7 @@ var detailEl = document.getElementById("node-detail");
 var listEl = document.getElementById("node-list");
 var searchEl = document.getElementById("search");
 var CHILDREN_PER_EXPAND = 100;
+var FOCUS_DEPTH = 2;
 function collectExpandedDescendants(id2) {
   const out = /* @__PURE__ */ new Set();
   const walk = (i2) => {
@@ -83162,25 +83330,24 @@ var focusNode = async (id2) => {
     console.warn("focusNode: id not in store", id2);
     return;
   }
-  store.selectedId = id2;
   if (store.expanded.has(id2)) {
-    const toRemove = collectExpandedDescendants(id2);
-    if (toRemove.size) {
-      const next = new Set(store.visibleIds);
-      for (const cid of toRemove) {
-        next.delete(cid);
-        store.expanded.delete(cid);
+    store.batch(() => {
+      const toRemove = collectExpandedDescendants(id2);
+      if (toRemove.size) {
+        const next = new Set(store.visibleIds);
+        for (const cid of toRemove) {
+          next.delete(cid);
+          store.expanded.delete(cid);
+        }
+        store.expanded.delete(id2);
+        store.setVisible([...next]);
+      } else {
+        store.expanded.delete(id2);
       }
-      store.expanded.delete(id2);
-      store.setVisible([...next]);
-    } else {
-      store.expanded.delete(id2);
-      store.emit();
-    }
-    const cachedEdges = store.edges.filter(
-      (e2) => e2.src === id2 || e2.dst === id2
-    );
-    renderDetail(detailEl, api, node, cachedEdges);
+      store.selectedId = id2;
+      store.computeFocusDistance(id2, FOCUS_DEPTH);
+    });
+    renderDetail(detailEl, api, node, store.edgesIncidentTo(id2));
     return;
   }
   const [edgesRaw, childrenRaw] = await Promise.all([
@@ -83193,26 +83360,21 @@ var focusNode = async (id2) => {
       return [];
     })
   ]);
-  const edges = Array.isArray(edgesRaw) ? edgesRaw : [];
+  const incomingEdges = Array.isArray(edgesRaw) ? edgesRaw : [];
   const children2 = Array.isArray(childrenRaw) ? childrenRaw.filter((c3) => c3 && c3.id) : [];
-  const fresh = edges.filter(
-    (e2) => e2 && e2.src && e2.dst && !store.edges.some((x3) => x3.src === e2.src && x3.dst === e2.dst && x3.type === e2.type)
-  );
-  let pushed = false;
-  if (fresh.length) {
-    store.edges = [...store.edges, ...fresh];
-    pushed = true;
-  }
-  if (children2.length) {
-    store.loadNodes(children2);
-    const next = new Set(store.visibleIds);
-    for (const c3 of children2) next.add(c3.id);
-    store.setVisible([...next]);
-    store.expanded.set(id2, new Set(children2.map((c3) => c3.id)));
-    pushed = true;
-  }
-  if (!pushed) store.emit();
-  renderDetail(detailEl, api, node, edges);
+  store.batch(() => {
+    store.selectedId = id2;
+    store.addEdges(incomingEdges);
+    if (children2.length) {
+      store.loadNodes(children2);
+      const next = new Set(store.visibleIds);
+      for (const c3 of children2) next.add(c3.id);
+      store.setVisible([...next]);
+      store.expanded.set(id2, new Set(children2.map((c3) => c3.id)));
+    }
+    store.computeFocusDistance(id2, FOCUS_DEPTH);
+  });
+  renderDetail(detailEl, api, node, store.edgesIncidentTo(id2));
 };
 var wireFG = (g2) => {
   g2.onNodeClick((node) => {
@@ -83221,7 +83383,17 @@ var wireFG = (g2) => {
   });
 };
 wireFG(fg);
-var refreshList = () => renderList(listEl, store, focusNode);
+var lastListSig = null;
+var refreshList = () => {
+  const isSearch = (store.searchResults?.length ?? 0) > 0;
+  const sig = `${isSearch ? "s" : "v"}|${(isSearch ? store.searchResults : [...store.visibleIds]).length}|${store.visibleIds.size}|${store.searchResults.length}`;
+  if (sig !== lastListSig) {
+    lastListSig = sig;
+    renderList(listEl, store, focusNode);
+  } else {
+    applyListSelection(listEl, store.selectedId);
+  }
+};
 store.subscribe(refreshList);
 refreshList();
 wireSearch(searchEl, api, store, focusNode);

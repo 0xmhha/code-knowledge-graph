@@ -76,9 +76,55 @@ fps degrades past 5–10K.
 | **P0** | L2-A: Auto prefix `*` | ~5 server | 적용 |
 | **P0** | L3-D1: Click-toggle collapse | ~30 client | 적용 |
 | **P0** | L3-D2: Children cap 100 | ~5 client | 적용 |
+| **P0** | L4-A: Render-storm fix (batch + edge index) | ~80 client | 적용 |
+| **P0** | L4-B: Focus + halo highlighting | ~80 client | 적용 |
 | **P1** | L3-D3: Type filter | ~30 client | 보류 |
+| **P1** | L4-C: Replace-mode visible (focus N-hop only) | ~60 client | 보류 |
+| **P1** | L4-D: Path-trace mode (2 nodes → shortest) | ~80 client | 보류 |
 | **V1** | L1-B: Trigram tokeniser | schema change | 보류 |
 | **V1** | L3-D4: LOD-aware ranked queries | ~40 server + client | 보류 |
+
+---
+
+## L4 — Rendering algorithm overhaul (2026-04-26 round 2)
+
+After P0/P1 search & UX fixes, rendering itself was still the bottleneck.
+Profiling revealed two categorical problems:
+
+**L4-A: render-storm.** `focusNode` fired 3–4 store emits per click
+(`loadNodes` + `setVisible` + ad-hoc `emit()` + LOD `setLOD`). Every
+emit re-ran `sync()`, which rebuilt the whole `graphData` and re-warmed
+the force simulation (200 ticks). On top, `renderList` re-rendered all
+200 sidebar rows on every emit — pure DOM thrash.
+
+Resolved by:
+- `Store.batch(fn)` — coalesces nested emits into one delivery.
+- `Store.edgesBySrc` / `edgesByDst` indices — drop the
+  `O(|edges|)` adjacency scan inside `sync()` and BFS to `O(|adj|)`.
+- `Store.addEdges(arr)` — single dedup'd ingestion path.
+- `cooldownTicks(80)` + `cooldownTime(2500)` — faster settle.
+- `applyListSelection(el, id)` — selection-only DOM update; row rebuild
+  only when the *items* change (visible set or search results).
+
+**L4-B: focus + halo.** All visible nodes were rendered identically,
+so a click on a hub package buried the relevant call path among 100+
+sibling nodes. Resolved by:
+- `Store.computeFocusDistance(id, depth=2)` — BFS over the edge index
+  produces a `Map<nodeId, distance>` (focus=0, 1-hop=1, 2-hop=2).
+- 3D layer: walks tracked meshes after each `sync()` and writes
+  `material.opacity` from the distance — no scene rebuild needed.
+- 2D layer: `nodeCanvasObject` reads distance per frame; focus node
+  also gets a white outline ring. Out-of-focus edges fade to a dim grey
+  via `linkColor` brightness scaling.
+- Hover tooltip surfaces the focus distance ("FOCUS / direct / 2-hop")
+  so the user can confirm what's been promoted.
+
+Both layers preserve the existing colour-by-language and shape-by-type
+encoding; the halo is multiplied on top, never replaces it.
+
+**Future work** still parked under P1: replace-mode visible cap (only
+keep the focus N-hop set on canvas) and path-trace (Ctrl+click two
+nodes, highlight shortest path between them).
 
 ## Test surfaces affected
 

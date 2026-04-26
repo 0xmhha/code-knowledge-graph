@@ -41,7 +41,13 @@ export function renderList(el, store, onClick) {
     for (const n of items) {
       const item = document.createElement('div');
       item.className = 'item';
-      if (n.id === store.selectedId) item.style.background = '#2a3140';
+      // data-id lets applyListSelection update highlight without rebuilding
+      // the entire DOM on selection-only store changes.
+      item.dataset.id = n.id;
+      if (n.id === store.selectedId) {
+        item.classList.add('selected');
+        item.style.background = '#2a3140';
+      }
       item.title = n.qualified_name || '';
       item.innerHTML =
         `<div class="head"><span class="type">[${escapeHtml(n.type)}]</span> ${escapeHtml(n.name || n.id)}</div>` +
@@ -53,6 +59,23 @@ export function renderList(el, store, onClick) {
   }
 
   el.replaceChildren(frag);
+}
+
+// applyListSelection updates only the selected-row highlight on an existing
+// node-list DOM. main.js calls this when the user picks a different node
+// without changing the underlying item set, dropping a 200-row reflow to
+// a couple of class flips.
+export function applyListSelection(el, selectedId) {
+  for (const item of el.querySelectorAll('.item')) {
+    const id = item.dataset.id;
+    if (id === selectedId) {
+      item.classList.add('selected');
+      item.style.background = '#2a3140';
+    } else {
+      item.classList.remove('selected');
+      item.style.background = '';
+    }
+  }
 }
 
 export function renderDetail(el, api, node, edges) {
