@@ -77785,7 +77785,13 @@ function edgeColor(link) {
   return "#" + c4.toString(16).padStart(6, "0");
 }
 function mountGraph(container, store2, api2) {
-  const fg2 = _3dForceGraph()(container).nodeThreeObject((node) => nodeMesh(node)).nodeVisibility((node) => store2.visibleIds.has(node.id)).linkVisibility((link) => !EDGE_STYLE[link.type]?.hidden).linkColor(edgeColor).linkWidth((link) => EDGE_STYLE[link.type]?.width ?? 1).cooldownTicks(200);
+  const fg2 = _3dForceGraph()(container).nodeThreeObject((node) => nodeMesh(node)).nodeLabel((node) => {
+    const t3 = node.type || "?";
+    const q2 = node.qualified_name || node.name || node.id;
+    const f3 = node.file_path ? `
+${node.file_path}:${node.start_line || 0}` : "";
+    return `<div style="font-family:ui-monospace,monospace;font-size:12px;line-height:1.3;background:rgba(15,17,20,.95);color:#e6e7e9;padding:6px 8px;border:1px solid #2a2c30;border-radius:4px;"><strong>${t3}</strong>&nbsp;<span style="color:#9aa">${q2}</span>${f3}</div>`;
+  }).nodeVisibility((node) => store2.visibleIds.has(node.id)).linkVisibility((link) => !EDGE_STYLE[link.type]?.hidden).linkColor(edgeColor).linkWidth((link) => EDGE_STYLE[link.type]?.width ?? 1).linkDirectionalArrowLength(3).linkDirectionalArrowRelPos(0.95).cooldownTicks(200);
   const sync = () => {
     const visible = store2.visibleIds;
     const nodes = [];
@@ -78135,12 +78141,10 @@ var store = new Store();
     banner.textContent = `\u26A0\uFE0F Graph built from ${manifest.src_commit} but src is now at ${manifest.current_commit}. Run \`ckg build\` to refresh.`;
     document.body.insertBefore(banner, document.body.firstChild);
   }
-  const tree = await api.hierarchy("pkg");
-  const top = tree.roots || [];
   const nodes = await api.nodes("", 5e3);
   store.loadNodes(nodes);
-  store.setVisible(top.map((t3) => t3.id));
-  console.log("viewer bootstrap", { nodes: nodes.length, top });
+  store.setVisible(nodes.map((n3) => n3.id));
+  console.log("viewer bootstrap", { nodes: nodes.length });
 })();
 var fg = mountGraph(document.getElementById("canvas"), store, api);
 var panelEl = document.getElementById("panel");
@@ -78148,16 +78152,29 @@ var searchEl = document.getElementById("search");
 var focusNode = async (id) => {
   const node = store.nodes.get(id);
   if (!node) return;
-  const edges = await api.edges([id]);
+  const [edges, children2] = await Promise.all([
+    api.edges([id]),
+    api.nodes(id, 1e3).catch(() => [])
+  ]);
   const fresh = edges.filter(
     (e3) => !store.edges.some((x4) => x4.src === e3.src && x4.dst === e3.dst && x4.type === e3.type)
   );
+  let dirty = false;
   if (fresh.length) {
     store.edges = [...store.edges, ...fresh];
-    store.emit();
+    dirty = true;
   }
+  if (children2.length) {
+    store.loadNodes(children2);
+    const next = new Set(store.visibleIds);
+    for (const c4 of children2) next.add(c4.id);
+    store.setVisible([...next]);
+    dirty = true;
+  }
+  if (dirty && !children2.length) store.emit();
   renderPanel(panelEl, api, node, edges);
 };
+fg.onNodeClick((node) => focusNode(node.id));
 wireSearch(searchEl, api, store, focusNode);
 /*! Bundled license information:
 

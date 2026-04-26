@@ -21,10 +21,19 @@ function edgeColor(link) {
 export function mountGraph(container, store, api) {
   const fg = ForceGraph3D()(container)
     .nodeThreeObject(node => nodeMesh(node))
+    .nodeLabel(node => {
+      // Hover tooltip — concise so it doesn't drown the canvas.
+      const t = node.type || '?';
+      const q = node.qualified_name || node.name || node.id;
+      const f = node.file_path ? `\n${node.file_path}:${node.start_line || 0}` : '';
+      return `<div style="font-family:ui-monospace,monospace;font-size:12px;line-height:1.3;background:rgba(15,17,20,.95);color:#e6e7e9;padding:6px 8px;border:1px solid #2a2c30;border-radius:4px;"><strong>${t}</strong>&nbsp;<span style="color:#9aa">${q}</span>${f}</div>`;
+    })
     .nodeVisibility(node => store.visibleIds.has(node.id))
     .linkVisibility(link => !(EDGE_STYLE[link.type]?.hidden))
     .linkColor(edgeColor)
     .linkWidth(link => EDGE_STYLE[link.type]?.width ?? 1)
+    .linkDirectionalArrowLength(3)
+    .linkDirectionalArrowRelPos(0.95)
     .cooldownTicks(200);
 
   // Push current store state into ForceGraph3D. Rebuilds the data array; the
