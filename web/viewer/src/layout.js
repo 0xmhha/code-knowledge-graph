@@ -33,7 +33,11 @@ export function mountGraph(container, store, api) {
       const usage = (node.usage_score ?? 0).toFixed(2);
       const pr = (node.pagerank ?? 0).toExponential(2);
       const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : '';
-      return `<div style="font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
+      // pointer-events:none — keep the tooltip transparent to mouse events so
+      // the cursor never "lands" on the tooltip itself; without this, moving
+      // the cursor onto the tooltip triggers an immediate re-hover loop and
+      // the tooltip appears stuck.
+      return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
 <div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span></div>
 <div style="color:#bbb;">📄 ${f}</div>${sig}
 <div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> · conf: <span style="color:#aaa">${conf}</span></div>

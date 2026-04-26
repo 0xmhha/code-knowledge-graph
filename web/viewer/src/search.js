@@ -18,7 +18,8 @@ export function wireSearch(input, api, store, onPick) {
     timer = setTimeout(async () => {
       try {
         const results = await api.search(q);
-        if (results.length) {
+        console.log('search', { q, count: Array.isArray(results) ? results.length : '(non-array)', sample: Array.isArray(results) ? results.slice(0, 3) : results });
+        if (Array.isArray(results) && results.length) {
           // Register results in the store so they can be focused / hovered /
           // listed without an extra round-trip.
           store.loadNodes(results);
@@ -31,11 +32,14 @@ export function wireSearch(input, api, store, onPick) {
           // Auto-focus the top hit so the right-hand detail panel populates.
           onPick(results[0].id);
         } else {
+          // Explicit empty-state — list panel will render "No results."
           store.searchResults = [];
           store.emit();
         }
       } catch (e) {
-        console.warn('search failed', e);
+        console.error('search failed', e);
+        store.searchResults = [];
+        store.emit();
       }
     }, 200);
   });

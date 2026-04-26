@@ -28,6 +28,8 @@
     #node-detail h4 { font-size: 11px; margin: 8px 0 3px 0; }
     #node-detail pre { font-size: 10.5px; max-height: 200px !important; }
     #bottombar { grid-column: 1 / span 2; background: #1a1c1f; padding: 3px 8px; font-size: 11px; display: flex; gap: 12px; align-items: center; }
+    #bottombar button { background: #232529; color: #e6e7e9; border: 1px solid #2a2c30; padding: 2px 8px; cursor: pointer; font-size: 11px; min-width: 28px; }
+    #bottombar button:hover { background: #2a2c30; }
     .stale-banner { background: #5a4a00; color: #fff; padding: 4px 8px; font-size: 11px; }
   </style>
 </head>
@@ -46,7 +48,12 @@
     </div>
     <div id="bottombar">
       <button id="hierarchy-toggle">topic ↔ pkg</button>
-      <span style="margin-left:12px;">LOD: <span id="lod">L0</span></span>
+      <span>LOD: <span id="lod">L0</span></span>
+      <span style="margin-left:auto;display:inline-flex;gap:4px;">
+        <button id="zoom-in" title="Zoom in (=)">＋</button>
+        <button id="zoom-out" title="Zoom out (-)">−</button>
+        <button id="zoom-reset" title="Reset camera (0)">⟲</button>
+      </span>
     </div>
   </div>
   <script type="module" src="/assets/viewer.js"></script>

@@ -102,3 +102,29 @@ document.getElementById('panel-toggle')?.addEventListener('click', () => {
   document.getElementById('app').classList.toggle('no-panel');
   setTimeout(() => window.dispatchEvent(new Event('resize')), 130);
 });
+
+// Zoom controls — adjust camera Z. Smaller Z = closer (zoom in).
+const zoomBy = (factor) => {
+  const pos = fg.cameraPosition();
+  fg.cameraPosition({ z: Math.max(50, pos.z * factor) }, undefined, 200);
+};
+document.getElementById('zoom-in')?.addEventListener('click', () => zoomBy(0.7));
+document.getElementById('zoom-out')?.addEventListener('click', () => zoomBy(1.4));
+document.getElementById('zoom-reset')?.addEventListener('click', () => {
+  fg.cameraPosition({ x: 0, y: 0, z: 1500 }, { x: 0, y: 0, z: 0 }, 400);
+});
+
+// Keyboard shortcuts: + / = zoom in, - zoom out, 0 reset, / focus search,
+// Escape to clear selection. Only when search box is not focused.
+window.addEventListener('keydown', (ev) => {
+  if (document.activeElement?.id === 'search') {
+    if (ev.key === 'Escape') document.activeElement.blur();
+    return;
+  }
+  if (ev.key === '=' || ev.key === '+') zoomBy(0.7);
+  else if (ev.key === '-') zoomBy(1.4);
+  else if (ev.key === '0') document.getElementById('zoom-reset')?.click();
+  else if (ev.key === '/') { ev.preventDefault(); document.getElementById('search')?.focus(); }
+});
+
+console.log('viewer ready', { fg, store });
