@@ -33,9 +33,9 @@ type CLIClientOptions struct {
 	Binary string
 
 	// AgentPath is the absolute path to the cliwrap-agent binary. If
-	// empty, exec.LookPath("cliwrap-agent") is used; if that fails an
-	// informative error is returned. CKG does NOT install cliwrap-agent;
-	// users must install it from github.com/0xmhha/cli-wrapper.
+	// empty, the CLIWRAP_AGENT environment variable is consulted. CKG
+	// does NOT install cliwrap-agent; set CLIWRAP_AGENT or pass this
+	// field explicitly. See https://github.com/0xmhha/cli-wrapper.
 	AgentPath string
 
 	// RuntimeDir is where cli-wrapper stores per-process WAL/state. If
@@ -48,9 +48,13 @@ type CLIClientOptions struct {
 // provided).
 var ErrClaudeNotFound = errors.New("claude CLI binary not found in PATH; provide --llm-claude-binary")
 
-// ErrCliwrapAgentNotFound is returned when cliwrap-agent cannot be located.
-// Users must install it separately from github.com/0xmhha/cli-wrapper.
-var ErrCliwrapAgentNotFound = errors.New("cliwrap-agent not found in PATH; install from github.com/0xmhha/cli-wrapper")
+// ErrCliwrapAgentNotFound is returned when cliwrap-agent path cannot be
+// resolved. Set the CLIWRAP_AGENT environment variable or provide
+// CLIClientOptions.AgentPath. See https://github.com/0xmhha/cli-wrapper.
+var ErrCliwrapAgentNotFound = errors.New(
+	"cliwrap-agent path not provided; set CLIWRAP_AGENT env var or " +
+		"pass CLIClientOptions.AgentPath. See https://github.com/0xmhha/cli-wrapper for installation.",
+)
 
 // NewCLIClient constructs a CLIClient. It resolves the claude binary path
 // (override or PATH lookup), locates cliwrap-agent, and constructs a
@@ -70,11 +74,10 @@ func NewCLIClient(opts CLIClientOptions) (*CLIClient, error) {
 
 	agent := opts.AgentPath
 	if agent == "" {
-		p, err := exec.LookPath("cliwrap-agent")
-		if err != nil {
-			return nil, ErrCliwrapAgentNotFound
-		}
-		agent = p
+		agent = os.Getenv("CLIWRAP_AGENT")
+	}
+	if agent == "" {
+		return nil, ErrCliwrapAgentNotFound
 	}
 
 	runtimeDir := opts.RuntimeDir
@@ -112,10 +115,13 @@ func (c *CLIClient) Close() error {
 //
 // Flags used:
 //   - -p / --print: non-interactive mode required for piping/JSON output
-//   - --bare: skip hooks, plugins, keychain, auto-memory; auth strictly via
-//     ANTHROPIC_API_KEY (avoids polluting the eval with the user's session)
-//   - --no-session-persistence: do not write sessions to disk
+//   - --no-session-persistence: do not write sessions to disk (prevents
+//     user's session DB from being polluted by eval runs)
 //   - --output-format json: single JSON document on stdout (schema below)
+//
+// Note: --bare is intentionally NOT used. Without it, claude uses normal
+// auth (OAuth, keychain, ANTHROPIC_API_KEY — whatever the user configured),
+// which is required for Pro/Max users who rely on OAuth/keychain auth.
 //
 // The `system` argument, if non-empty, is forwarded as
 // --append-system-prompt. The `user` argument is the final positional
@@ -123,7 +129,6 @@ func (c *CLIClient) Close() error {
 func (c *CLIClient) Complete(ctx context.Context, system, user string) (LLMResult, error) {
 	args := []string{
 		"-p",
-		"--bare",
 		"--no-session-persistence",
 		"--output-format", "json",
 	}
@@ -162,7 +167,25 @@ func (c *CLIClient) Complete(ctx context.Context, system, user string) (LLMResul
 	}
 
 	raw := c.mgr.LogsSnapshot(procID, 0) // 0 = stdout
-	return parseClaudeJSON(raw)
+
+	text, claudeFallback, err := extractClaudeText(raw)
+	if err != nil {
+		return LLMResult{}, err
+	}
+
+	// Primary: token-monitor; fall back to claude's own usage block.
+	usage := claudeFallback
+	if tm, ok := queryTokenMonitor(ctx); ok {
+		usage = tm
+	}
+
+	return LLMResult{
+		OutputText:        text,
+		InputTokens:       usage.InputTokens,
+		OutputTokens:      usage.OutputTokens,
+		CacheReadTokens:   usage.CacheRead,
+		CacheCreateTokens: usage.CacheCreate,
+	}, nil
 }
 
 // waitForExit blocks until a process.stopped or process.crashed event is
@@ -182,6 +205,15 @@ func waitForExit(ctx context.Context, sub event.Subscription) error {
 			}
 		}
 	}
+}
+
+// claudeUsage mirrors the token counts from claude's --output-format json
+// `usage` block and is also used to carry token-monitor results.
+type claudeUsage struct {
+	InputTokens  int
+	OutputTokens int
+	CacheRead    int
+	CacheCreate  int
 }
 
 // claudeJSONOutput is the schema emitted by `claude -p --output-format json`.
@@ -204,73 +236,72 @@ type claudeJSONOutput struct {
 	Result  string `json:"result"`
 	IsError bool   `json:"is_error"`
 	Usage   struct {
-		InputTokens          int `json:"input_tokens"`
-		OutputTokens         int `json:"output_tokens"`
-		CacheReadInputTokens int `json:"cache_read_input_tokens"`
-		CacheCreationTokens  int `json:"cache_creation_input_tokens"`
+		InputTokens         int `json:"input_tokens"`
+		OutputTokens        int `json:"output_tokens"`
+		CacheReadTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
 }
 
-// parseClaudeJSON extracts the assistant's response text and token usage
-// from claude's --output-format json stdout. If usage cache fields are
-// zero, attempts a best-effort enrichment via `token-monitor query
-// --current --json` (silently skipped if the binary is unavailable).
-func parseClaudeJSON(raw []byte) (LLMResult, error) {
+// extractClaudeText pulls the assistant's response text from claude's
+// --output-format json stdout and returns it alongside the parsed usage
+// block (used as fallback only when token-monitor is unavailable).
+// If is_error is true the result text is surfaced as a Go error.
+func extractClaudeText(raw []byte) (text string, usage claudeUsage, err error) {
 	if len(raw) == 0 {
-		return LLMResult{}, errors.New("ckg eval: claude produced empty output")
+		return "", claudeUsage{}, errors.New("ckg eval: claude produced empty output")
 	}
 	var resp claudeJSONOutput
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return LLMResult{}, fmt.Errorf("ckg eval: parse claude json: %w", err)
+	if jsonErr := json.Unmarshal(raw, &resp); jsonErr != nil {
+		return "", claudeUsage{}, fmt.Errorf("ckg eval: parse claude json: %w", jsonErr)
 	}
 	if resp.IsError {
 		// claude signalled an error in-band; surface it. The result
 		// field typically contains a human-readable message in that
 		// case (e.g., "Not logged in · Please run /login").
-		return LLMResult{}, fmt.Errorf("ckg eval: claude reported error: %s", resp.Result)
+		return "", claudeUsage{}, fmt.Errorf("ckg eval: claude reported error: %s", resp.Result)
 	}
-	out := LLMResult{
-		OutputText:        resp.Result,
-		InputTokens:       resp.Usage.InputTokens,
-		OutputTokens:      resp.Usage.OutputTokens,
-		CacheReadTokens:   resp.Usage.CacheReadInputTokens,
-		CacheCreateTokens: resp.Usage.CacheCreationTokens,
+	u := claudeUsage{
+		InputTokens:  resp.Usage.InputTokens,
+		OutputTokens: resp.Usage.OutputTokens,
+		CacheRead:    resp.Usage.CacheReadTokens,
+		CacheCreate:  resp.Usage.CacheCreationTokens,
 	}
-	if out.CacheReadTokens == 0 && out.CacheCreateTokens == 0 {
-		enrichFromTokenMonitor(&out)
-	}
-	return out, nil
+	return resp.Result, u, nil
 }
 
-// enrichFromTokenMonitor calls `token-monitor query --current --json` and
-// merges any available cache_read/cache_creation token counts into out.
-// This is a best-effort enrichment: a missing or failing token-monitor is
-// silently ignored — token-monitor is OPTIONAL.
-func enrichFromTokenMonitor(out *LLMResult) {
+// queryTokenMonitor calls `token-monitor query --current --json` and returns
+// the full token counts. This is the PRIMARY token source; claude's own usage
+// block is only used when token-monitor is unavailable or returns no data.
+// Returns (zero, false) on any failure — callers must treat that as a signal
+// to use the claude fallback.
+func queryTokenMonitor(ctx context.Context) (claudeUsage, bool) {
 	bin, err := exec.LookPath("token-monitor")
 	if err != nil {
-		return
+		return claudeUsage{}, false
 	}
-	// 5s is generous for a local query; on a busy CI box the previous 2s
-	// budget could expire before /bin/sh finished interpreter startup.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// 5s is generous for a local query; on a busy CI box a tighter budget
+	// could expire before /bin/sh finishes interpreter startup.
+	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "query", "--current", "--json")
+	cmd := exec.CommandContext(qctx, bin, "query", "--current", "--json")
 	raw, err := cmd.Output()
 	if err != nil {
-		return
+		return claudeUsage{}, false
 	}
 	var tm struct {
-		CacheRead     int `json:"cache_read_input_tokens"`
-		CacheCreation int `json:"cache_creation_input_tokens"`
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+		CacheRead    int `json:"cache_read_input_tokens"`
+		CacheCreate  int `json:"cache_creation_input_tokens"`
 	}
 	if err := json.Unmarshal(raw, &tm); err != nil {
-		return
+		return claudeUsage{}, false
 	}
-	if out.CacheReadTokens == 0 {
-		out.CacheReadTokens = tm.CacheRead
-	}
-	if out.CacheCreateTokens == 0 {
-		out.CacheCreateTokens = tm.CacheCreation
-	}
+	return claudeUsage{
+		InputTokens:  tm.InputTokens,
+		OutputTokens: tm.OutputTokens,
+		CacheRead:    tm.CacheRead,
+		CacheCreate:  tm.CacheCreate,
+	}, true
 }

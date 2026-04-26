@@ -264,7 +264,7 @@ func TestSelectLLMBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("api_default_routes_to_APIClient", func(t *testing.T) {
+	t.Run("api_routes_to_APIClient", func(t *testing.T) {
 		// Without ANTHROPIC_API_KEY this still surfaces as ErrNoAPIKey
 		// rather than the unknown-backend error, proving the api branch
 		// was selected.
@@ -274,18 +274,22 @@ func TestSelectLLMBackend(t *testing.T) {
 		}
 	})
 
-	t.Run("empty_backend_treated_as_api", func(t *testing.T) {
+	t.Run("empty_backend_treated_as_cli", func(t *testing.T) {
+		// Default is now "cli". With PATH="" and CLIWRAP_AGENT="" we
+		// get ErrClaudeNotFound (CLI branch), not ErrNoAPIKey (API branch).
+		t.Setenv("PATH", "")
+		t.Setenv("CLIWRAP_AGENT", "")
 		_, err := selectLLMBackend("", "claude-sonnet-4-6", "")
 		if err == nil {
-			t.Fatal("expected ErrNoAPIKey when key absent")
+			t.Fatal("expected ErrClaudeNotFound when binary absent")
 		}
 	})
 
 	t.Run("cli_routes_to_CLIClient", func(t *testing.T) {
-		// Empty PATH guarantees both claude lookup and cliwrap-agent
-		// lookup fail, so we get a CLI-specific error rather than
-		// the api-branch ErrNoAPIKey or unknown-backend error.
+		// Empty PATH guarantees claude lookup fails, so we get a
+		// CLI-specific error rather than ErrNoAPIKey or unknown-backend.
 		t.Setenv("PATH", "")
+		t.Setenv("CLIWRAP_AGENT", "")
 		_, err := selectLLMBackend("cli", "", "")
 		if err == nil {
 			t.Fatal("expected ErrClaudeNotFound when binary absent")
@@ -295,7 +299,8 @@ func TestSelectLLMBackend(t *testing.T) {
 
 // TestEvalCmd_MissingAPIKey exercises the RunE body past LoadTasks (empty
 // match is fine) and hits NewAPIClient which returns ErrNoAPIKey when
-// ANTHROPIC_API_KEY is unset.  This covers the NewAPIClient error path in
+// ANTHROPIC_API_KEY is unset. Explicitly passes --llm-backend=api since the
+// default backend is now "cli". This covers the NewAPIClient error path in
 // eval.go without requiring a live API key.
 func TestEvalCmd_MissingAPIKey(t *testing.T) {
 	graphDir := t.TempDir()
@@ -310,6 +315,7 @@ func TestEvalCmd_MissingAPIKey(t *testing.T) {
 	cmd.SetArgs([]string{
 		"--tasks=" + t.TempDir() + "/*.yaml",
 		"--graph=" + graphDir,
+		"--llm-backend=api",
 	})
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)

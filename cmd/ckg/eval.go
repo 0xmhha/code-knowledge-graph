@@ -46,7 +46,7 @@ func newEvalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&model, "llm", "claude-sonnet-4-6", "LLM model id (api backend)")
 	cmd.Flags().StringSliceVar(&baselines, "baselines",
 		[]string{"alpha", "beta", "gamma", "delta"}, "baselines to run")
-	cmd.Flags().StringVar(&llmBackend, "llm-backend", "api", "LLM backend: api|cli")
+	cmd.Flags().StringVar(&llmBackend, "llm-backend", "cli", "LLM backend: api|cli (default cli)")
 	cmd.Flags().StringVar(&claudeBinary, "llm-claude-binary", "",
 		"path to claude binary (cli backend; empty = PATH lookup)")
 	_ = cmd.MarkFlagRequired("tasks")
@@ -55,14 +55,14 @@ func newEvalCmd() *cobra.Command {
 }
 
 // selectLLMBackend wires --llm-backend to the corresponding LLMClient
-// constructor. The default ("api" or empty) preserves the prior behavior
-// so unrelated tests and scripts keep working.
+// constructor. The default ("cli" or empty) routes to CLIClient; "api"
+// selects APIClient for use with ANTHROPIC_API_KEY.
 func selectLLMBackend(backend, model, claudeBinary string) (eval.LLMClient, error) {
 	switch backend {
-	case "", "api":
-		return eval.NewAPIClient(model)
-	case "cli":
+	case "", "cli":
 		return eval.NewCLIClient(eval.CLIClientOptions{Binary: claudeBinary})
+	case "api":
+		return eval.NewAPIClient(model)
 	default:
 		return nil, fmt.Errorf("unknown --llm-backend=%q (want api|cli)", backend)
 	}
