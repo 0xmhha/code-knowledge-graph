@@ -48,12 +48,22 @@
       <div id="node-detail">Select a node to inspect.</div>
     </div>
     <div id="bottombar">
-      <button id="hierarchy-toggle">topic ↔ pkg</button>
-      <span>LOD: <span id="lod">L0</span></span>
+      <span style="display:inline-flex;gap:4px;">
+        <button id="depth-out" title="Depth out ([)">⇱</button>
+        <button id="depth-in" title="Depth in (])">⇲</button>
+        <button id="depth-home" title="Home (Home)">🏠</button>
+        <span id="depth-indicator">depth root</span>
+      </span>
+      <span id="render-meter" style="color:#7ab8ff;">— ms · 0 nodes / 0 edges</span>
       <span style="margin-left:auto;display:inline-flex;gap:4px;">
+        <span style="color:#888;margin-right:4px;">font</span>
+        <button id="font-s" title="Small">S</button>
+        <button id="font-m" title="Medium">M</button>
+        <button id="font-l" title="Large">L</button>
+        <span style="width:8px;"></span>
         <button id="zoom-in" title="Zoom in (=)">＋</button>
         <button id="zoom-out" title="Zoom out (-)">−</button>
-        <button id="zoom-reset" title="Reset camera (0)">⟲</button>
+        <button id="zoom-reset" title="Reset (0)">⟲</button>
       </span>
     </div>
   </div>

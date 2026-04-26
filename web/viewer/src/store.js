@@ -25,10 +25,15 @@ export class Store {
     this.searchResults = [];
     this.selectedId = null;
     // focusDistance: id -> BFS distance from `selectedId`, capped at FOCUS_DEPTH.
-    // Drives the focus+halo rendering layer (Phase B). Empty map = no focus
-    // (initial state) → renderer falls back to flat encoding.
+    // Drives the focus+halo rendering layer. Empty map = no focus.
     this.focusDistance = new Map();
-    this.expanded = new Map();        // parentId -> Set<childId>
+    // Depth-driven navigation (replaces the old 'expanded' click-toggle):
+    //   anchorId === null → root view (top-level packages)
+    //   anchorId === <id>  → BFS from that node, depth hops outward
+    this.anchorId = null;
+    this.depth = 0;
+    this.fontSize = 1.0;              // 0.85 / 1.0 / 1.2 — UI 3-step
+    this.lastRenderMs = 0;            // measured by main.js after each navigation
     this._batchDepth = 0;
     this._dirty = false;
   }

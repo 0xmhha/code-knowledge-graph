@@ -79,18 +79,23 @@ function tooltipHtml(node, store) {
   const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : '';
   const dist = store.focusDistance.get(node.id);
   const distLabel = dist === 0 ? '· FOCUS' : dist === 1 ? '· direct' : dist === 2 ? '· 2-hop' : '';
-  return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
-<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
+  const fs = store.fontSize ?? 1.0;
+  const f1 = (11 * fs).toFixed(1);
+  const f2 = (12 * fs).toFixed(1);
+  const f3 = (10 * fs).toFixed(1);
+  return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:${f1}px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:${420 * fs}px;">
+<div style="font-size:${f2}px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
 <div style="color:#bbb;">📄 ${f}</div>${sig}
 <div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> · conf: <span style="color:#aaa">${conf}</span></div>
 <div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> · out-edges: <span style="color:#aaa">${outDeg}</span></div>
 <div style="color:#888;">usage: <span style="color:#aaa">${usage}</span> · pagerank: <span style="color:#aaa">${pr}</span></div>
-<div style="color:#666;margin-top:6px;font-size:10px;">click to expand · click again to collapse</div>
+<div style="color:#666;margin-top:6px;font-size:${f3}px;">click → set anchor · ⇲/⇱ to navigate depth</div>
 </div>`;
 }
 
 // 2D node renderer. Reads opacity from store.focusDistance per frame so
-// the focus halo updates without rebuilding graph data.
+// the focus halo updates without rebuilding graph data. Font scale comes
+// from store.fontSize (S/M/L user toggle).
 function makeDrawNode2D(store) {
   return function drawNode2D(node, ctx, globalScale) {
     const r = 3 + Math.log10((node.usage_score || 0) + 1) * 1.5;
@@ -100,7 +105,6 @@ function makeDrawNode2D(store) {
     ctx.beginPath();
     ctx.arc(node.x, node.y, Math.max(2, r), 0, 2 * Math.PI);
     ctx.fill();
-    // Focus node gets a bright ring so it stands out even on monochrome corpora.
     const dist = store.focusDistance.get(node.id);
     if (dist === 0) {
       ctx.globalAlpha = 1;
@@ -111,11 +115,11 @@ function makeDrawNode2D(store) {
       ctx.stroke();
     }
     ctx.globalAlpha = 1;
-    // Label only zoomed-in hubs OR nodes inside the focus ball.
     const inFocusBall = dist !== undefined;
     const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
     if (inFocusBall || (globalScale > 1.5 && deg > 5)) {
-      const fontSize = Math.max(8, 10 / globalScale);
+      const fs = store.fontSize ?? 1.0;
+      const fontSize = Math.max(8, (10 * fs) / globalScale);
       ctx.font = `${fontSize}px ui-monospace, monospace`;
       ctx.fillStyle = inFocusBall ? '#e6e7e9' : '#9aa';
       ctx.textAlign = 'center';
@@ -132,20 +136,6 @@ function makePointerArea2D() {
     ctx.arc(node.x, node.y, r + 3, 0, 2 * Math.PI);
     ctx.fill();
   };
-}
-
-// LOD thresholds.
-function lodFromZ(z) {
-  if (z < 400) return 3;
-  if (z < 800) return 2;
-  if (z < 1500) return 1;
-  return 0;
-}
-function lodFromZoom(k) {
-  if (k > 4) return 3;
-  if (k > 2) return 2;
-  if (k > 1) return 1;
-  return 0;
 }
 
 export function mountGraph(container, store, api, mode = '3d') {
@@ -221,45 +211,12 @@ export function mountGraph(container, store, api, mode = '3d') {
   const unsubscribe = store.subscribe(sync);
   sync();
 
-  // LOD trigger.
-  let lodFetchInFlight = false;
-  const tryLODExpand = (lod) => {
-    if (lod === store.lod) return;
-    store.setLOD(lod);
-    const lodEl = document.getElementById('lod');
-    if (lodEl) lodEl.textContent = `L${lod}`;
-    if (lod <= 0 || lodFetchInFlight) return;
-    lodFetchInFlight = true;
-    const parents = Array.from(store.visibleIds);
-    Promise.all(
-      parents.map(id =>
-        api.nodes(id, 1000).catch(err => {
-          console.warn('LOD fetch failed for', id, err);
-          return [];
-        })
-      )
-    )
-      .then(batches => {
-        const more = batches.flat().filter(n => n && n.id);
-        if (!more.length) return;
-        store.batch(() => {
-          store.loadNodes(more);
-          const next = new Set(store.visibleIds);
-          for (const n of more) next.add(n.id);
-          store.setVisible([...next]);
-        });
-      })
-      .catch(err => console.warn('LOD expand failed', err))
-      .finally(() => { lodFetchInFlight = false; });
-  };
-
-  if (mode === '3d') {
-    fg.controls().addEventListener('change', () => {
-      tryLODExpand(lodFromZ(fg.cameraPosition().z));
-    });
-  } else if (typeof fg.onZoom === 'function') {
-    fg.onZoom(({ k }) => tryLODExpand(lodFromZoom(k)));
-  }
+  // Camera/zoom is pure visual now — no implicit data fetches. Navigation
+  // is driven explicitly by the depth-in / depth-out / set-anchor / home
+  // controls in main.js. Removing the camera-driven LOD expander means
+  // mouse-wheel zoom no longer kicks off surprise rerenders, which the
+  // user explicitly asked for after seeing inconsistent rendering at high
+  // zoom levels (docs/VIEWER-ROADMAP.md L4).
 
   fg._ckgTeardown = () => {
     unsubscribe?.();

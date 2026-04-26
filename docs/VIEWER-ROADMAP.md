@@ -126,6 +126,56 @@ encoding; the halo is multiplied on top, never replaces it.
 keep the focus N-hop set on canvas) and path-trace (Ctrl+click two
 nodes, highlight shortest path between them).
 
+---
+
+## L5 — Discrete depth navigation (2026-04-26 round 3)
+
+After L4 the renderer was fast on small visible sets, but the navigation
+model still produced unbounded growth: every click added another shell
+of children to `visibleIds`, and mouse-wheel zoom triggered
+camera-distance LOD that fetched even more nodes implicitly. The user's
+exact complaint: "확대, 축소에 따라 일관되지 않는 렌더링이 발생하며,
+graph knowledge 를 나타내는 방식이 내가 원하는 방식은 아니며,
+렌더링이 많을 수 밖에 없는 구조로 되어 있고".
+
+The redesign replaces the implicit, accumulating model with an explicit
+`(anchorId, depth)` pair:
+
+- **anchor** — the node the user is currently centred on. `null`
+  means root view (top-level packages).
+- **depth** — integer 0…6. visible = anchor's BFS d-hop neighbourhood
+  capped at MAX_VISIBLE (500). depth=0 shows just the anchor;
+  depth=N expands one shell at a time.
+
+**Server:** new `POST /api/nodes-by-ids` endpoint (persist already had
+`Store.NodesByIDs`). The depth BFS needs a single round-trip to fetch
+every neighbour's metadata after the edge index gives it the ids.
+
+**Client:** `web/viewer/src/depth.js` owns `recomputeVisible(store, api)`,
+called by every depth-in / depth-out / set-anchor / home action. Camera
+zoom is now pure visual — no implicit fetches, ever.
+
+**UI:**
+- Bottom bar gets ⇱ depth-out, ⇲ depth-in, 🏠 home, plus a `depth N/6`
+  indicator.
+- Render-time meter `142 ms · 412 nodes / 891 edges` displays the
+  measured cost of each navigation step. Captured as
+  `t1 = perf.now()` inside `requestAnimationFrame` after the batch
+  emits + `onEngineStop` settles.
+- Font-size toggle S/M/L (persisted to localStorage), affects both 3D
+  HTML tooltips and 2D Canvas label drawing.
+
+**Behaviour change:** clicking a node = "set as anchor at depth 1"
+(navigation), not "expand children" (accumulation). Sidebar list clicks
+remain inspection-only (selectOnly). Search auto-focuses but doesn't
+re-anchor unless the user clicks the canvas node.
+
+**Why it matters for performance debugging:** every step now has a
+visible cost number. If depth-in 4→5 jumps from 80 ms to 1.4 s, the
+user sees it immediately and can adjust MAX_VISIBLE or report the
+specific bottleneck. Camera zoom never triggers fetches, so visible-set
+size is stable across pan/zoom.
+
 ## Test surfaces affected
 
 - `internal/persist`: new `SearchSubstr` covered by `sqlite_extra_test.go`

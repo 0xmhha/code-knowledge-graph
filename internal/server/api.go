@@ -103,6 +103,31 @@ func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(src)
 }
 
+// handleNodesByIDs returns full node records for a caller-supplied id list.
+// The viewer's depth-driven navigation needs this: BFS-walking the edge
+// index produces a set of neighbour ids, and each neighbour's metadata
+// (qname, file_path, language, …) must come back in a single round-trip
+// so depth-in doesn't fan out into 100 small fetches.
+func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(body.IDs) == 0 {
+		writeJSON(w, []types.Node{})
+		return
+	}
+	nodes, err := s.store.NodesByIDs(body.IDs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, nodes)
+}
+
 // handleSearch routes between FTS5 (English / token-aligned) and a
 // substring fallback (CJK / non-tokenisable). Trade-offs:
 //   - non-ASCII bytes anywhere in q → SearchSubstr (LIKE, O(n))

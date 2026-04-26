@@ -1600,6 +1600,14 @@ var API = class {
       body: JSON.stringify({ ids: nodeIds })
     }).then((r2) => r2.json()).then(asArray);
   }
+  async nodesByIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    return fetch(`${this.base}/api/nodes-by-ids`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids })
+    }).then((r2) => r2.json()).then(asArray);
+  }
   async blob(nodeId) {
     const r2 = await fetch(`${this.base}/api/blob/${nodeId}`);
     if (!r2.ok) return "";
@@ -1698,7 +1706,10 @@ var Store = class {
     this.searchResults = [];
     this.selectedId = null;
     this.focusDistance = /* @__PURE__ */ new Map();
-    this.expanded = /* @__PURE__ */ new Map();
+    this.anchorId = null;
+    this.depth = 0;
+    this.fontSize = 1;
+    this.lastRenderMs = 0;
     this._batchDepth = 0;
     this._dirty = false;
   }
@@ -83034,13 +83045,17 @@ function tooltipHtml(node, store2) {
   const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : "";
   const dist = store2.focusDistance.get(node.id);
   const distLabel = dist === 0 ? "\xB7 FOCUS" : dist === 1 ? "\xB7 direct" : dist === 2 ? "\xB7 2-hop" : "";
-  return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
-<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t3}</strong> <span style="color:#cfd0d3;">${q2}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
+  const fs = store2.fontSize ?? 1;
+  const f1 = (11 * fs).toFixed(1);
+  const f22 = (12 * fs).toFixed(1);
+  const f3 = (10 * fs).toFixed(1);
+  return `<div style="pointer-events:none;font-family:ui-monospace,monospace;font-size:${f1}px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:${420 * fs}px;">
+<div style="font-size:${f22}px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t3}</strong> <span style="color:#cfd0d3;">${q2}</span> <span style="color:#7ab8ff">${distLabel}</span></div>
 <div style="color:#bbb;">\u{1F4C4} ${f2}</div>${sig}
 <div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> \xB7 conf: <span style="color:#aaa">${conf}</span></div>
 <div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> \xB7 out-edges: <span style="color:#aaa">${outDeg}</span></div>
 <div style="color:#888;">usage: <span style="color:#aaa">${usage}</span> \xB7 pagerank: <span style="color:#aaa">${pr}</span></div>
-<div style="color:#666;margin-top:6px;font-size:10px;">click to expand \xB7 click again to collapse</div>
+<div style="color:#666;margin-top:6px;font-size:${f3}px;">click \u2192 set anchor \xB7 \u21F2/\u21F1 to navigate depth</div>
 </div>`;
 }
 function makeDrawNode2D(store2) {
@@ -83065,7 +83080,8 @@ function makeDrawNode2D(store2) {
     const inFocusBall = dist !== void 0;
     const deg = (node.in_degree ?? 0) + (node.out_degree ?? 0);
     if (inFocusBall || globalScale > 1.5 && deg > 5) {
-      const fontSize = Math.max(8, 10 / globalScale);
+      const fs = store2.fontSize ?? 1;
+      const fontSize = Math.max(8, 10 * fs / globalScale);
       ctx.font = `${fontSize}px ui-monospace, monospace`;
       ctx.fillStyle = inFocusBall ? "#e6e7e9" : "#9aa";
       ctx.textAlign = "center";
@@ -83081,18 +83097,6 @@ function makePointerArea2D() {
     ctx.arc(node.x, node.y, r2 + 3, 0, 2 * Math.PI);
     ctx.fill();
   };
-}
-function lodFromZ(z3) {
-  if (z3 < 400) return 3;
-  if (z3 < 800) return 2;
-  if (z3 < 1500) return 1;
-  return 0;
-}
-function lodFromZoom(k2) {
-  if (k2 > 4) return 3;
-  if (k2 > 2) return 2;
-  if (k2 > 1) return 1;
-  return 0;
 }
 function mountGraph(container, store2, api2, mode2 = "3d") {
   container.innerHTML = "";
@@ -83137,42 +83141,6 @@ function mountGraph(container, store2, api2, mode2 = "3d") {
   };
   const unsubscribe = store2.subscribe(sync);
   sync();
-  let lodFetchInFlight = false;
-  const tryLODExpand = (lod) => {
-    if (lod === store2.lod) return;
-    store2.setLOD(lod);
-    const lodEl = document.getElementById("lod");
-    if (lodEl) lodEl.textContent = `L${lod}`;
-    if (lod <= 0 || lodFetchInFlight) return;
-    lodFetchInFlight = true;
-    const parents = Array.from(store2.visibleIds);
-    Promise.all(
-      parents.map(
-        (id2) => api2.nodes(id2, 1e3).catch((err) => {
-          console.warn("LOD fetch failed for", id2, err);
-          return [];
-        })
-      )
-    ).then((batches) => {
-      const more = batches.flat().filter((n2) => n2 && n2.id);
-      if (!more.length) return;
-      store2.batch(() => {
-        store2.loadNodes(more);
-        const next = new Set(store2.visibleIds);
-        for (const n2 of more) next.add(n2.id);
-        store2.setVisible([...next]);
-      });
-    }).catch((err) => console.warn("LOD expand failed", err)).finally(() => {
-      lodFetchInFlight = false;
-    });
-  };
-  if (mode2 === "3d") {
-    fg2.controls().addEventListener("change", () => {
-      tryLODExpand(lodFromZ(fg2.cameraPosition().z));
-    });
-  } else if (typeof fg2.onZoom === "function") {
-    fg2.onZoom(({ k: k2 }) => tryLODExpand(lodFromZoom(k2)));
-  }
   fg2._ckgTeardown = () => {
     unsubscribe?.();
     if (meshIndex) meshIndex.clear();
@@ -83283,11 +83251,108 @@ function renderDetail(el, api2, node, edges) {
   });
 }
 
+// src/depth.js
+var MAX_VISIBLE = 500;
+async function recomputeVisible(store2, api2) {
+  const { anchorId, depth: depth2 } = store2;
+  if (!anchorId) {
+    const top = await api2.nodes("", MAX_VISIBLE);
+    const ids = top.map((n2) => n2.id);
+    store2.batch(() => {
+      store2.loadNodes(top);
+      store2.setVisible(ids);
+      store2.focusDistance = /* @__PURE__ */ new Map();
+    });
+    return new Set(ids);
+  }
+  const visible = /* @__PURE__ */ new Set([anchorId]);
+  let frontier = [anchorId];
+  const needFetch = /* @__PURE__ */ new Set();
+  if ((store2.edgesBySrc.get(anchorId)?.length ?? 0) === 0 && (store2.edgesByDst.get(anchorId)?.length ?? 0) === 0) {
+    needFetch.add(anchorId);
+  }
+  for (let d2 = 0; d2 < depth2 && visible.size < MAX_VISIBLE; d2++) {
+    if (needFetch.size) {
+      const ids = [...needFetch];
+      needFetch.clear();
+      const fresh = await api2.edges(ids);
+      if (fresh.length) store2.addEdges(fresh);
+    }
+    const nextFrontier = [];
+    for (const id2 of frontier) {
+      const outs = store2.edgesBySrc.get(id2) || [];
+      const ins = store2.edgesByDst.get(id2) || [];
+      for (const e2 of outs.concat(ins)) {
+        const other = e2.src === id2 ? e2.dst : e2.src;
+        if (visible.has(other)) continue;
+        visible.add(other);
+        nextFrontier.push(other);
+        if (!store2.edgesBySrc.has(other) && !store2.edgesByDst.has(other)) {
+          needFetch.add(other);
+        }
+        if (visible.size >= MAX_VISIBLE) break;
+      }
+      if (visible.size >= MAX_VISIBLE) break;
+    }
+    frontier = nextFrontier;
+    if (!frontier.length) break;
+  }
+  const missing = [...visible].filter((id2) => !store2.nodes.has(id2));
+  if (missing.length) {
+    const fetched = await api2.nodesByIds(missing);
+    if (fetched.length) {
+      store2.batch(() => store2.loadNodes(fetched));
+    }
+  }
+  store2.batch(() => {
+    store2.setVisible([...visible]);
+    store2.computeFocusDistance(anchorId, Math.min(depth2, 2));
+  });
+  return visible;
+}
+
 // src/main.js
+var FONT_SIZES = { S: 0.85, M: 1, L: 1.2 };
+var DEPTH_MAX = 6;
 var mode = await detectMode();
 var api = mode === "static" ? new StaticAPI() : new API("");
 var store = new Store();
-(async () => {
+var viewMode = localStorage.getItem("ckg.viewMode") === "2d" ? "2d" : "3d";
+store.fontSize = FONT_SIZES[localStorage.getItem("ckg.fontSize")] ?? FONT_SIZES.M;
+var canvasEl = document.getElementById("canvas");
+var detailEl = document.getElementById("node-detail");
+var listEl = document.getElementById("node-list");
+var searchEl = document.getElementById("search");
+var depthEl = document.getElementById("depth-indicator");
+var renderEl = document.getElementById("render-meter");
+var fg = mountGraph(canvasEl, store, api, viewMode);
+function updateMeters() {
+  if (depthEl) {
+    depthEl.textContent = store.anchorId ? `depth ${store.depth}/${DEPTH_MAX}` : "depth root";
+  }
+  if (renderEl) {
+    const v2 = store.visibleIds.size;
+    const e2 = store.edges.filter((x3) => store.visibleIds.has(x3.src) && store.visibleIds.has(x3.dst)).length;
+    renderEl.textContent = `${store.lastRenderMs.toFixed(0)} ms \xB7 ${v2} nodes / ${e2} edges`;
+  }
+}
+async function navigate(mutator) {
+  const t0 = performance.now();
+  await mutator();
+  requestAnimationFrame(() => {
+    store.lastRenderMs = performance.now() - t0;
+    updateMeters();
+  });
+}
+function setEngineStopHook() {
+  if (typeof fg.onEngineStop === "function") {
+    fg.onEngineStop(() => {
+      updateMeters();
+    });
+  }
+}
+setEngineStopHook();
+async function bootstrap() {
   const manifest = await api.manifest();
   document.getElementById("src-info").textContent = manifest.src_root || "";
   if (manifest.graph_stale) {
@@ -83296,90 +83361,73 @@ var store = new Store();
     banner.textContent = `\u26A0\uFE0F Graph built from ${manifest.src_commit} but src is now at ${manifest.current_commit}. Run \`ckg build\` to refresh.`;
     document.body.insertBefore(banner, document.body.firstChild);
   }
-  const nodes = await api.nodes("", 5e3);
-  store.batch(() => {
-    store.loadNodes(nodes);
-    store.setVisible(nodes.map((n2) => n2.id));
+  await navigate(async () => {
+    store.anchorId = null;
+    store.depth = 0;
+    await recomputeVisible(store, api);
   });
-  console.log("viewer bootstrap", { nodes: nodes.length });
-})();
-var viewMode = localStorage.getItem("ckg.viewMode") === "2d" ? "2d" : "3d";
-var canvasEl = document.getElementById("canvas");
-var fg = mountGraph(canvasEl, store, api, viewMode);
-var detailEl = document.getElementById("node-detail");
-var listEl = document.getElementById("node-list");
-var searchEl = document.getElementById("search");
-var CHILDREN_PER_EXPAND = 100;
-var FOCUS_DEPTH = 2;
-function collectExpandedDescendants(id2) {
-  const out = /* @__PURE__ */ new Set();
-  const walk = (i2) => {
-    const kids = store.expanded.get(i2);
-    if (!kids) return;
-    for (const k2 of kids) {
-      out.add(k2);
-      walk(k2);
-    }
-  };
-  walk(id2);
-  return out;
+  console.log("viewer bootstrap", { visible: store.visibleIds.size });
 }
-var focusNode = async (id2) => {
+bootstrap();
+function selectOnly(id2) {
   const node = store.nodes.get(id2);
-  if (!node) {
-    console.warn("focusNode: id not in store", id2);
-    return;
-  }
-  if (store.expanded.has(id2)) {
-    store.batch(() => {
-      const toRemove = collectExpandedDescendants(id2);
-      if (toRemove.size) {
-        const next = new Set(store.visibleIds);
-        for (const cid of toRemove) {
-          next.delete(cid);
-          store.expanded.delete(cid);
-        }
-        store.expanded.delete(id2);
-        store.setVisible([...next]);
-      } else {
-        store.expanded.delete(id2);
-      }
-      store.selectedId = id2;
-      store.computeFocusDistance(id2, FOCUS_DEPTH);
-    });
-    renderDetail(detailEl, api, node, store.edgesIncidentTo(id2));
-    return;
-  }
-  const [edgesRaw, childrenRaw] = await Promise.all([
-    api.edges([id2]).catch((err) => {
-      console.warn("edges fetch failed", id2, err);
-      return [];
-    }),
-    api.nodes(id2, CHILDREN_PER_EXPAND).catch((err) => {
-      console.warn("children fetch failed", id2, err);
-      return [];
-    })
-  ]);
-  const incomingEdges = Array.isArray(edgesRaw) ? edgesRaw : [];
-  const children2 = Array.isArray(childrenRaw) ? childrenRaw.filter((c3) => c3 && c3.id) : [];
+  if (!node) return;
   store.batch(() => {
     store.selectedId = id2;
-    store.addEdges(incomingEdges);
-    if (children2.length) {
-      store.loadNodes(children2);
-      const next = new Set(store.visibleIds);
-      for (const c3 of children2) next.add(c3.id);
-      store.setVisible([...next]);
-      store.expanded.set(id2, new Set(children2.map((c3) => c3.id)));
-    }
-    store.computeFocusDistance(id2, FOCUS_DEPTH);
+    store.computeFocusDistance(id2, 2);
   });
   renderDetail(detailEl, api, node, store.edgesIncidentTo(id2));
-};
+}
+async function setAnchor(id2) {
+  if (!store.nodes.has(id2)) {
+    console.warn("setAnchor: id not in store", id2);
+    return;
+  }
+  await navigate(async () => {
+    store.anchorId = id2;
+    store.depth = 1;
+    store.selectedId = id2;
+    await recomputeVisible(store, api);
+  });
+  const node = store.nodes.get(id2);
+  if (node) renderDetail(detailEl, api, node, store.edgesIncidentTo(id2));
+}
+async function depthIn() {
+  if (!store.anchorId) return;
+  if (store.depth >= DEPTH_MAX) return;
+  await navigate(async () => {
+    store.depth += 1;
+    await recomputeVisible(store, api);
+  });
+}
+async function depthOut() {
+  if (!store.anchorId) return;
+  if (store.depth <= 0) {
+    await navigate(async () => {
+      store.anchorId = null;
+      store.depth = 0;
+      store.selectedId = null;
+      await recomputeVisible(store, api);
+    });
+    return;
+  }
+  await navigate(async () => {
+    store.depth -= 1;
+    await recomputeVisible(store, api);
+  });
+}
+async function goHome() {
+  await navigate(async () => {
+    store.anchorId = null;
+    store.depth = 0;
+    store.selectedId = null;
+    await recomputeVisible(store, api);
+  });
+}
 var wireFG = (g2) => {
   g2.onNodeClick((node) => {
     console.log("node clicked", node?.id, node?.qualified_name);
-    if (node?.id) focusNode(node.id);
+    if (node?.id) setAnchor(node.id);
   });
 };
 wireFG(fg);
@@ -83389,14 +83437,15 @@ var refreshList = () => {
   const sig = `${isSearch ? "s" : "v"}|${(isSearch ? store.searchResults : [...store.visibleIds]).length}|${store.visibleIds.size}|${store.searchResults.length}`;
   if (sig !== lastListSig) {
     lastListSig = sig;
-    renderList(listEl, store, focusNode);
+    renderList(listEl, store, selectOnly);
   } else {
     applyListSelection(listEl, store.selectedId);
   }
+  updateMeters();
 };
 store.subscribe(refreshList);
 refreshList();
-wireSearch(searchEl, api, store, focusNode);
+wireSearch(searchEl, api, store, selectOnly);
 document.getElementById("panel-toggle")?.addEventListener("click", () => {
   document.getElementById("app").classList.toggle("no-panel");
   setTimeout(() => window.dispatchEvent(new Event("resize")), 130);
@@ -83412,9 +83461,25 @@ modeBtn?.addEventListener("click", () => {
   fg._ckgTeardown?.();
   fg = mountGraph(canvasEl, store, api, viewMode);
   wireFG(fg);
+  setEngineStopHook();
   applyModeToButton();
   console.log("view mode \u2192", viewMode);
 });
+document.getElementById("depth-in")?.addEventListener("click", depthIn);
+document.getElementById("depth-out")?.addEventListener("click", depthOut);
+document.getElementById("depth-home")?.addEventListener("click", goHome);
+function applyFontFromStore() {
+  if (canvasEl) canvasEl.style.setProperty("--ckg-font-scale", store.fontSize.toFixed(2));
+  store.emit();
+}
+["S", "M", "L"].forEach((label2) => {
+  document.getElementById(`font-${label2.toLowerCase()}`)?.addEventListener("click", () => {
+    store.fontSize = FONT_SIZES[label2];
+    localStorage.setItem("ckg.fontSize", label2);
+    applyFontFromStore();
+  });
+});
+applyFontFromStore();
 var zoomBy = (factor) => {
   if (viewMode === "3d") {
     const pos = fg.cameraPosition();
@@ -83441,6 +83506,9 @@ window.addEventListener("keydown", (ev) => {
   if (ev.key === "=" || ev.key === "+") zoomBy(0.7);
   else if (ev.key === "-") zoomBy(1.4);
   else if (ev.key === "0") document.getElementById("zoom-reset")?.click();
+  else if (ev.key === "]") depthIn();
+  else if (ev.key === "[") depthOut();
+  else if (ev.key === "Home") goHome();
   else if (ev.key === "/") {
     ev.preventDefault();
     document.getElementById("search")?.focus();

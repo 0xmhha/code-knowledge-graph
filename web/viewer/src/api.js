@@ -22,6 +22,13 @@ export class API {
       body: JSON.stringify({ ids: nodeIds })
     }).then(r => r.json()).then(asArray);
   }
+  async nodesByIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    return fetch(`${this.base}/api/nodes-by-ids`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids })
+    }).then(r => r.json()).then(asArray);
+  }
   async blob(nodeId) {
     // Many node types (Package, File, Field, etc.) don't carry a source blob —
     // GetBlob returns sql.ErrNoRows → the server emits 404. That's expected,

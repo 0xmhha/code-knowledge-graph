@@ -40,6 +40,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/manifest", s.handleManifest)
 	s.mux.HandleFunc("GET /api/hierarchy", s.handleHierarchy)
 	s.mux.HandleFunc("GET /api/nodes", s.handleNodes)
+	s.mux.HandleFunc("POST /api/nodes-by-ids", s.handleNodesByIDs)
 	s.mux.HandleFunc("POST /api/edges", s.handleEdges)
 	s.mux.HandleFunc("GET /api/blob/{id}", s.handleBlob)
 	s.mux.HandleFunc("GET /api/search", s.handleSearch)

@@ -1,17 +1,84 @@
 // src/main.js
+//
+// Navigation model: (anchorId, depth) pair, never accumulating.
+//   - Click on a node                → set anchor to that id, depth = 1
+//   - ⇲ depth-in button (or "]")     → depth + 1, recompute visible
+//   - ⇱ depth-out button (or "[")    → depth − 1, recompute visible
+//   - 🏠 home button (or "Home")     → anchorId = null, depth = 0
+//   - Mouse wheel / drag             → pure camera (no data change)
+//
+// This replaces the old click-toggle/expand model. Every navigation step
+// is a single, explicit, measured event: t0 = perf.now() at user action,
+// t1 = perf.now() inside requestAnimationFrame after sync — the delta is
+// surfaced in the bottombar so we can profile interactively.
 import { API, StaticAPI, detectMode } from './api.js';
 import { Store } from './store.js';
 import { mountGraph } from './layout.js';
 import { wireSearch } from './search.js';
 import { renderList, renderDetail, applyListSelection } from './panel.js';
+import { recomputeVisible } from './depth.js';
 
-// Top-level await in module load — detectMode probes ./manifest.json. Static
-// export bundles ship with a manifest sibling; under `ckg serve` it 404s.
+const FONT_SIZES = { S: 0.85, M: 1.0, L: 1.2 };
+const DEPTH_MAX = 6;     // soft cap so depth-in doesn't run forever
+
 const mode = await detectMode();
 const api = mode === 'static' ? new StaticAPI() : new API('');
 const store = new Store();
 
-(async () => {
+let viewMode = (localStorage.getItem('ckg.viewMode') === '2d') ? '2d' : '3d';
+store.fontSize = FONT_SIZES[localStorage.getItem('ckg.fontSize')] ?? FONT_SIZES.M;
+
+const canvasEl = document.getElementById('canvas');
+const detailEl = document.getElementById('node-detail');
+const listEl = document.getElementById('node-list');
+const searchEl = document.getElementById('search');
+const depthEl = document.getElementById('depth-indicator');
+const renderEl = document.getElementById('render-meter');
+
+let fg = mountGraph(canvasEl, store, api, viewMode);
+
+function updateMeters() {
+  if (depthEl) {
+    depthEl.textContent = store.anchorId
+      ? `depth ${store.depth}/${DEPTH_MAX}`
+      : 'depth root';
+  }
+  if (renderEl) {
+    const v = store.visibleIds.size;
+    const e = store.edges.filter(x => store.visibleIds.has(x.src) && store.visibleIds.has(x.dst)).length;
+    renderEl.textContent = `${store.lastRenderMs.toFixed(0)} ms · ${v} nodes / ${e} edges`;
+  }
+}
+
+// navigate runs a single user-driven navigation step (depth-in / out, set
+// anchor, home, etc.) and measures its render cost. The work is wrapped in
+// store.batch so the renderer sees one consolidated change. Render time is
+// captured on the next animation frame after graphData has been pushed.
+async function navigate(mutator) {
+  const t0 = performance.now();
+  await mutator();
+  // After the batch settles, the store has emitted, layout's sync() has
+  // pushed graphData into the renderer, and the engine has started its
+  // simulation. We capture t1 on the next frame so the measurement covers
+  // the synchronous DOM work + first frame; settle time is reported by
+  // the engine-stop handler set up below.
+  requestAnimationFrame(() => {
+    store.lastRenderMs = performance.now() - t0;
+    updateMeters();
+  });
+}
+
+function setEngineStopHook() {
+  if (typeof fg.onEngineStop === 'function') {
+    fg.onEngineStop(() => {
+      // settled — refresh the meter so the user sees the steady-state cost.
+      updateMeters();
+    });
+  }
+}
+setEngineStopHook();
+
+async function bootstrap() {
   const manifest = await api.manifest();
   document.getElementById('src-info').textContent = manifest.src_root || '';
   if (manifest.graph_stale) {
@@ -20,139 +87,112 @@ const store = new Store();
     banner.textContent = `⚠️ Graph built from ${manifest.src_commit} but src is now at ${manifest.current_commit}. Run \`ckg build\` to refresh.`;
     document.body.insertBefore(banner, document.body.firstChild);
   }
-  // L0: top-level packages. setVisible re-emits, but the renderer only mounts
-  // once below so this is fine.
-  const nodes = await api.nodes('', 5000);
-  store.batch(() => {
-    store.loadNodes(nodes);
-    store.setVisible(nodes.map(n => n.id));
+  await navigate(async () => {
+    store.anchorId = null;
+    store.depth = 0;
+    await recomputeVisible(store, api);
   });
-  console.log('viewer bootstrap', { nodes: nodes.length });
-})();
-
-// View mode (2D / 3D) is persisted; default 3D.
-let viewMode = (localStorage.getItem('ckg.viewMode') === '2d') ? '2d' : '3d';
-const canvasEl = document.getElementById('canvas');
-let fg = mountGraph(canvasEl, store, api, viewMode);
-
-const detailEl = document.getElementById('node-detail');
-const listEl = document.getElementById('node-list');
-const searchEl = document.getElementById('search');
-
-// Phase A — children cap so a single click can't push thousands of stmt-level
-// nodes onto the canvas.
-const CHILDREN_PER_EXPAND = 100;
-// Phase B — depth of the BFS halo (focus = 0, 1-hop, 2-hop highlighted).
-const FOCUS_DEPTH = 2;
-
-function collectExpandedDescendants(id) {
-  const out = new Set();
-  const walk = (i) => {
-    const kids = store.expanded.get(i);
-    if (!kids) return;
-    for (const k of kids) {
-      out.add(k);
-      walk(k);
-    }
-  };
-  walk(id);
-  return out;
+  console.log('viewer bootstrap', { visible: store.visibleIds.size });
 }
+bootstrap();
 
-// focusNode: select + (toggle expand) + recompute focus halo. Wrapped in a
-// single store.batch so the whole interaction emits ONCE — instead of the
-// 3–4 emit storm we had before, which forced the renderer to rebuild
-// graphData (and the simulation to re-warm) on every internal step.
-const focusNode = async (id) => {
+// Selection / detail panel without changing the navigation anchor. Used
+// from sidebar list clicks where the user wants to inspect, not navigate.
+function selectOnly(id) {
   const node = store.nodes.get(id);
-  if (!node) {
-    console.warn('focusNode: id not in store', id);
-    return;
-  }
-
-  // Toggle: collapse if already expanded.
-  if (store.expanded.has(id)) {
-    store.batch(() => {
-      const toRemove = collectExpandedDescendants(id);
-      if (toRemove.size) {
-        const next = new Set(store.visibleIds);
-        for (const cid of toRemove) {
-          next.delete(cid);
-          store.expanded.delete(cid);
-        }
-        store.expanded.delete(id);
-        store.setVisible([...next]);
-      } else {
-        store.expanded.delete(id);
-      }
-      store.selectedId = id;
-      store.computeFocusDistance(id, FOCUS_DEPTH);
-    });
-    renderDetail(detailEl, api, node, store.edgesIncidentTo(id));
-    return;
-  }
-
-  // Expand path — fetch children + edges, then commit in one batch.
-  const [edgesRaw, childrenRaw] = await Promise.all([
-    api.edges([id]).catch(err => { console.warn('edges fetch failed', id, err); return []; }),
-    api.nodes(id, CHILDREN_PER_EXPAND).catch(err => { console.warn('children fetch failed', id, err); return []; }),
-  ]);
-  const incomingEdges = Array.isArray(edgesRaw) ? edgesRaw : [];
-  const children = Array.isArray(childrenRaw) ? childrenRaw.filter(c => c && c.id) : [];
-
+  if (!node) return;
   store.batch(() => {
     store.selectedId = id;
-    store.addEdges(incomingEdges);
-    if (children.length) {
-      store.loadNodes(children);
-      const next = new Set(store.visibleIds);
-      for (const c of children) next.add(c.id);
-      store.setVisible([...next]);
-      store.expanded.set(id, new Set(children.map(c => c.id)));
-    }
-    store.computeFocusDistance(id, FOCUS_DEPTH);
+    store.computeFocusDistance(id, 2);
   });
   renderDetail(detailEl, api, node, store.edgesIncidentTo(id));
-};
+}
+
+// setAnchor navigates: this id becomes the new anchor at depth 1 (so the
+// user immediately sees neighbours). Click on a node = navigate.
+async function setAnchor(id) {
+  if (!store.nodes.has(id)) {
+    console.warn('setAnchor: id not in store', id);
+    return;
+  }
+  await navigate(async () => {
+    store.anchorId = id;
+    store.depth = 1;
+    store.selectedId = id;
+    await recomputeVisible(store, api);
+  });
+  const node = store.nodes.get(id);
+  if (node) renderDetail(detailEl, api, node, store.edgesIncidentTo(id));
+}
+
+async function depthIn() {
+  if (!store.anchorId) return;
+  if (store.depth >= DEPTH_MAX) return;
+  await navigate(async () => {
+    store.depth += 1;
+    await recomputeVisible(store, api);
+  });
+}
+
+async function depthOut() {
+  if (!store.anchorId) return;
+  if (store.depth <= 0) {
+    // depth=0 → going further out = back to root view.
+    await navigate(async () => {
+      store.anchorId = null;
+      store.depth = 0;
+      store.selectedId = null;
+      await recomputeVisible(store, api);
+    });
+    return;
+  }
+  await navigate(async () => {
+    store.depth -= 1;
+    await recomputeVisible(store, api);
+  });
+}
+
+async function goHome() {
+  await navigate(async () => {
+    store.anchorId = null;
+    store.depth = 0;
+    store.selectedId = null;
+    await recomputeVisible(store, api);
+  });
+}
 
 const wireFG = (g) => {
   g.onNodeClick(node => {
     console.log('node clicked', node?.id, node?.qualified_name);
-    if (node?.id) focusNode(node.id);
+    if (node?.id) setAnchor(node.id);
   });
 };
 wireFG(fg);
 
-// List re-render is now SPLIT from sync. We rebuild the DOM only when the
-// underlying source-of-items changes (visible set or search results); a
-// pure selection change just toggles the .selected class on existing rows.
-// On a 200-item list this drops the per-click reflow from full DOM rebuild
-// to <1ms class flips.
+// Sidebar list: clicking a row inspects without navigating (keeps anchor).
 let lastListSig = null;
 const refreshList = () => {
   const isSearch = (store.searchResults?.length ?? 0) > 0;
-  // Signature captures everything that changes the rendered ITEMS (not the
-  // selection styling). selectedId is intentionally excluded.
   const sig = `${isSearch ? 's' : 'v'}|${(isSearch ? store.searchResults : [...store.visibleIds]).length}|${store.visibleIds.size}|${store.searchResults.length}`;
   if (sig !== lastListSig) {
     lastListSig = sig;
-    renderList(listEl, store, focusNode);
+    renderList(listEl, store, selectOnly);
   } else {
     applyListSelection(listEl, store.selectedId);
   }
+  updateMeters();
 };
 store.subscribe(refreshList);
 refreshList();
 
-wireSearch(searchEl, api, store, focusNode);
+wireSearch(searchEl, api, store, selectOnly);
 
-// Panel toggle.
+// ─── Top-bar buttons ─────────────────────────────────────────────────────
 document.getElementById('panel-toggle')?.addEventListener('click', () => {
   document.getElementById('app').classList.toggle('no-panel');
   setTimeout(() => window.dispatchEvent(new Event('resize')), 130);
 });
 
-// Mode toggle.
 const modeBtn = document.getElementById('mode-toggle');
 function applyModeToButton() {
   if (modeBtn) modeBtn.textContent = viewMode === '2d' ? '2D' : '3D';
@@ -164,11 +204,30 @@ modeBtn?.addEventListener('click', () => {
   fg._ckgTeardown?.();
   fg = mountGraph(canvasEl, store, api, viewMode);
   wireFG(fg);
+  setEngineStopHook();
   applyModeToButton();
   console.log('view mode →', viewMode);
 });
 
-// Zoom controls.
+// ─── Bottom-bar: depth, render meter, font size, zoom ────────────────────
+document.getElementById('depth-in')?.addEventListener('click', depthIn);
+document.getElementById('depth-out')?.addEventListener('click', depthOut);
+document.getElementById('depth-home')?.addEventListener('click', goHome);
+
+function applyFontFromStore() {
+  if (canvasEl) canvasEl.style.setProperty('--ckg-font-scale', store.fontSize.toFixed(2));
+  // Mode-toggle button is also a touch larger when font scale is large.
+  store.emit();
+}
+['S', 'M', 'L'].forEach(label => {
+  document.getElementById(`font-${label.toLowerCase()}`)?.addEventListener('click', () => {
+    store.fontSize = FONT_SIZES[label];
+    localStorage.setItem('ckg.fontSize', label);
+    applyFontFromStore();
+  });
+});
+applyFontFromStore();
+
 const zoomBy = (factor) => {
   if (viewMode === '3d') {
     const pos = fg.cameraPosition();
@@ -188,6 +247,7 @@ document.getElementById('zoom-reset')?.addEventListener('click', () => {
   }
 });
 
+// Keyboard shortcuts.
 window.addEventListener('keydown', (ev) => {
   if (document.activeElement?.id === 'search') {
     if (ev.key === 'Escape') document.activeElement.blur();
@@ -196,6 +256,9 @@ window.addEventListener('keydown', (ev) => {
   if (ev.key === '=' || ev.key === '+') zoomBy(0.7);
   else if (ev.key === '-') zoomBy(1.4);
   else if (ev.key === '0') document.getElementById('zoom-reset')?.click();
+  else if (ev.key === ']') depthIn();
+  else if (ev.key === '[') depthOut();
+  else if (ev.key === 'Home') goHome();
   else if (ev.key === '/') { ev.preventDefault(); document.getElementById('search')?.focus(); }
 });
 
