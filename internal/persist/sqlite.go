@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	_ "embed"
 	"fmt"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -370,6 +371,81 @@ func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
 	return scanNodes(rows)
 }
 
+// Search is the smart search front door used by the HTTP /api/search
+// handler AND the MCP `search_text` / `get_context_for_task` tools. It
+// routes between FTS5 (English / token-aligned) and a substring fallback
+// (CJK / non-tokenisable), and rewrites benign single-token ASCII queries
+// to a prefix match (`gene` → `gene*`) so callers don't need to know
+// FTS5 syntax. See docs/VIEWER-ROADMAP.md L1/L2 for the option matrix.
+//
+// Centralising the routing here removes the divergence between
+// handleSearch (auto-prefix + CJK) and buildContext (raw FTS, prose
+// queries silently `not_found`); both now call this and get the same
+// behaviour.
+func (s *Store) Search(q string, limit int) ([]types.Node, error) {
+	if hasNonASCII(q) {
+		return s.SearchSubstr(q, limit)
+	}
+	return s.SearchFTS(rewriteFTSQuery(q), limit)
+}
+
+// hasNonASCII reports whether q contains any byte ≥ 0x80. Drives the
+// CJK-routing branch in Search.
+func hasNonASCII(q string) bool {
+	for i := 0; i < len(q); i++ {
+		if q[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
+}
+
+// rewriteFTSQuery turns a casual user query into something FTS5 actually
+// matches. The default FTS5 semantics on multi-token input is AND, so a
+// prose description like "how does block validation work in consensus"
+// returns zero hits because no doc contains all seven tokens. We instead:
+//
+//   - power-user mode: any sigil (* " ( ) :) → pass through verbatim.
+//   - single token, length ≥ 2 → append `*` (prefix match: gene → gene*).
+//   - multi-token: drop tokens shorter than 3 chars (stop-word heuristic),
+//     prefix-tag tokens length ≥ 4, OR them together so any one match
+//     surfaces a candidate. The downstream scoring (BM25 + PageRank +
+//     usage) re-ranks the candidates so this OR-broadening doesn't
+//     degrade quality on terms that are uniquely informative.
+//
+// Returning q unchanged when no useful tokens survive (`""`, `"a b"`)
+// lets FTS5 surface its own no-hits behaviour.
+func rewriteFTSQuery(q string) string {
+	if strings.ContainsAny(q, `*"():`) {
+		return q
+	}
+	fields := strings.Fields(q)
+	if len(fields) == 0 {
+		return q
+	}
+	if len(fields) == 1 {
+		if len(fields[0]) >= 2 {
+			return fields[0] + "*"
+		}
+		return q
+	}
+	parts := make([]string, 0, len(fields))
+	for _, t := range fields {
+		if len(t) < 3 {
+			continue
+		}
+		if len(t) >= 4 {
+			parts = append(parts, t+"*")
+		} else {
+			parts = append(parts, t)
+		}
+	}
+	if len(parts) == 0 {
+		return q
+	}
+	return strings.Join(parts, " OR ")
+}
+
 // SearchSubstr is a non-FTS fallback for queries the FTS5 unicode61
 // tokeniser can't tokenise — primarily CJK input where text contains no
 // whitespace separators. It runs `LIKE '%q%'` against name + qualified_name
@@ -479,7 +555,13 @@ func (s *Store) FindSymbol(name, lang string, exact bool) ([]types.Node, error) 
 // node whose qualified_name == qname. When reverse is true, expansion follows
 // edges backwards (callers); otherwise it follows them forwards (callees).
 // Result includes the seed nodes plus all nodes reachable within depth hops.
-func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool) ([]types.Node, []types.Edge, error) {
+//
+// Optional `edgeTypes` filters which edges count for traversal. Empty
+// (the default) follows every edge type — preserves the original
+// get_subgraph semantics. Pass e.g. ("calls","invokes") to restrict
+// find_callers / find_callees to actual call edges and skip the
+// containment / definition relationships that share the same Store.
+func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
 	roots, err := s.FindSymbol(qname, "", true)
 	if err != nil {
 		return nil, nil, err
@@ -497,9 +579,9 @@ func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool) ([]ty
 		var es []types.Edge
 		var err error
 		if reverse {
-			es, err = s.edgesPointingTo(frontier)
+			es, err = s.edgesPointingTo(frontier, edgeTypes)
 		} else {
-			es, err = s.edgesFrom(frontier)
+			es, err = s.edgesFrom(frontier, edgeTypes)
 		}
 		if err != nil {
 			return nil, nil, err
@@ -532,6 +614,8 @@ func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool) ([]ty
 
 // SubgraphByQname returns BFS expansion in BOTH directions up to depth. Node
 // set is the union of forward and reverse traversals from qname's roots.
+// Always traverses every edge type (passing no filter) so callers like
+// `get_subgraph` see the full structural picture.
 func (s *Store) SubgraphByQname(qname string, depth int) ([]types.Node, []types.Edge, error) {
 	fwdN, fwdE, err := s.NeighborhoodByQname(qname, depth, false)
 	if err != nil {
@@ -555,13 +639,20 @@ func (s *Store) SubgraphByQname(qname string, depth int) ([]types.Node, []types.
 	return out, append(fwdE, revE...), nil
 }
 
-// edgesFrom returns every edge whose src is in ids.
-func (s *Store) edgesFrom(ids []string) ([]types.Edge, error) {
+// edgesFrom returns every edge whose src is in ids. When edgeTypes is
+// non-empty, the result is filtered to those types (e.g. just `calls`).
+func (s *Store) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
-		FROM edges WHERE src IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		FROM edges WHERE src IN (` + placeholders(len(ids)) + `)`
+	args := anys(ids)
+	if len(edgeTypes) > 0 {
+		q += ` AND type IN (` + placeholders(len(edgeTypes)) + `)`
+		args = append(args, anys(edgeTypes)...)
+	}
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("edges from %d ids: %w", len(ids), err)
 	}
@@ -569,13 +660,20 @@ func (s *Store) edgesFrom(ids []string) ([]types.Edge, error) {
 	return scanEdges(rows)
 }
 
-// edgesPointingTo returns every edge whose dst is in ids.
-func (s *Store) edgesPointingTo(ids []string) ([]types.Edge, error) {
+// edgesPointingTo returns every edge whose dst is in ids. When edgeTypes
+// is non-empty, the result is filtered to those types.
+func (s *Store) edgesPointingTo(ids []string, edgeTypes []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
-		FROM edges WHERE dst IN (`+placeholders(len(ids))+`)`, anys(ids)...)
+	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		FROM edges WHERE dst IN (` + placeholders(len(ids)) + `)`
+	args := anys(ids)
+	if len(edgeTypes) > 0 {
+		q += ` AND type IN (` + placeholders(len(edgeTypes)) + `)`
+		args = append(args, anys(edgeTypes)...)
+	}
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("edges pointing to %d ids: %w", len(ids), err)
 	}

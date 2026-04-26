@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -128,54 +127,19 @@ func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, nodes)
 }
 
-// handleSearch routes between FTS5 (English / token-aligned) and a
-// substring fallback (CJK / non-tokenisable). Trade-offs:
-//   - non-ASCII bytes anywhere in q → SearchSubstr (LIKE, O(n))
-//   - benign ASCII (no FTS sigils, len ≥ 2) → append `*` so `gene` matches
-//     `generator` (autocomplete-style prefix)
-//   - explicit FTS syntax (quoted phrase, `*`, `(`, `)`, `:`) is passed
-//     through unchanged so power users can still use boolean operators
-// See docs/VIEWER-ROADMAP.md L1/L2 for option matrix.
+// handleSearch delegates the smart routing (FTS / CJK substring,
+// auto-prefix) to persist.Store.Search so the HTTP API and the MCP
+// tools share one implementation. See docs/VIEWER-ROADMAP.md L1/L2.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
 		writeJSON(w, []types.Node{})
 		return
 	}
-	const limit = 20
-	var hits []types.Node
-	var err error
-	if hasNonASCII(q) {
-		hits, err = s.store.SearchSubstr(q, limit)
-	} else {
-		hits, err = s.store.SearchFTS(rewriteFTSQuery(q), limit)
-	}
+	hits, err := s.store.Search(q, 20)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	writeJSON(w, hits)
-}
-
-// hasNonASCII reports whether q contains any byte ≥ 0x80. Used to route
-// CJK-bearing queries away from the FTS5 unicode61 tokeniser, which
-// segments Korean text into single un-matchable tokens.
-func hasNonASCII(q string) bool {
-	for i := 0; i < len(q); i++ {
-		if q[i] >= 0x80 {
-			return true
-		}
-	}
-	return false
-}
-
-// rewriteFTSQuery promotes a benign single-word query to a prefix match
-// so users typing `gene` get hits on `generator`/`Genesis`/etc. without
-// having to know FTS5 syntax. Anything containing FTS sigils is passed
-// through verbatim so power users keep their authored queries.
-func rewriteFTSQuery(q string) string {
-	if len(q) < 2 || strings.ContainsAny(q, `*"():`) {
-		return q
-	}
-	return q + "*"
 }

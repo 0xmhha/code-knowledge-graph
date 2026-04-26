@@ -48,14 +48,18 @@ func registerGetContextForTask(s *server.MCPServer, store *persist.Store) {
 // it can be unit-tested without spinning up the MCP server.
 //
 // Steps:
-//   (a) Retrieve  — BM25 top 30 via FTS5
+//   (a) Retrieve  — top 30 via Store.Search (FTS5 with auto-prefix for ASCII,
+//                    LIKE substring fallback for CJK). Using Search instead of
+//                    raw SearchFTS aligns this tool with handleSearch /
+//                    search_text and makes prose queries like "block validation"
+//                    match without the user knowing FTS5 syntax.
 //   (b) Expand    — 1-hop neighbours via QueryEdgesForNodes
 //   (c) Score     — 0.5 * BM25_rank_norm + 0.3 * PageRank_norm + 0.2 * Usage_norm
 //   (d) Diversify — V0: simple cap of top-30 (no per-cluster cap)
 //   (e) Pack      — top maxBodies get full source; next ≤15 get sig+doc summary
 func buildContext(store *persist.Store, query string, budget int, includeBlobs bool, maxBodies int) (map[string]any, error) {
-	// (a) Retrieve: BM25 top 30
-	cands, err := store.SearchFTS(query, 30)
+	// (a) Retrieve: top 30 via the smart router.
+	cands, err := store.Search(query, 30)
 	if err != nil {
 		return nil, err
 	}
