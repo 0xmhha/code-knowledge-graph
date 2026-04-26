@@ -31,11 +31,12 @@ const store = new Store();
   console.log('viewer bootstrap', { nodes: nodes.length });
 })();
 
-// Mount the 3D graph once. It reads from `store` reactively (subscribe) and
-// uses `api` for LOD-driven expansion. Safe to mount before bootstrap finishes
-// because the store starts empty and `sync()` re-fires on every `setVisible`.
-// `fg` is the 3d-force-graph instance — captured for future T26 camera focus.
-const fg = mountGraph(document.getElementById('canvas'), store, api);
+// Mount the graph (3D by default; remembers user preference in localStorage).
+// Safe to mount before the boot IIFE finishes — the store starts empty and
+// sync() re-fires on every setVisible.
+let viewMode = (localStorage.getItem('ckg.viewMode') === '2d') ? '2d' : '3d';
+const canvasEl = document.getElementById('canvas');
+let fg = mountGraph(canvasEl, store, api, viewMode);
 
 const detailEl = document.getElementById('node-detail');
 const listEl = document.getElementById('node-list');
@@ -130,13 +131,17 @@ const focusNode = async (id) => {
   renderDetail(detailEl, api, node, edges);
 };
 
-// Click-on-node: expand its children + edges in place. 3d-force-graph emits
-// onNodeClick with the node datum directly. Search and list-item picks
-// funnel through the same focusNode so behaviour stays consistent.
-fg.onNodeClick(node => {
-  console.log('node clicked', node?.id, node?.qualified_name);
-  if (node?.id) focusNode(node.id);
-});
+// Click-on-node: expand its children + edges in place. Both 2D and 3D
+// libraries emit onNodeClick with the node datum directly. Search and
+// list-item picks funnel through the same focusNode so behaviour stays
+// consistent.
+const wireFG = (g) => {
+  g.onNodeClick(node => {
+    console.log('node clicked', node?.id, node?.qualified_name);
+    if (node?.id) focusNode(node.id);
+  });
+};
+wireFG(fg);
 
 // Re-render the sidebar list on every store change (search results, visible
 // set, selection). renderList is idempotent — lit-html diffs internally.
@@ -146,24 +151,55 @@ refreshList();
 
 wireSearch(searchEl, api, store, focusNode);
 
-// Right-panel toggle. ⇆ button collapses #panel to 0px so the 3D canvas can
-// use the full window — useful on small laptop screens. We also fire a resize
-// event so 3d-force-graph picks up the new canvas dimensions immediately
-// (the library wires its own resize observer but that lags one tick).
+// Right-panel toggle. ⇆ button collapses #panel to 0px so the canvas can
+// use the full window — useful on small laptop screens. We also fire a
+// resize event so the renderer picks up the new dimensions immediately.
 document.getElementById('panel-toggle')?.addEventListener('click', () => {
   document.getElementById('app').classList.toggle('no-panel');
   setTimeout(() => window.dispatchEvent(new Event('resize')), 130);
 });
 
-// Zoom controls — adjust camera Z. Smaller Z = closer (zoom in).
+// 2D / 3D mode toggle. Tears down the current renderer and remounts on the
+// same #canvas with the same store — node positions reset (the libraries
+// don't share simulation state) but the visible set / expanded tree / list
+// state all live in the store and are preserved.
+const modeBtn = document.getElementById('mode-toggle');
+function applyModeToButton() {
+  if (modeBtn) modeBtn.textContent = viewMode === '2d' ? '2D' : '3D';
+}
+applyModeToButton();
+modeBtn?.addEventListener('click', () => {
+  viewMode = viewMode === '2d' ? '3d' : '2d';
+  localStorage.setItem('ckg.viewMode', viewMode);
+  fg._ckgTeardown?.();
+  fg = mountGraph(canvasEl, store, api, viewMode);
+  wireFG(fg);
+  applyModeToButton();
+  console.log('view mode →', viewMode);
+});
+
+// Zoom controls — both modes are supported. 3D adjusts camera Z; 2D
+// multiplies the zoom factor. Smaller value = farther in 3D, larger value
+// = closer in 2D.
 const zoomBy = (factor) => {
-  const pos = fg.cameraPosition();
-  fg.cameraPosition({ z: Math.max(50, pos.z * factor) }, undefined, 200);
+  if (viewMode === '3d') {
+    const pos = fg.cameraPosition();
+    fg.cameraPosition({ z: Math.max(50, pos.z * factor) }, undefined, 200);
+  } else {
+    // 2D: factor < 1 means "zoom in" semantically (consistent with 3D),
+    // but force-graph's zoom is the literal scale factor — invert it.
+    const z = typeof fg.zoom === 'function' ? fg.zoom() : 1;
+    fg.zoom(Math.max(0.05, z * (1 / factor)), 200);
+  }
 };
 document.getElementById('zoom-in')?.addEventListener('click', () => zoomBy(0.7));
 document.getElementById('zoom-out')?.addEventListener('click', () => zoomBy(1.4));
 document.getElementById('zoom-reset')?.addEventListener('click', () => {
-  fg.cameraPosition({ x: 0, y: 0, z: 1500 }, { x: 0, y: 0, z: 0 }, 400);
+  if (viewMode === '3d') {
+    fg.cameraPosition({ x: 0, y: 0, z: 1500 }, { x: 0, y: 0, z: 0 }, 400);
+  } else if (typeof fg.zoomToFit === 'function') {
+    fg.zoomToFit(400, 50);
+  }
 });
 
 // Keyboard shortcuts: + / = zoom in, - zoom out, 0 reset, / focus search,
