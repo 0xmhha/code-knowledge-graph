@@ -290,10 +290,10 @@ func queryTokenMonitor(ctx context.Context) (claudeUsage, bool) {
 		return claudeUsage{}, false
 	}
 	var tm struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-		CacheRead    int `json:"cache_read_input_tokens"`
-		CacheCreate  int `json:"cache_creation_input_tokens"`
+		InputTokens         int `json:"input_tokens"`
+		OutputTokens        int `json:"output_tokens"`
+		CacheReadTokens     int `json:"cache_read_tokens"`
+		CacheCreationTokens int `json:"cache_creation_tokens"`
 	}
 	if err := json.Unmarshal(raw, &tm); err != nil {
 		return claudeUsage{}, false
@@ -301,7 +301,7 @@ func queryTokenMonitor(ctx context.Context) (claudeUsage, bool) {
 	return claudeUsage{
 		InputTokens:  tm.InputTokens,
 		OutputTokens: tm.OutputTokens,
-		CacheRead:    tm.CacheRead,
-		CacheCreate:  tm.CacheCreate,
+		CacheRead:    tm.CacheReadTokens,
+		CacheCreate:  tm.CacheCreationTokens,
 	}, true
 }

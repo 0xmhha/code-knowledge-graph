@@ -115,7 +115,7 @@ func TestQueryTokenMonitor_FromFakeBinary(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "token-monitor")
 	body := "#!/bin/sh\n" +
-		`echo '{"input_tokens":99,"output_tokens":50,"cache_read_input_tokens":13,"cache_creation_input_tokens":17}'` +
+		`echo '{"input_tokens":99,"output_tokens":50,"cache_read_tokens":7,"cache_creation_tokens":3}'` +
 		"\n"
 	if err := os.WriteFile(stub, []byte(body), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
@@ -133,11 +133,11 @@ func TestQueryTokenMonitor_FromFakeBinary(t *testing.T) {
 	if usage.OutputTokens != 50 {
 		t.Errorf("OutputTokens want 50 got %d", usage.OutputTokens)
 	}
-	if usage.CacheRead != 13 {
-		t.Errorf("CacheRead want 13 got %d", usage.CacheRead)
+	if usage.CacheRead != 7 {
+		t.Errorf("CacheRead want 7 got %d", usage.CacheRead)
 	}
-	if usage.CacheCreate != 17 {
-		t.Errorf("CacheCreate want 17 got %d", usage.CacheCreate)
+	if usage.CacheCreate != 3 {
+		t.Errorf("CacheCreate want 3 got %d", usage.CacheCreate)
 	}
 }
 
@@ -403,7 +403,7 @@ func TestCLIClient_Complete_TokenMonitorPrimary(t *testing.T) {
 	tmDir := t.TempDir()
 	tmStub := filepath.Join(tmDir, "token-monitor")
 	tmBody := "#!/bin/sh\n" +
-		`echo '{"input_tokens":99,"output_tokens":50,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}'` +
+		`echo '{"input_tokens":99,"output_tokens":50,"cache_read_tokens":7,"cache_creation_tokens":3}'` +
 		"\n"
 	if err := os.WriteFile(tmStub, []byte(tmBody), 0o755); err != nil {
 		t.Fatalf("write fake token-monitor: %v", err)
