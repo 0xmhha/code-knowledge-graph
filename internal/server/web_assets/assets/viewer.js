@@ -1577,6 +1577,7 @@ var require_ngraph3 = __commonJS({
 });
 
 // src/api.js
+var asArray = (v2) => Array.isArray(v2) ? v2 : [];
 var API = class {
   constructor(base = "") {
     this.base = base;
@@ -1585,25 +1586,25 @@ var API = class {
     return fetch(`${this.base}/api/manifest`).then((r2) => r2.json());
   }
   async hierarchy(kind = "pkg") {
-    return fetch(`${this.base}/api/hierarchy?kind=${kind}`).then((r2) => r2.json());
+    return fetch(`${this.base}/api/hierarchy?kind=${kind}`).then((r2) => r2.json()).then(asArray);
   }
   async nodes(parentId = "", limit = 5e3) {
     const q2 = new URLSearchParams({ limit: String(limit) });
     if (parentId) q2.set("parent", parentId);
-    return fetch(`${this.base}/api/nodes?${q2}`).then((r2) => r2.json());
+    return fetch(`${this.base}/api/nodes?${q2}`).then((r2) => r2.json()).then(asArray);
   }
   async edges(nodeIds) {
     return fetch(`${this.base}/api/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ids: nodeIds })
-    }).then((r2) => r2.json());
+    }).then((r2) => r2.json()).then(asArray);
   }
   async blob(nodeId) {
     return fetch(`${this.base}/api/blob/${nodeId}`).then((r2) => r2.text());
   }
   async search(q2) {
-    return fetch(`${this.base}/api/search?q=${encodeURIComponent(q2)}`).then((r2) => r2.json());
+    return fetch(`${this.base}/api/search?q=${encodeURIComponent(q2)}`).then((r2) => r2.json()).then(asArray);
   }
 };
 async function detectMode() {
@@ -1701,7 +1702,10 @@ var Store = class {
     this.listeners.forEach((fn) => fn(this));
   }
   loadNodes(arr) {
-    for (const n2 of arr) this.nodes.set(n2.id, n2);
+    if (!Array.isArray(arr)) return;
+    for (const n2 of arr) {
+      if (n2 && n2.id) this.nodes.set(n2.id, n2);
+    }
     this.emit();
   }
   setVisible(ids) {
@@ -77840,7 +77844,7 @@ function mountGraph(container, store2, api2) {
         })
       )
     ).then((batches) => {
-      const more = batches.flat();
+      const more = batches.flat().filter((n2) => n2 && n2.id);
       if (!more.length) return;
       store2.loadNodes(more);
       const next = new Set(store2.visibleIds);
@@ -77965,12 +77969,20 @@ var focusNode = async (id) => {
     return;
   }
   store.selectedId = id;
-  const [edges, children2] = await Promise.all([
-    api.edges([id]),
-    api.nodes(id, 1e3).catch(() => [])
+  const [edgesRaw, childrenRaw] = await Promise.all([
+    api.edges([id]).catch((err) => {
+      console.warn("edges fetch failed", id, err);
+      return [];
+    }),
+    api.nodes(id, 1e3).catch((err) => {
+      console.warn("children fetch failed", id, err);
+      return [];
+    })
   ]);
+  const edges = Array.isArray(edgesRaw) ? edgesRaw : [];
+  const children2 = Array.isArray(childrenRaw) ? childrenRaw.filter((c3) => c3 && c3.id) : [];
   const fresh = edges.filter(
-    (e2) => !store.edges.some((x3) => x3.src === e2.src && x3.dst === e2.dst && x3.type === e2.type)
+    (e2) => e2 && e2.src && e2.dst && !store.edges.some((x3) => x3.src === e2.src && x3.dst === e2.dst && x3.type === e2.type)
   );
   let pushed = false;
   if (fresh.length) {

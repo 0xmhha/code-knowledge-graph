@@ -100,7 +100,9 @@ export function mountGraph(container, store, api) {
       )
     )
       .then(batches => {
-        const more = batches.flat();
+        // batches: array-of-arrays; flatten + drop null entries up front so
+        // store.loadNodes / setVisible don't have to defend on every iteration.
+        const more = batches.flat().filter(n => n && n.id);
         if (!more.length) return;
         store.loadNodes(more);
         const next = new Set(store.visibleIds);

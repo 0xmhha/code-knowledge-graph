@@ -53,12 +53,17 @@ const focusNode = async (id) => {
     return;
   }
   store.selectedId = id;
-  const [edges, children] = await Promise.all([
-    api.edges([id]),
-    api.nodes(id, 1000).catch(() => []),
+  // Defensive: api.* now normalises null → []; still gate against unexpected
+  // shapes so a single bad response can't take down the whole interaction.
+  const [edgesRaw, childrenRaw] = await Promise.all([
+    api.edges([id]).catch(err => { console.warn('edges fetch failed', id, err); return []; }),
+    api.nodes(id, 1000).catch(err => { console.warn('children fetch failed', id, err); return []; }),
   ]);
+  const edges = Array.isArray(edgesRaw) ? edgesRaw : [];
+  const children = Array.isArray(childrenRaw) ? childrenRaw.filter(c => c && c.id) : [];
+
   const fresh = edges.filter(
-    e => !store.edges.some(x => x.src === e.src && x.dst === e.dst && x.type === e.type)
+    e => e && e.src && e.dst && !store.edges.some(x => x.src === e.src && x.dst === e.dst && x.type === e.type)
   );
   let pushed = false;
   if (fresh.length) {
