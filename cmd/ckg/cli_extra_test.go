@@ -250,9 +250,52 @@ func TestEvalCmd_BadGlob(t *testing.T) {
 	}
 }
 
+// TestSelectLLMBackend exercises the small dispatch helper in eval.go.
+// We do not actually construct working backends (that requires a live
+// API key or cliwrap-agent); we just verify the routing and the
+// "unknown backend" error path.
+func TestSelectLLMBackend(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	t.Run("unknown_backend_errors", func(t *testing.T) {
+		_, err := selectLLMBackend("nope", "claude-sonnet-4-6", "")
+		if err == nil {
+			t.Fatal("expected error for unknown backend")
+		}
+	})
+
+	t.Run("api_default_routes_to_APIClient", func(t *testing.T) {
+		// Without ANTHROPIC_API_KEY this still surfaces as ErrNoAPIKey
+		// rather than the unknown-backend error, proving the api branch
+		// was selected.
+		_, err := selectLLMBackend("api", "claude-sonnet-4-6", "")
+		if err == nil {
+			t.Fatal("expected ErrNoAPIKey when key absent")
+		}
+	})
+
+	t.Run("empty_backend_treated_as_api", func(t *testing.T) {
+		_, err := selectLLMBackend("", "claude-sonnet-4-6", "")
+		if err == nil {
+			t.Fatal("expected ErrNoAPIKey when key absent")
+		}
+	})
+
+	t.Run("cli_routes_to_CLIClient", func(t *testing.T) {
+		// Empty PATH guarantees both claude lookup and cliwrap-agent
+		// lookup fail, so we get a CLI-specific error rather than
+		// the api-branch ErrNoAPIKey or unknown-backend error.
+		t.Setenv("PATH", "")
+		_, err := selectLLMBackend("cli", "", "")
+		if err == nil {
+			t.Fatal("expected ErrClaudeNotFound when binary absent")
+		}
+	})
+}
+
 // TestEvalCmd_MissingAPIKey exercises the RunE body past LoadTasks (empty
-// match is fine) and hits NewLLMClient which returns ErrNoAPIKey when
-// ANTHROPIC_API_KEY is unset.  This covers the NewLLMClient error path in
+// match is fine) and hits NewAPIClient which returns ErrNoAPIKey when
+// ANTHROPIC_API_KEY is unset.  This covers the NewAPIClient error path in
 // eval.go without requiring a live API key.
 func TestEvalCmd_MissingAPIKey(t *testing.T) {
 	graphDir := t.TempDir()

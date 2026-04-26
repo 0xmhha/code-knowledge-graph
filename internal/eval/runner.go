@@ -30,8 +30,11 @@ type Result struct {
 }
 
 // Run loops tasks × baselines and writes results.csv plus report.md.
+// Run takes ownership of llm: it is Closed when Run returns, regardless
+// of error path. Callers must NOT Close llm themselves.
 func Run(ctx context.Context, tasks []Task, baselines []Baseline,
-	graphDir string, llm *LLMClient, outDir string) ([]Result, error) {
+	graphDir string, llm LLMClient, outDir string) ([]Result, error) {
+	defer func() { _ = llm.Close() }()
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -73,7 +76,7 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 //   - β/γ/δ: register MCP tool names; tool execution is in-process here
 //     (we call Store directly instead of spawning ckg mcp), keeping eval
 //     hermetic and reproducible.
-func runOne(ctx context.Context, llm *LLMClient, store *persist.Store,
+func runOne(ctx context.Context, llm LLMClient, store *persist.Store,
 	t Task, b Baseline, stale bool) (Result, error) {
 	start := time.Now()
 	system := SystemPrompt(b)
@@ -101,7 +104,7 @@ func runOne(ctx context.Context, llm *LLMClient, store *persist.Store,
 	// γ is intentionally NOT pre-called — emulating the multi-turn cost,
 	// we let the LLM ask in plain text. (Real tool-loop emulation arrives V1+.)
 
-	out, err := llm.Complete(ctx, system, user, nil)
+	out, err := llm.Complete(ctx, system, user)
 	if err != nil {
 		return Result{}, err
 	}

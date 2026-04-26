@@ -13,6 +13,7 @@ import (
 func newEvalCmd() *cobra.Command {
 	var tasksGlob, graph, outDir, model string
 	var baselines []string
+	var llmBackend, claudeBinary string
 	cmd := &cobra.Command{
 		Use:   "eval",
 		Short: "Run four-baseline evaluation against a graph",
@@ -21,7 +22,7 @@ func newEvalCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			llm, err := eval.NewLLMClient(model)
+			llm, err := selectLLMBackend(llmBackend, model, claudeBinary)
 			if err != nil {
 				return err
 			}
@@ -42,10 +43,27 @@ func newEvalCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tasksGlob, "tasks", "", "task YAML glob (required)")
 	cmd.Flags().StringVar(&graph, "graph", "", "graph directory (required)")
 	cmd.Flags().StringVar(&outDir, "out", "eval/results", "output directory")
-	cmd.Flags().StringVar(&model, "llm", "claude-sonnet-4-6", "LLM model id")
+	cmd.Flags().StringVar(&model, "llm", "claude-sonnet-4-6", "LLM model id (api backend)")
 	cmd.Flags().StringSliceVar(&baselines, "baselines",
 		[]string{"alpha", "beta", "gamma", "delta"}, "baselines to run")
+	cmd.Flags().StringVar(&llmBackend, "llm-backend", "api", "LLM backend: api|cli")
+	cmd.Flags().StringVar(&claudeBinary, "llm-claude-binary", "",
+		"path to claude binary (cli backend; empty = PATH lookup)")
 	_ = cmd.MarkFlagRequired("tasks")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
+}
+
+// selectLLMBackend wires --llm-backend to the corresponding LLMClient
+// constructor. The default ("api" or empty) preserves the prior behavior
+// so unrelated tests and scripts keep working.
+func selectLLMBackend(backend, model, claudeBinary string) (eval.LLMClient, error) {
+	switch backend {
+	case "", "api":
+		return eval.NewAPIClient(model)
+	case "cli":
+		return eval.NewCLIClient(eval.CLIClientOptions{Binary: claudeBinary})
+	default:
+		return nil, fmt.Errorf("unknown --llm-backend=%q (want api|cli)", backend)
+	}
 }

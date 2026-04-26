@@ -7,9 +7,9 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/eval"
 )
 
-func TestLLMClientRequiresAPIKey(t *testing.T) {
+func TestAPIClientRequiresAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	_, err := eval.NewLLMClient("claude-sonnet-4-6")
+	_, err := eval.NewAPIClient("claude-sonnet-4-6")
 	if !errors.Is(err, eval.ErrNoAPIKey) {
 		t.Errorf("expected ErrNoAPIKey, got: %v", err)
 	}
