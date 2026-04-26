@@ -3,7 +3,7 @@ import { API, StaticAPI, detectMode } from './api.js';
 import { Store } from './store.js';
 import { mountGraph } from './layout.js';
 import { wireSearch } from './search.js';
-import { renderPanel } from './panel.js';
+import { renderList, renderDetail } from './panel.js';
 
 // Transport selection happens once at boot. detectMode probes ./manifest.json
 // — present in static export bundles, absent under `ckg serve`. Anything
@@ -37,17 +37,22 @@ const store = new Store();
 // `fg` is the 3d-force-graph instance — captured for future T26 camera focus.
 const fg = mountGraph(document.getElementById('canvas'), store, api);
 
-const panelEl = document.getElementById('panel');
+const detailEl = document.getElementById('node-detail');
+const listEl = document.getElementById('node-list');
 const searchEl = document.getElementById('search');
 
 // focusNode: load the node + its edges + its direct children, dedupe against
-// existing store, render the selection panel. We call store.emit() after the
-// store mutations so the layout's `sync()` listener re-pushes graph data into
-// 3d-force-graph; without it the new edges/nodes sit in the store but never
-// reach the canvas.
+// existing store, render the detail panel. Robust against the node not being
+// in the store yet (search hits arrive via wireSearch, which now pre-loads
+// results into the store, so this is a defensive fallback).
 const focusNode = async (id) => {
-  const node = store.nodes.get(id);
-  if (!node) return;
+  let node = store.nodes.get(id);
+  if (!node) {
+    // Last-resort: skip — wireSearch should have loaded the node already.
+    console.warn('focusNode: id not in store', id);
+    return;
+  }
+  store.selectedId = id;
   const [edges, children] = await Promise.all([
     api.edges([id]),
     api.nodes(id, 1000).catch(() => []),
@@ -55,25 +60,36 @@ const focusNode = async (id) => {
   const fresh = edges.filter(
     e => !store.edges.some(x => x.src === e.src && x.dst === e.dst && x.type === e.type)
   );
-  let dirty = false;
+  let pushed = false;
   if (fresh.length) {
     store.edges = [...store.edges, ...fresh];
-    dirty = true;
+    pushed = true;
   }
   if (children.length) {
     store.loadNodes(children);
     const next = new Set(store.visibleIds);
     for (const c of children) next.add(c.id);
     store.setVisible([...next]);
-    dirty = true;
+    pushed = true;
   }
-  if (dirty && !children.length) store.emit();
-  renderPanel(panelEl, api, node, edges);
+  // setVisible already emits; otherwise emit once so list highlight + canvas
+  // pick up `selectedId` and any new edges.
+  if (!pushed) store.emit();
+  renderDetail(detailEl, api, node, edges);
 };
 
 // Click-on-node: expand its children + edges in place. 3d-force-graph emits
-// onNodeClick with the node datum directly. Search results funnel through the
-// same focusNode so click vs. search behaviour stays consistent.
-fg.onNodeClick(node => focusNode(node.id));
+// onNodeClick with the node datum directly. Search and list-item picks
+// funnel through the same focusNode so behaviour stays consistent.
+fg.onNodeClick(node => {
+  console.log('node clicked', node?.id, node?.qualified_name);
+  if (node?.id) focusNode(node.id);
+});
+
+// Re-render the sidebar list on every store change (search results, visible
+// set, selection). renderList is idempotent — lit-html diffs internally.
+const refreshList = () => renderList(listEl, store, focusNode);
+store.subscribe(refreshList);
+refreshList();
 
 wireSearch(searchEl, api, store, focusNode);

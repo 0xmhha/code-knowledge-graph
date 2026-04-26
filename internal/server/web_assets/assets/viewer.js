@@ -1690,6 +1690,8 @@ var Store = class {
     this.lod = 0;
     this.hierarchyKind = "pkg";
     this.listeners = /* @__PURE__ */ new Set();
+    this.searchResults = [];
+    this.selectedId = null;
   }
   subscribe(fn) {
     this.listeners.add(fn);
@@ -22758,7 +22760,7 @@ function WebGLBackground(renderer3, cubemaps, cubeuvmaps, state, objects, alpha,
       renderer3.clear(renderer3.autoClearColor, renderer3.autoClearDepth, renderer3.autoClearStencil);
     }
   }
-  function addToRenderList(renderList, scene3) {
+  function addToRenderList(renderList2, scene3) {
     const background = getBackground(scene3);
     if (background && (background.isCubeTexture || background.mapping === CubeUVReflectionMapping)) {
       if (boxMesh === void 0) {
@@ -22809,7 +22811,7 @@ function WebGLBackground(renderer3, cubemaps, cubeuvmaps, state, objects, alpha,
         currentTonemapping = renderer3.toneMapping;
       }
       boxMesh.layers.enableAll();
-      renderList.unshift(boxMesh, boxMesh.geometry, boxMesh.material, 0, 0, null);
+      renderList2.unshift(boxMesh, boxMesh.geometry, boxMesh.material, 0, 0, null);
     } else if (background && background.isTexture) {
       if (planeMesh === void 0) {
         planeMesh = new Mesh(
@@ -22848,7 +22850,7 @@ function WebGLBackground(renderer3, cubemaps, cubeuvmaps, state, objects, alpha,
         currentTonemapping = renderer3.toneMapping;
       }
       planeMesh.layers.enableAll();
-      renderList.unshift(planeMesh, planeMesh.geometry, planeMesh.material, 0, 0, null);
+      renderList2.unshift(planeMesh, planeMesh.geometry, planeMesh.material, 0, 0, null);
     }
   }
   function setClear(color2, alpha2) {
@@ -31226,10 +31228,10 @@ var WebGLRenderer = class {
       if (currentCameraViewport !== void 0) camera3.viewport = currentCameraViewport;
       _this.toneMapping = currentToneMapping;
     }
-    function renderObjects(renderList, scene3, camera3) {
+    function renderObjects(renderList2, scene3, camera3) {
       const overrideMaterial = scene3.isScene === true ? scene3.overrideMaterial : null;
-      for (let i3 = 0, l3 = renderList.length; i3 < l3; i3++) {
-        const renderItem = renderList[i3];
+      for (let i3 = 0, l3 = renderList2.length; i3 < l3; i3++) {
+        const renderItem = renderList2[i3];
         const object = renderItem.object;
         const geometry = renderItem.geometry;
         const group = renderItem.group;
@@ -53158,7 +53160,7 @@ var Background = class extends DataMap {
    * @param {RenderList} renderList - The current render list.
    * @param {RenderContext} renderContext - The current render context.
    */
-  update(scene3, renderList, renderContext) {
+  update(scene3, renderList2, renderContext) {
     const renderer3 = this.renderer;
     const background = this.nodes.getBackgroundNode(scene3) || scene3.background;
     let forceClear = false;
@@ -53213,7 +53215,7 @@ var Background = class extends DataMap {
         backgroundMesh.material.needsUpdate = true;
         sceneData.backgroundCacheKey = backgroundCacheKey;
       }
-      renderList.unshift(backgroundMesh, backgroundMesh.geometry, backgroundMesh.material, 0, 0, null, null);
+      renderList2.unshift(backgroundMesh, backgroundMesh.geometry, backgroundMesh.material, 0, 0, null, null);
     } else {
       console.error("THREE.Renderer: Unsupported background configuration.", background);
     }
@@ -58012,10 +58014,10 @@ var Renderer = class {
       onShaderError: null,
       getShaderAsync: async (scene3, camera3, object) => {
         await this.compileAsync(scene3, camera3);
-        const renderList = this._renderLists.get(scene3, camera3);
+        const renderList2 = this._renderLists.get(scene3, camera3);
         const renderContext = this._renderContexts.get(scene3, camera3, this._renderTarget);
         const material = scene3.overrideMaterial || object.material;
-        const renderObject = this._objects.get(object, material, scene3, camera3, renderList.lightsNode, renderContext, renderContext.clippingContext);
+        const renderObject = this._objects.get(object, material, scene3, camera3, renderList2.lightsNode, renderContext, renderContext.clippingContext);
         const { fragmentShader, vertexShader } = renderObject.getNodeBuilderState();
         return { fragmentShader, vertexShader };
       }
@@ -58121,17 +58123,17 @@ var Renderer = class {
     if (!renderContext.clippingContext) renderContext.clippingContext = new ClippingContext();
     renderContext.clippingContext.updateGlobal(sceneRef, camera3);
     sceneRef.onBeforeRender(this, scene3, camera3, renderTarget);
-    const renderList = this._renderLists.get(scene3, camera3);
-    renderList.begin();
-    this._projectObject(scene3, camera3, 0, renderList, renderContext.clippingContext);
+    const renderList2 = this._renderLists.get(scene3, camera3);
+    renderList2.begin();
+    this._projectObject(scene3, camera3, 0, renderList2, renderContext.clippingContext);
     if (targetScene !== scene3) {
       targetScene.traverseVisible(function(object) {
         if (object.isLight && object.layers.test(camera3.layers)) {
-          renderList.pushLight(object);
+          renderList2.pushLight(object);
         }
       });
     }
-    renderList.finish();
+    renderList2.finish();
     if (renderTarget !== null) {
       this._textures.updateRenderTarget(renderTarget, activeMipmapLevel);
       const renderTargetData = this._textures.get(renderTarget);
@@ -58141,11 +58143,11 @@ var Renderer = class {
       renderContext.textures = null;
       renderContext.depthTexture = null;
     }
-    this._background.update(sceneRef, renderList, renderContext);
-    const opaqueObjects = renderList.opaque;
-    const transparentObjects = renderList.transparent;
-    const transparentDoublePassObjects = renderList.transparentDoublePass;
-    const lightsNode = renderList.lightsNode;
+    this._background.update(sceneRef, renderList2, renderContext);
+    const opaqueObjects = renderList2.opaque;
+    const transparentObjects = renderList2.transparent;
+    const transparentDoublePassObjects = renderList2.transparentDoublePass;
+    const lightsNode = renderList2.lightsNode;
     if (this.opaque === true && opaqueObjects.length > 0) this._renderObjects(opaqueObjects, camera3, sceneRef, lightsNode);
     if (this.transparent === true && transparentObjects.length > 0) this._renderTransparents(transparentObjects, transparentDoublePassObjects, camera3, sceneRef, lightsNode);
     nodeFrame.renderId = previousRenderId;
@@ -58256,7 +58258,7 @@ Reason: ${info.reason}`;
    * @param {LightsNode} lightsNode - The lights node.
    */
   _renderBundle(bundle, sceneRef, lightsNode) {
-    const { bundleGroup, camera: camera3, renderList } = bundle;
+    const { bundleGroup, camera: camera3, renderList: renderList2 } = bundle;
     const renderContext = this._currentRenderContext;
     const renderBundle = this._bundles.get(bundleGroup, camera3);
     const renderBundleData = this.backend.get(renderBundle);
@@ -58274,7 +58276,7 @@ Reason: ${info.reason}`;
         transparentDoublePass: transparentDoublePassObjects,
         transparent: transparentObjects,
         opaque: opaqueObjects
-      } = renderList;
+      } = renderList2;
       if (this.opaque === true && opaqueObjects.length > 0) this._renderObjects(opaqueObjects, camera3, sceneRef, lightsNode);
       if (this.transparent === true && transparentObjects.length > 0) this._renderTransparents(transparentObjects, transparentDoublePassObjects, camera3, sceneRef, lightsNode);
       this._currentRenderBundle = null;
@@ -58444,12 +58446,12 @@ Reason: ${info.reason}`;
       _projScreenMatrix2.multiplyMatrices(camera3.projectionMatrix, camera3.matrixWorldInverse);
       frustum.setFromProjectionMatrix(_projScreenMatrix2, camera3.coordinateSystem, camera3.reversedDepth);
     }
-    const renderList = this._renderLists.get(scene3, camera3);
-    renderList.begin();
-    this._projectObject(scene3, camera3, 0, renderList, renderContext.clippingContext);
-    renderList.finish();
+    const renderList2 = this._renderLists.get(scene3, camera3);
+    renderList2.begin();
+    this._projectObject(scene3, camera3, 0, renderList2, renderContext.clippingContext);
+    renderList2.finish();
     if (this.sortObjects === true) {
-      renderList.sort(this._opaqueSort, this._transparentSort);
+      renderList2.sort(this._opaqueSort, this._transparentSort);
     }
     if (renderTarget !== null) {
       this._textures.updateRenderTarget(renderTarget, activeMipmapLevel);
@@ -58473,7 +58475,7 @@ Reason: ${info.reason}`;
     renderContext.height >>= activeMipmapLevel;
     renderContext.activeCubeFace = activeCubeFace;
     renderContext.activeMipmapLevel = activeMipmapLevel;
-    renderContext.occlusionQueryCount = renderList.occlusionQueryCount;
+    renderContext.occlusionQueryCount = renderList2.occlusionQueryCount;
     renderContext.scissorValue.max(_vector4.set(0, 0, 0, 0));
     if (renderContext.scissorValue.x + renderContext.scissorValue.width > renderContext.width) {
       renderContext.scissorValue.width = Math.max(renderContext.width - renderContext.scissorValue.x, 0);
@@ -58481,7 +58483,7 @@ Reason: ${info.reason}`;
     if (renderContext.scissorValue.y + renderContext.scissorValue.height > renderContext.height) {
       renderContext.scissorValue.height = Math.max(renderContext.height - renderContext.scissorValue.y, 0);
     }
-    this._background.update(sceneRef, renderList, renderContext);
+    this._background.update(sceneRef, renderList2, renderContext);
     renderContext.camera = camera3;
     this.backend.beginRender(renderContext);
     const {
@@ -58490,7 +58492,7 @@ Reason: ${info.reason}`;
       transparentDoublePass: transparentDoublePassObjects,
       transparent: transparentObjects,
       opaque: opaqueObjects
-    } = renderList;
+    } = renderList2;
     if (bundles.length > 0) this._renderBundles(bundles, sceneRef, lightsNode);
     if (this.opaque === true && opaqueObjects.length > 0) this._renderObjects(opaqueObjects, camera3, sceneRef, lightsNode);
     if (this.transparent === true && transparentObjects.length > 0) this._renderTransparents(transparentObjects, transparentDoublePassObjects, camera3, sceneRef, lightsNode);
@@ -59278,7 +59280,7 @@ Reason: ${info.reason}`;
    * @param {RenderList} renderList - The current render list.
    * @param {ClippingContext} clippingContext - The current clipping context.
    */
-  _projectObject(object, camera3, groupOrder, renderList, clippingContext) {
+  _projectObject(object, camera3, groupOrder, renderList2, clippingContext) {
     if (object.visible === false) return;
     const visible = object.layers.test(camera3.layers);
     if (visible) {
@@ -59288,7 +59290,7 @@ Reason: ${info.reason}`;
       } else if (object.isLOD) {
         if (object.autoUpdate === true) object.update(camera3);
       } else if (object.isLight) {
-        renderList.pushLight(object);
+        renderList2.pushLight(object);
       } else if (object.isSprite) {
         const frustum = camera3.isArrayCamera ? _frustumArray : _frustum;
         if (!object.frustumCulled || frustum.intersectsSprite(object, camera3)) {
@@ -59297,7 +59299,7 @@ Reason: ${info.reason}`;
           }
           const { geometry, material } = object;
           if (material.visible) {
-            renderList.push(object, geometry, material, groupOrder, _vector4.z, null, clippingContext);
+            renderList2.push(object, geometry, material, groupOrder, _vector4.z, null, clippingContext);
           }
         }
       } else if (object.isLineLoop) {
@@ -59316,29 +59318,29 @@ Reason: ${info.reason}`;
               const group = groups[i3];
               const groupMaterial = material[group.materialIndex];
               if (groupMaterial && groupMaterial.visible) {
-                renderList.push(object, geometry, groupMaterial, groupOrder, _vector4.z, group, clippingContext);
+                renderList2.push(object, geometry, groupMaterial, groupOrder, _vector4.z, group, clippingContext);
               }
             }
           } else if (material.visible) {
-            renderList.push(object, geometry, material, groupOrder, _vector4.z, null, clippingContext);
+            renderList2.push(object, geometry, material, groupOrder, _vector4.z, null, clippingContext);
           }
         }
       }
     }
     if (object.isBundleGroup === true && this.backend.beginBundle !== void 0) {
-      const baseRenderList = renderList;
-      renderList = this._renderLists.get(object, camera3);
-      renderList.begin();
+      const baseRenderList = renderList2;
+      renderList2 = this._renderLists.get(object, camera3);
+      renderList2.begin();
       baseRenderList.pushBundle({
         bundleGroup: object,
         camera: camera3,
-        renderList
+        renderList: renderList2
       });
-      renderList.finish();
+      renderList2.finish();
     }
     const children2 = object.children;
     for (let i3 = 0, l3 = children2.length; i3 < l3; i3++) {
-      this._projectObject(children2[i3], camera3, groupOrder, renderList, clippingContext);
+      this._projectObject(children2[i3], camera3, groupOrder, renderList2, clippingContext);
     }
   }
   /**
@@ -59364,7 +59366,7 @@ Reason: ${info.reason}`;
    * @param {Scene} scene - The scene the render list belongs to.
    * @param {LightsNode} lightsNode - The current lights node.
    */
-  _renderTransparents(renderList, doublePassList, camera3, scene3, lightsNode) {
+  _renderTransparents(renderList2, doublePassList, camera3, scene3, lightsNode) {
     if (doublePassList.length > 0) {
       for (const { material } of doublePassList) {
         material.side = BackSide;
@@ -59373,12 +59375,12 @@ Reason: ${info.reason}`;
       for (const { material } of doublePassList) {
         material.side = FrontSide;
       }
-      this._renderObjects(renderList, camera3, scene3, lightsNode);
+      this._renderObjects(renderList2, camera3, scene3, lightsNode);
       for (const { material } of doublePassList) {
         material.side = DoubleSide;
       }
     } else {
-      this._renderObjects(renderList, camera3, scene3, lightsNode);
+      this._renderObjects(renderList2, camera3, scene3, lightsNode);
     }
   }
   /**
@@ -59391,9 +59393,9 @@ Reason: ${info.reason}`;
    * @param {LightsNode} lightsNode - The current lights node.
    * @param {?string} [passId=null] - An optional ID for identifying the pass.
    */
-  _renderObjects(renderList, camera3, scene3, lightsNode, passId = null) {
-    for (let i3 = 0, il = renderList.length; i3 < il; i3++) {
-      const { object, geometry, material, group, clippingContext } = renderList[i3];
+  _renderObjects(renderList2, camera3, scene3, lightsNode, passId = null) {
+    for (let i3 = 0, il = renderList2.length; i3 < il; i3++) {
+      const { object, geometry, material, group, clippingContext } = renderList2[i3];
       this._currentRenderObjectFunction(object, scene3, camera3, geometry, material, group, lightsNode, clippingContext, passId);
     }
   }
@@ -77788,9 +77790,22 @@ function mountGraph(container, store2, api2) {
   const fg2 = _3dForceGraph()(container).nodeThreeObject((node) => nodeMesh(node)).nodeLabel((node) => {
     const t3 = node.type || "?";
     const q2 = node.qualified_name || node.name || node.id;
-    const f3 = node.file_path ? `
-${node.file_path}:${node.start_line || 0}` : "";
-    return `<div style="font-family:ui-monospace,monospace;font-size:12px;line-height:1.3;background:rgba(15,17,20,.95);color:#e6e7e9;padding:6px 8px;border:1px solid #2a2c30;border-radius:4px;"><strong>${t3}</strong>&nbsp;<span style="color:#9aa">${q2}</span>${f3}</div>`;
+    const f3 = node.file_path ? `${node.file_path}:${node.start_line || 0}` : "\u2014";
+    const lang = node.language || "";
+    const conf = node.confidence || "";
+    const inDeg = node.in_degree ?? 0;
+    const outDeg = node.out_degree ?? 0;
+    const usage = (node.usage_score ?? 0).toFixed(2);
+    const pr = (node.pagerank ?? 0).toExponential(2);
+    const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : "";
+    return `<div style="font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
+<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t3}</strong> <span style="color:#cfd0d3;">${q2}</span></div>
+<div style="color:#bbb;">\u{1F4C4} ${f3}</div>${sig}
+<div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> \xB7 conf: <span style="color:#aaa">${conf}</span></div>
+<div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> \xB7 out-edges: <span style="color:#aaa">${outDeg}</span></div>
+<div style="color:#888;">usage: <span style="color:#aaa">${usage}</span> \xB7 pagerank: <span style="color:#aaa">${pr}</span></div>
+<div style="color:#666;margin-top:6px;font-size:10px;">click to expand children</div>
+</div>`;
   }).nodeVisibility((node) => store2.visibleIds.has(node.id)).linkVisibility((link) => !EDGE_STYLE[link.type]?.hidden).linkColor(edgeColor).linkWidth((link) => EDGE_STYLE[link.type]?.width ?? 1).linkDirectionalArrowLength(3).linkDirectionalArrowRelPos(0.95).cooldownTicks(200);
   const sync = () => {
     const visible = store2.visibleIds;
@@ -77844,11 +77859,29 @@ function wireSearch(input, api2, store2, onPick) {
   input.addEventListener("input", () => {
     clearTimeout(timer2);
     const q2 = input.value.trim();
-    if (!q2) return;
+    if (!q2) {
+      store2.searchResults = [];
+      store2.emit();
+      return;
+    }
     timer2 = setTimeout(async () => {
-      const results = await api2.search(q2);
-      console.log("search", q2, results.slice(0, 5));
-      if (results[0]) onPick(results[0].id);
+      try {
+        const results = await api2.search(q2);
+        if (results.length) {
+          store2.loadNodes(results);
+          const next = new Set(store2.visibleIds);
+          for (const r3 of results) next.add(r3.id);
+          store2.setVisible([...next]);
+          store2.searchResults = results;
+          store2.emit();
+          onPick(results[0].id);
+        } else {
+          store2.searchResults = [];
+          store2.emit();
+        }
+      } catch (e3) {
+        console.warn("search failed", e3);
+      }
     }, 200);
   });
 }
@@ -78108,23 +78141,43 @@ var D2 = (t3, i3, s3) => {
 };
 
 // src/panel.js
-function renderPanel(el, api2, node, edges) {
+function renderList(el, store2, onClick) {
+  const isSearch = (store2.searchResults?.length ?? 0) > 0;
+  const source = isSearch ? store2.searchResults : [...store2.visibleIds].map((id) => store2.nodes.get(id)).filter(Boolean);
+  const items = source.slice(0, 200);
+  const meta = isSearch ? `\u{1F50E} ${source.length} search result${source.length === 1 ? "" : "s"}${source.length > 200 ? " (showing 200)" : ""}` : `\u{1F441} ${source.length} visible node${source.length === 1 ? "" : "s"}${source.length > 200 ? " (showing 200)" : ""}`;
   const tpl = b2`
-    <h3>${node.name}</h3>
+    <div class="listmeta">${meta}</div>
+    ${items.map((n3) => b2`
+      <div class="item ${n3.id === store2.selectedId ? "selected" : ""}"
+           style=${n3.id === store2.selectedId ? "background:#2a3140;" : ""}
+           @click=${() => onClick(n3.id)}
+           title=${n3.qualified_name || ""}>
+        <div class="head"><span class="type">[${n3.type}]</span> ${n3.name || n3.id}</div>
+        <div class="qname">${n3.qualified_name || ""}</div>
+        ${n3.file_path ? b2`<div class="file">${n3.file_path}:${n3.start_line ?? 0}</div>` : ""}
+      </div>
+    `)}
+  `;
+  D2(tpl, el);
+}
+function renderDetail(el, api2, node, edges) {
+  const tpl = b2`
+    <h3 style="margin:0 0 8px 0;font-size:14px;">${node.name}</h3>
     <div><strong>Type:</strong> ${node.type}</div>
-    <div><strong>Qualified:</strong> ${node.qualified_name}</div>
+    <div><strong>Qualified:</strong> <span style="font-family:ui-monospace,monospace;font-size:12px;">${node.qualified_name}</span></div>
     <div><strong>File:</strong> ${node.file_path}:${node.start_line}</div>
-    <div><strong>Confidence:</strong> ${node.confidence}</div>
-    <div><strong>Usage:</strong> ${node.usage_score?.toFixed(2) ?? 0}</div>
-    <h4>Edges</h4>
-    <div>In: ${edges.filter((e3) => e3.dst === node.id).length}</div>
-    <div>Out: ${edges.filter((e3) => e3.src === node.id).length}</div>
-    <h4>Source</h4>
-    <pre id="blob" style="white-space: pre-wrap; max-height: 300px; overflow: auto; background: #0d0e10; padding: 6px;"></pre>
+    <div><strong>Lang:</strong> ${node.language ?? ""} · <strong>Conf:</strong> ${node.confidence ?? ""}</div>
+    <div><strong>Usage:</strong> ${(node.usage_score ?? 0).toFixed(2)} · <strong>PR:</strong> ${(node.pagerank ?? 0).toExponential(2)}</div>
+    <div><strong>Edges:</strong> in ${edges.filter((e3) => e3.dst === node.id).length} · out ${edges.filter((e3) => e3.src === node.id).length}</div>
+    ${node.signature ? b2`<div style="margin-top:6px;color:#9ad;font-style:italic;font-family:ui-monospace,monospace;font-size:11px;">${node.signature}</div>` : ""}
+    <h4 style="margin:10px 0 4px 0;font-size:12px;">Source</h4>
+    <pre id="blob" style="white-space: pre-wrap; max-height: 240px; overflow: auto; background: #0d0e10; padding: 6px; font-size: 11px; border:1px solid #2a2c30;"></pre>
   `;
   D2(tpl, el);
   api2.blob(node.id).then((text) => {
-    el.querySelector("#blob").textContent = text;
+    const blobEl = el.querySelector("#blob");
+    if (blobEl) blobEl.textContent = text || "(no source blob \u2014 non-leaf node)";
   });
 }
 
@@ -78147,11 +78200,16 @@ var store = new Store();
   console.log("viewer bootstrap", { nodes: nodes.length });
 })();
 var fg = mountGraph(document.getElementById("canvas"), store, api);
-var panelEl = document.getElementById("panel");
+var detailEl = document.getElementById("node-detail");
+var listEl = document.getElementById("node-list");
 var searchEl = document.getElementById("search");
 var focusNode = async (id) => {
-  const node = store.nodes.get(id);
-  if (!node) return;
+  let node = store.nodes.get(id);
+  if (!node) {
+    console.warn("focusNode: id not in store", id);
+    return;
+  }
+  store.selectedId = id;
   const [edges, children2] = await Promise.all([
     api.edges([id]),
     api.nodes(id, 1e3).catch(() => [])
@@ -78159,22 +78217,28 @@ var focusNode = async (id) => {
   const fresh = edges.filter(
     (e3) => !store.edges.some((x4) => x4.src === e3.src && x4.dst === e3.dst && x4.type === e3.type)
   );
-  let dirty = false;
+  let pushed = false;
   if (fresh.length) {
     store.edges = [...store.edges, ...fresh];
-    dirty = true;
+    pushed = true;
   }
   if (children2.length) {
     store.loadNodes(children2);
     const next = new Set(store.visibleIds);
     for (const c4 of children2) next.add(c4.id);
     store.setVisible([...next]);
-    dirty = true;
+    pushed = true;
   }
-  if (dirty && !children2.length) store.emit();
-  renderPanel(panelEl, api, node, edges);
+  if (!pushed) store.emit();
+  renderDetail(detailEl, api, node, edges);
 };
-fg.onNodeClick((node) => focusNode(node.id));
+fg.onNodeClick((node) => {
+  console.log("node clicked", node?.id, node?.qualified_name);
+  if (node?.id) focusNode(node.id);
+});
+var refreshList = () => renderList(listEl, store, focusNode);
+store.subscribe(refreshList);
+refreshList();
 wireSearch(searchEl, api, store, focusNode);
 /*! Bundled license information:
 

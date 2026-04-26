@@ -22,11 +22,25 @@ export function mountGraph(container, store, api) {
   const fg = ForceGraph3D()(container)
     .nodeThreeObject(node => nodeMesh(node))
     .nodeLabel(node => {
-      // Hover tooltip — concise so it doesn't drown the canvas.
+      // Hover tooltip — rich enough to identify the node + its place in the graph.
       const t = node.type || '?';
       const q = node.qualified_name || node.name || node.id;
-      const f = node.file_path ? `\n${node.file_path}:${node.start_line || 0}` : '';
-      return `<div style="font-family:ui-monospace,monospace;font-size:12px;line-height:1.3;background:rgba(15,17,20,.95);color:#e6e7e9;padding:6px 8px;border:1px solid #2a2c30;border-radius:4px;"><strong>${t}</strong>&nbsp;<span style="color:#9aa">${q}</span>${f}</div>`;
+      const f = node.file_path ? `${node.file_path}:${node.start_line || 0}` : '—';
+      const lang = node.language || '';
+      const conf = node.confidence || '';
+      const inDeg = node.in_degree ?? 0;
+      const outDeg = node.out_degree ?? 0;
+      const usage = (node.usage_score ?? 0).toFixed(2);
+      const pr = (node.pagerank ?? 0).toExponential(2);
+      const sig = node.signature ? `<div style="color:#9ad;margin-top:4px;font-style:italic;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${node.signature}</div>` : '';
+      return `<div style="font-family:ui-monospace,monospace;font-size:11px;line-height:1.4;background:rgba(15,17,20,.96);color:#e6e7e9;padding:8px 10px;border:1px solid #2a2c30;border-radius:4px;max-width:420px;">
+<div style="font-size:12px;margin-bottom:4px;"><strong style="color:#7ab8ff;">${t}</strong> <span style="color:#cfd0d3;">${q}</span></div>
+<div style="color:#bbb;">📄 ${f}</div>${sig}
+<div style="color:#888;margin-top:5px;">lang: <span style="color:#aaa">${lang}</span> · conf: <span style="color:#aaa">${conf}</span></div>
+<div style="color:#888;">in-edges: <span style="color:#aaa">${inDeg}</span> · out-edges: <span style="color:#aaa">${outDeg}</span></div>
+<div style="color:#888;">usage: <span style="color:#aaa">${usage}</span> · pagerank: <span style="color:#aaa">${pr}</span></div>
+<div style="color:#666;margin-top:6px;font-size:10px;">click to expand children</div>
+</div>`;
     })
     .nodeVisibility(node => store.visibleIds.has(node.id))
     .linkVisibility(link => !(EDGE_STYLE[link.type]?.hidden))

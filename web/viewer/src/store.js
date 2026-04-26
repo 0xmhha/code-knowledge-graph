@@ -7,6 +7,8 @@ export class Store {
     this.lod = 0;
     this.hierarchyKind = 'pkg';
     this.listeners = new Set();
+    this.searchResults = [];   // populated by search.js; empty -> list shows visible
+    this.selectedId = null;    // most recently focused node
   }
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit() { this.listeners.forEach(fn => fn(this)); }
