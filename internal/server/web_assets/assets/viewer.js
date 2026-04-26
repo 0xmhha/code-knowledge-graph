@@ -83197,12 +83197,23 @@ function renderList(el, store2, onClick) {
   const isSearch = (store2.searchResults?.length ?? 0) > 0;
   const source = isSearch ? store2.searchResults : [...store2.visibleIds].map((id2) => store2.nodes.get(id2)).filter(Boolean);
   const items = source.slice(0, 200);
-  const meta = isSearch ? `\u{1F50E} ${source.length} search result${source.length === 1 ? "" : "s"}${source.length > 200 ? " (showing 200)" : ""}` : `\u{1F441} ${source.length} visible node${source.length === 1 ? "" : "s"}${source.length > 200 ? " (showing 200)" : ""}`;
+  const titleText = isSearch ? "\u{1F50E} Search Results" : "\u{1F441} Visible Nodes";
+  const countText = source.length > 200 ? `${source.length} (showing 200)` : `${source.length}`;
+  let ctxText = "";
+  if (isSearch) {
+    ctxText = "";
+  } else if (!store2.anchorId) {
+    ctxText = "root view \xB7 click a node to set anchor";
+  } else {
+    const a3 = store2.nodes.get(store2.anchorId);
+    const aName = a3?.qualified_name || a3?.name || store2.anchorId;
+    ctxText = `anchor: ${aName} \xB7 depth ${store2.depth}`;
+  }
   console.debug("renderList", { isSearch, total: source.length, shown: items.length, selectedId: store2.selectedId });
   const frag = document.createDocumentFragment();
   const metaEl = document.createElement("div");
   metaEl.className = "listmeta";
-  metaEl.textContent = meta;
+  metaEl.innerHTML = `<div class="title">${escapeHtml(titleText)} <span class="count">(${escapeHtml(countText)})</span></div>` + (ctxText ? `<div class="ctx">${escapeHtml(ctxText)}</div>` : "");
   frag.appendChild(metaEl);
   if (items.length === 0) {
     const empty2 = document.createElement("div");
@@ -83434,7 +83445,8 @@ wireFG(fg);
 var lastListSig = null;
 var refreshList = () => {
   const isSearch = (store.searchResults?.length ?? 0) > 0;
-  const sig = `${isSearch ? "s" : "v"}|${(isSearch ? store.searchResults : [...store.visibleIds]).length}|${store.visibleIds.size}|${store.searchResults.length}`;
+  const itemCount = (isSearch ? store.searchResults : [...store.visibleIds]).length;
+  const sig = `${isSearch ? "s" : "v"}|${itemCount}|${store.visibleIds.size}|${store.searchResults.length}|${store.anchorId ?? ""}|${store.depth}`;
   if (sig !== lastListSig) {
     lastListSig = sig;
     renderList(listEl, store, selectOnly);

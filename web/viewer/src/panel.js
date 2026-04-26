@@ -18,18 +18,36 @@ export function renderList(el, store, onClick) {
     ? store.searchResults
     : [...store.visibleIds].map(id => store.nodes.get(id)).filter(Boolean);
   const items = source.slice(0, 200);
-  const meta = isSearch
-    ? `🔎 ${source.length} search result${source.length === 1 ? '' : 's'}${source.length > 200 ? ' (showing 200)' : ''}`
-    : `👁 ${source.length} visible node${source.length === 1 ? '' : 's'}${source.length > 200 ? ' (showing 200)' : ''}`;
+
+  // Header layout: emoji+title on the first line, count emphasised in
+  // accent colour, and a second-line context describing what's being
+  // listed (search query / anchor + depth). Sticky inside #node-list so
+  // the count stays visible while scrolling through the items below.
+  const titleText = isSearch ? '🔎 Search Results' : '👁 Visible Nodes';
+  const countText = source.length > 200
+    ? `${source.length} (showing 200)`
+    : `${source.length}`;
+  let ctxText = '';
+  if (isSearch) {
+    // Search controls put no anchor info here; the search box is the cue.
+    ctxText = '';
+  } else if (!store.anchorId) {
+    ctxText = 'root view · click a node to set anchor';
+  } else {
+    const a = store.nodes.get(store.anchorId);
+    const aName = a?.qualified_name || a?.name || store.anchorId;
+    ctxText = `anchor: ${aName} · depth ${store.depth}`;
+  }
 
   console.debug('renderList', { isSearch, total: source.length, shown: items.length, selectedId: store.selectedId });
 
-  // Build via DocumentFragment for one paint.
   const frag = document.createDocumentFragment();
 
   const metaEl = document.createElement('div');
   metaEl.className = 'listmeta';
-  metaEl.textContent = meta;
+  metaEl.innerHTML =
+    `<div class="title">${escapeHtml(titleText)} <span class="count">(${escapeHtml(countText)})</span></div>` +
+    (ctxText ? `<div class="ctx">${escapeHtml(ctxText)}</div>` : '');
   frag.appendChild(metaEl);
 
   if (items.length === 0) {

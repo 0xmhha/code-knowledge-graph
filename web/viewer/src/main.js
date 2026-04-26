@@ -170,10 +170,15 @@ const wireFG = (g) => {
 wireFG(fg);
 
 // Sidebar list: clicking a row inspects without navigating (keeps anchor).
+// Signature includes searchResults length, visibleIds size, anchorId, and
+// depth — anything that changes the rendered ITEMS or the meta header
+// invalidates the cached render. selectedId is intentionally excluded so
+// pure selection changes flip a class instead of rebuilding the DOM.
 let lastListSig = null;
 const refreshList = () => {
   const isSearch = (store.searchResults?.length ?? 0) > 0;
-  const sig = `${isSearch ? 's' : 'v'}|${(isSearch ? store.searchResults : [...store.visibleIds]).length}|${store.visibleIds.size}|${store.searchResults.length}`;
+  const itemCount = (isSearch ? store.searchResults : [...store.visibleIds]).length;
+  const sig = `${isSearch ? 's' : 'v'}|${itemCount}|${store.visibleIds.size}|${store.searchResults.length}|${store.anchorId ?? ''}|${store.depth}`;
   if (sig !== lastListSig) {
     lastListSig = sig;
     renderList(listEl, store, selectOnly);
