@@ -78240,6 +78240,10 @@ var refreshList = () => renderList(listEl, store, focusNode);
 store.subscribe(refreshList);
 refreshList();
 wireSearch(searchEl, api, store, focusNode);
+document.getElementById("panel-toggle")?.addEventListener("click", () => {
+  document.getElementById("app").classList.toggle("no-panel");
+  setTimeout(() => window.dispatchEvent(new Event("resize")), 130);
+});
 /*! Bundled license information:
 
 three/build/three.core.js:

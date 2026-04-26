@@ -93,3 +93,12 @@ store.subscribe(refreshList);
 refreshList();
 
 wireSearch(searchEl, api, store, focusNode);
+
+// Right-panel toggle. ⇆ button collapses #panel to 0px so the 3D canvas can
+// use the full window — useful on small laptop screens. We also fire a resize
+// event so 3d-force-graph picks up the new canvas dimensions immediately
+// (the library wires its own resize observer but that lags one tick).
+document.getElementById('panel-toggle')?.addEventListener('click', () => {
+  document.getElementById('app').classList.toggle('no-panel');
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 130);
+});
