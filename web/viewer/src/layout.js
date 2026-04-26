@@ -20,6 +20,13 @@ function edgeColor(link) {
 
 export function mountGraph(container, store, api) {
   const fg = ForceGraph3D()(container)
+    // Edge field-name mapping. CKG persists edges with `src`/`dst` and
+    // 3d-force-graph defaults to `source`/`target`. Without this mapping the
+    // library can't resolve link endpoints to node objects, raising
+    // "node not found: undefined" for every link → no edges render and the
+    // simulation throws on link.source.x / link.target.x.
+    .linkSource('src')
+    .linkTarget('dst')
     .nodeThreeObject(node => nodeMesh(node))
     .nodeLabel(node => {
       // Hover tooltip — rich enough to identify the node + its place in the graph.

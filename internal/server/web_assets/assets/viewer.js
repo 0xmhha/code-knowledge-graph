@@ -1601,7 +1601,9 @@ var API = class {
     }).then((r2) => r2.json()).then(asArray);
   }
   async blob(nodeId) {
-    return fetch(`${this.base}/api/blob/${nodeId}`).then((r2) => r2.text());
+    const r2 = await fetch(`${this.base}/api/blob/${nodeId}`);
+    if (!r2.ok) return "";
+    return r2.text();
   }
   async search(q2) {
     return fetch(`${this.base}/api/search?q=${encodeURIComponent(q2)}`).then((r2) => r2.json()).then(asArray);
@@ -77791,7 +77793,7 @@ function edgeColor(link) {
   return "#" + c3.toString(16).padStart(6, "0");
 }
 function mountGraph(container, store2, api2) {
-  const fg2 = _3dForceGraph()(container).nodeThreeObject((node) => nodeMesh(node)).nodeLabel((node) => {
+  const fg2 = _3dForceGraph()(container).linkSource("src").linkTarget("dst").nodeThreeObject((node) => nodeMesh(node)).nodeLabel((node) => {
     const t2 = node.type || "?";
     const q2 = node.qualified_name || node.name || node.id;
     const f2 = node.file_path ? `${node.file_path}:${node.start_line || 0}` : "\u2014";

@@ -22,7 +22,15 @@ export class API {
       body: JSON.stringify({ ids: nodeIds })
     }).then(r => r.json()).then(asArray);
   }
-  async blob(nodeId) { return fetch(`${this.base}/api/blob/${nodeId}`).then(r => r.text()); }
+  async blob(nodeId) {
+    // Many node types (Package, File, Field, etc.) don't carry a source blob —
+    // GetBlob returns sql.ErrNoRows → the server emits 404. That's expected,
+    // not an error; collapse it to an empty string so the UI doesn't surface
+    // a network warning that's actually noise.
+    const r = await fetch(`${this.base}/api/blob/${nodeId}`);
+    if (!r.ok) return '';
+    return r.text();
+  }
   async search(q) { return fetch(`${this.base}/api/search?q=${encodeURIComponent(q)}`).then(r => r.json()).then(asArray); }
 }
 
