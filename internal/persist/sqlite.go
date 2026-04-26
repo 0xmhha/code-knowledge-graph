@@ -370,6 +370,27 @@ func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
 	return scanNodes(rows)
 }
 
+// SearchSubstr is a non-FTS fallback for queries the FTS5 unicode61
+// tokeniser can't tokenise — primarily CJK input where text contains no
+// whitespace separators. It runs `LIKE '%q%'` against name + qualified_name
+// and is intentionally O(n) on the nodes table; expect 50–100ms on 200K
+// rows. Use only when FTS isn't viable; see docs/VIEWER-ROADMAP.md L1.
+func (s *Store) SearchSubstr(q string, limit int) ([]types.Node, error) {
+	pat := "%" + q + "%"
+	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
+		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
+		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
+		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
+		n.confidence, COALESCE(n.sub_kind,'')
+		FROM nodes n
+		WHERE n.name LIKE ? OR n.qualified_name LIKE ? LIMIT ?`, pat, pat, limit)
+	if err != nil {
+		return nil, fmt.Errorf("substring search %q: %w", q, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
 // placeholders returns a comma-separated `?,?,?` of length n. n<=0 returns
 // "" so callers can detect the empty case before building a malformed IN().
 func placeholders(n int) string {

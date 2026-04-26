@@ -41,23 +41,71 @@ const detailEl = document.getElementById('node-detail');
 const listEl = document.getElementById('node-list');
 const searchEl = document.getElementById('search');
 
+// CHILDREN_PER_EXPAND caps how many children one expand-click can reveal.
+// 200K-node corpora produce packages with hundreds of files and files with
+// hundreds of statements; uncapped expands push the visible set past
+// 3d-force-graph's interactive sweet spot. See docs/VIEWER-ROADMAP.md L3.
+const CHILDREN_PER_EXPAND = 100;
+
+// collectExpandedDescendants walks the store's expanded-tree rooted at id,
+// returning every transitively-revealed descendant. Used by collapse so a
+// re-click on a parent rolls up the entire sub-tree, not just one level.
+function collectExpandedDescendants(id) {
+  const out = new Set();
+  const walk = (i) => {
+    const kids = store.expanded.get(i);
+    if (!kids) return;
+    for (const k of kids) {
+      out.add(k);
+      walk(k);
+    }
+  };
+  walk(id);
+  return out;
+}
+
 // focusNode: load the node + its edges + its direct children, dedupe against
-// existing store, render the detail panel. Robust against the node not being
-// in the store yet (search hits arrive via wireSearch, which now pre-loads
-// results into the store, so this is a defensive fallback).
+// existing store, render the detail panel. Toggles: clicking an already-
+// expanded node collapses its descendants instead of re-expanding.
 const focusNode = async (id) => {
-  let node = store.nodes.get(id);
+  const node = store.nodes.get(id);
   if (!node) {
-    // Last-resort: skip — wireSearch should have loaded the node already.
     console.warn('focusNode: id not in store', id);
     return;
   }
   store.selectedId = id;
-  // Defensive: api.* now normalises null → []; still gate against unexpected
-  // shapes so a single bad response can't take down the whole interaction.
+
+  // Toggle: if this node is already expanded, collapse the entire sub-tree
+  // and stop. The detail panel still re-renders so the user can re-check
+  // the metadata after collapsing.
+  if (store.expanded.has(id)) {
+    const toRemove = collectExpandedDescendants(id);
+    if (toRemove.size) {
+      const next = new Set(store.visibleIds);
+      for (const cid of toRemove) {
+        next.delete(cid);
+        store.expanded.delete(cid);
+      }
+      store.expanded.delete(id);
+      store.setVisible([...next]);
+    } else {
+      store.expanded.delete(id);
+      store.emit();
+    }
+    // Re-render detail without re-fetching edges (we already showed them
+    // when the node was first focused).
+    const cachedEdges = store.edges.filter(
+      e => e.src === id || e.dst === id
+    );
+    renderDetail(detailEl, api, node, cachedEdges);
+    return;
+  }
+
+  // Expand path: defensive fetches with array guards so one bad response
+  // can't crash the interaction.
   const [edgesRaw, childrenRaw] = await Promise.all([
     api.edges([id]).catch(err => { console.warn('edges fetch failed', id, err); return []; }),
-    api.nodes(id, 1000).catch(err => { console.warn('children fetch failed', id, err); return []; }),
+    api.nodes(id, CHILDREN_PER_EXPAND).catch(err => { console.warn('children fetch failed', id, err); return []; }),
   ]);
   const edges = Array.isArray(edgesRaw) ? edgesRaw : [];
   const children = Array.isArray(childrenRaw) ? childrenRaw.filter(c => c && c.id) : [];
@@ -75,10 +123,9 @@ const focusNode = async (id) => {
     const next = new Set(store.visibleIds);
     for (const c of children) next.add(c.id);
     store.setVisible([...next]);
+    store.expanded.set(id, new Set(children.map(c => c.id)));
     pushed = true;
   }
-  // setVisible already emits; otherwise emit once so list highlight + canvas
-  // pick up `selectedId` and any new edges.
   if (!pushed) store.emit();
   renderDetail(detailEl, api, node, edges);
 };

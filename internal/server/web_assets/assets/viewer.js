@@ -1695,6 +1695,7 @@ var Store = class {
     this.listeners = /* @__PURE__ */ new Set();
     this.searchResults = [];
     this.selectedId = null;
+    this.expanded = /* @__PURE__ */ new Map();
   }
   subscribe(fn) {
     this.listeners.add(fn);
@@ -77964,19 +77965,53 @@ var fg = mountGraph(document.getElementById("canvas"), store, api);
 var detailEl = document.getElementById("node-detail");
 var listEl = document.getElementById("node-list");
 var searchEl = document.getElementById("search");
+var CHILDREN_PER_EXPAND = 100;
+function collectExpandedDescendants(id) {
+  const out = /* @__PURE__ */ new Set();
+  const walk = (i2) => {
+    const kids = store.expanded.get(i2);
+    if (!kids) return;
+    for (const k2 of kids) {
+      out.add(k2);
+      walk(k2);
+    }
+  };
+  walk(id);
+  return out;
+}
 var focusNode = async (id) => {
-  let node = store.nodes.get(id);
+  const node = store.nodes.get(id);
   if (!node) {
     console.warn("focusNode: id not in store", id);
     return;
   }
   store.selectedId = id;
+  if (store.expanded.has(id)) {
+    const toRemove = collectExpandedDescendants(id);
+    if (toRemove.size) {
+      const next = new Set(store.visibleIds);
+      for (const cid of toRemove) {
+        next.delete(cid);
+        store.expanded.delete(cid);
+      }
+      store.expanded.delete(id);
+      store.setVisible([...next]);
+    } else {
+      store.expanded.delete(id);
+      store.emit();
+    }
+    const cachedEdges = store.edges.filter(
+      (e2) => e2.src === id || e2.dst === id
+    );
+    renderDetail(detailEl, api, node, cachedEdges);
+    return;
+  }
   const [edgesRaw, childrenRaw] = await Promise.all([
     api.edges([id]).catch((err) => {
       console.warn("edges fetch failed", id, err);
       return [];
     }),
-    api.nodes(id, 1e3).catch((err) => {
+    api.nodes(id, CHILDREN_PER_EXPAND).catch((err) => {
       console.warn("children fetch failed", id, err);
       return [];
     })
@@ -77996,6 +78031,7 @@ var focusNode = async (id) => {
     const next = new Set(store.visibleIds);
     for (const c3 of children2) next.add(c3.id);
     store.setVisible([...next]);
+    store.expanded.set(id, new Set(children2.map((c3) => c3.id)));
     pushed = true;
   }
   if (!pushed) store.emit();
