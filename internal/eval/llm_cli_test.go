@@ -384,26 +384,31 @@ func TestCLIClient_Complete_Smoke_ClaudeFallback(t *testing.T) {
 	}
 }
 
-// TestCLIClient_Complete_TokenMonitorPrimary verifies the priority flip:
-// when a fake token-monitor is on PATH its values win over claude's usage.
-func TestCLIClient_Complete_TokenMonitorPrimary(t *testing.T) {
+// TestCLIClient_Complete_ClaudeUsagePrimary asserts the per-invocation
+// token attribution comes from claude's --output-format json `usage` block,
+// not from token-monitor. token-monitor surfaces SESSION-CUMULATIVE counts
+// (e.g. 138M cached tokens for a long-running Claude Code session) which
+// is meaningless as a per-invocation metric — see docs/EVAL.md and
+// commit history for the policy reversal.
+func TestCLIClient_Complete_ClaudeUsagePrimary(t *testing.T) {
 	agentPath := buildCliwrapAgentForTest(t)
 
 	dir := t.TempDir()
 	fakeClaude := filepath.Join(dir, "claude")
 	claudeBody := "#!/bin/sh\n" +
 		"cat <<'EOF'\n" +
-		"{\"result\":\"hi\",\"usage\":{\"input_tokens\":10,\"output_tokens\":3}}\n" +
+		`{"result":"hi","usage":{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}` + "\n" +
 		"EOF\n"
 	if err := os.WriteFile(fakeClaude, []byte(claudeBody), 0o755); err != nil {
 		t.Fatalf("write fake claude: %v", err)
 	}
 
-	// Fake token-monitor returns different (higher) counts — these must win.
+	// Fake token-monitor returns wildly higher numbers — these must NOT
+	// override claude's per-invocation values.
 	tmDir := t.TempDir()
 	tmStub := filepath.Join(tmDir, "token-monitor")
 	tmBody := "#!/bin/sh\n" +
-		`echo '{"input_tokens":99,"output_tokens":50,"cache_read_tokens":7,"cache_creation_tokens":3}'` +
+		`echo '{"input_tokens":99999,"output_tokens":50000,"cache_read_tokens":777,"cache_creation_tokens":333}'` +
 		"\n"
 	if err := os.WriteFile(tmStub, []byte(tmBody), 0o755); err != nil {
 		t.Fatalf("write fake token-monitor: %v", err)
@@ -432,18 +437,18 @@ func TestCLIClient_Complete_TokenMonitorPrimary(t *testing.T) {
 	if got.OutputText != "hi" {
 		t.Errorf("OutputText: want %q got %q", "hi", got.OutputText)
 	}
-	// token-monitor must win (99, not claude's 10).
-	if got.InputTokens != 99 {
-		t.Errorf("InputTokens: want 99 (token-monitor primary), got %d", got.InputTokens)
+	// claude's usage block must win — token-monitor's huge values must be ignored.
+	if got.InputTokens != 10 {
+		t.Errorf("InputTokens: want 10 (from claude), got %d", got.InputTokens)
 	}
-	if got.OutputTokens != 50 {
-		t.Errorf("OutputTokens: want 50 (token-monitor primary), got %d", got.OutputTokens)
+	if got.OutputTokens != 3 {
+		t.Errorf("OutputTokens: want 3 (from claude), got %d", got.OutputTokens)
 	}
-	if got.CacheReadTokens != 7 {
-		t.Errorf("CacheReadTokens: want 7 got %d", got.CacheReadTokens)
+	if got.CacheReadTokens != 2 {
+		t.Errorf("CacheReadTokens: want 2 (from claude), got %d", got.CacheReadTokens)
 	}
-	if got.CacheCreateTokens != 3 {
-		t.Errorf("CacheCreateTokens: want 3 got %d", got.CacheCreateTokens)
+	if got.CacheCreateTokens != 1 {
+		t.Errorf("CacheCreateTokens: want 1 (from claude), got %d", got.CacheCreateTokens)
 	}
 }
 

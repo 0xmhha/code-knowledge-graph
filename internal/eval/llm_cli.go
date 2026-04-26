@@ -168,17 +168,20 @@ func (c *CLIClient) Complete(ctx context.Context, system, user string) (LLMResul
 
 	raw := c.mgr.LogsSnapshot(procID, 0) // 0 = stdout
 
-	text, claudeFallback, err := extractClaudeText(raw)
+	text, usage, err := extractClaudeText(raw)
 	if err != nil {
 		return LLMResult{}, err
 	}
 
-	// Primary: token-monitor; fall back to claude's own usage block.
-	usage := claudeFallback
-	if tm, ok := queryTokenMonitor(ctx); ok {
-		usage = tm
-	}
-
+	// Token attribution: Claude's --output-format json `usage` block is
+	// per-invocation accurate (input + output + cache_read +
+	// cache_creation). token-monitor was previously the primary source
+	// but it surfaces SESSION-CUMULATIVE counts from the local JSONL
+	// (e.g. 138M cached_tokens after a long Claude Code session) which
+	// is meaningless as a per-invocation metric. Stick with claude's
+	// own numbers; queryTokenMonitor remains in the file as a hook for
+	// future "session burn rate" or "billing block remaining" reporting,
+	// but is no longer wired into LLMResult. See docs/EVAL.md.
 	return LLMResult{
 		OutputText:        text,
 		InputTokens:       usage.InputTokens,
