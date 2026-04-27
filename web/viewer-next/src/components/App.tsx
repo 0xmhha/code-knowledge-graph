@@ -146,7 +146,11 @@ export default function App() {
   // Keyboard shortcuts.
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
-      if (document.activeElement?.tagName === 'INPUT') return;
+      // Skip when typing into any text-input surface — INPUT today, but
+      // also TEXTAREA and contenteditable so future UI (notes, comments)
+      // can't get its keys hijacked.
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
 
       // Escape: close help overlay first; otherwise SearchBox's handler runs.
       if (ev.key === 'Escape') {

@@ -76,63 +76,62 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // re-creating the handle on every viewMode change.
   viewModeRef.current = viewMode;
 
-  useImperativeHandle(ref, () => ({
-    zoomIn() {
-      const fg = fgRef.current as Record<string, unknown> | null;
-      if (!fg) return;
-      if (viewModeRef.current === '2d') {
-        const zoom = fg.zoom as ((factor: number, duration?: number) => void) | undefined;
-        zoom?.(ZOOM_FACTOR_IN, ZOOM_DURATION_MS);
-      } else {
-        const camPos = fg.cameraPosition as
-          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => { x: number; y: number; z: number } | void) | undefined;
-        if (!camPos) return;
-        const cur = camPos() as { x: number; y: number; z: number } | undefined;
-        if (!cur) return;
-        const dist = Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2);
-        const factor = ZOOM_FACTOR_IN;
-        const newDist = dist / factor;
-        camPos(
-          { x: (cur.x / dist) * newDist, y: (cur.y / dist) * newDist, z: (cur.z / dist) * newDist },
-          null,
-          ZOOM_DURATION_MS,
-        );
+  useImperativeHandle(ref, () => {
+    // Local typed shim: react-force-graph ships without TS types, so we
+    // declare the surface we actually call. Cast the imperative ref once
+    // per method instead of re-asserting at every call site.
+    type Vec3 = { x: number; y: number; z: number };
+    interface FGShim {
+      zoom?: (factor: number, duration?: number) => void;
+      zoomToFit?: (duration?: number) => void;
+      cameraPosition?: (pos?: Vec3, lookAt?: Vec3, duration?: number) => Vec3 | void;
+    }
+    const fg = (): FGShim | null => (fgRef.current as FGShim | null) ?? null;
+    const RESET_3D: Vec3 = { x: 0, y: 0, z: 600 };
+    const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
+
+    const zoom3D = (factor: number) => {
+      const f = fg();
+      if (!f?.cameraPosition) return;
+      const cur = f.cameraPosition() as Vec3 | undefined;
+      if (!cur) return;
+      const dist = Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2);
+      // Camera at origin would divide by zero; recover via reset distance
+      // along z. Rare in normal flow but reachable after zooming all the
+      // way in.
+      if (dist === 0) {
+        f.cameraPosition({ x: 0, y: 0, z: RESET_3D.z / factor }, ORIGIN, ZOOM_DURATION_MS);
+        return;
       }
-    },
-    zoomOut() {
-      const fg = fgRef.current as Record<string, unknown> | null;
-      if (!fg) return;
-      if (viewModeRef.current === '2d') {
-        const zoom = fg.zoom as ((factor: number, duration?: number) => void) | undefined;
-        zoom?.(ZOOM_FACTOR_OUT, ZOOM_DURATION_MS);
-      } else {
-        const camPos = fg.cameraPosition as
-          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => { x: number; y: number; z: number } | void) | undefined;
-        if (!camPos) return;
-        const cur = camPos() as { x: number; y: number; z: number } | undefined;
-        if (!cur) return;
-        const dist = Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2);
-        const newDist = dist / ZOOM_FACTOR_OUT;
-        camPos(
-          { x: (cur.x / dist) * newDist, y: (cur.y / dist) * newDist, z: (cur.z / dist) * newDist },
-          null,
-          ZOOM_DURATION_MS,
-        );
-      }
-    },
-    zoomReset() {
-      const fg = fgRef.current as Record<string, unknown> | null;
-      if (!fg) return;
-      if (viewModeRef.current === '2d') {
-        const zoomToFit = fg.zoomToFit as ((duration?: number) => void) | undefined;
-        zoomToFit?.(ZOOM_DURATION_MS);
-      } else {
-        const camPos = fg.cameraPosition as
-          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => void) | undefined;
-        camPos?.({ x: 0, y: 0, z: 600 }, null, ZOOM_DURATION_MS);
-      }
-    },
-  }), []);
+      const newDist = dist / factor;
+      f.cameraPosition(
+        { x: (cur.x / dist) * newDist, y: (cur.y / dist) * newDist, z: (cur.z / dist) * newDist },
+        ORIGIN,
+        ZOOM_DURATION_MS,
+      );
+    };
+
+    return {
+      zoomIn() {
+        if (viewModeRef.current === '2d') fg()?.zoom?.(ZOOM_FACTOR_IN, ZOOM_DURATION_MS);
+        else zoom3D(ZOOM_FACTOR_IN);
+      },
+      zoomOut() {
+        if (viewModeRef.current === '2d') fg()?.zoom?.(ZOOM_FACTOR_OUT, ZOOM_DURATION_MS);
+        else zoom3D(ZOOM_FACTOR_OUT);
+      },
+      zoomReset() {
+        if (viewModeRef.current === '2d') {
+          fg()?.zoomToFit?.(ZOOM_DURATION_MS);
+        } else {
+          // Pass an explicit lookAt so the camera both translates AND aims
+          // at the origin — passing undefined would preserve the prior
+          // look-at and produce a tilted "reset".
+          fg()?.cameraPosition?.(RESET_3D, ORIGIN, ZOOM_DURATION_MS);
+        }
+      },
+    };
+  }, []);
 
   // graphData re-derives on visibleIds / edges / nodes change. We use the
   // edge index to avoid scanning the full edges array.
@@ -348,6 +347,3 @@ function escape(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// suppress: viewMode reads a peer object during ref capture but isn't used
-// in the JSX above (it picks the component); keep ref typed loosely.
-export type _RefHack = ViewMode;
