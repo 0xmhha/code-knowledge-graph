@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -275,12 +276,27 @@ func TestCopyViewerAssetsTo(t *testing.T) {
 		t.Errorf("index.html missing from dst: %v", err)
 	}
 
-	// Must include at least one file under assets/.
-	assetsDir := filepath.Join(dst, "assets")
-	entries, err := os.ReadDir(assetsDir)
-	if err != nil {
-		t.Errorf("assets/ directory missing from dst: %v", err)
-	} else if len(entries) == 0 {
-		t.Error("assets/ directory is empty after CopyViewerAssetsTo")
+	// Must include the bundled JS/CSS — Next.js places them under _next/static/.
+	// (The legacy esbuild viewer used assets/; retained as `make viewer-old`
+	// during the migration window.)
+	staticDir := filepath.Join(dst, "_next", "static")
+	if _, err := os.Stat(staticDir); err != nil {
+		t.Errorf("_next/static/ directory missing from dst: %v", err)
+		return
+	}
+	var jsCount int
+	if err := filepath.WalkDir(staticDir, func(_ string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return walkErr
+		}
+		if filepath.Ext(d.Name()) == ".js" {
+			jsCount++
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("WalkDir _next/static: %v", err)
+	}
+	if jsCount == 0 {
+		t.Error("no .js files found under _next/static/ after CopyViewerAssetsTo")
 	}
 }
