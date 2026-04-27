@@ -36,7 +36,13 @@ build: viewer
 	@# time, so restore the tracked stub so `git status` stays clean. No-op
 	@# outside a git repo (CI tarballs etc.) — the stub on disk doesn't
 	@# affect the running binary.
-	@if [ -d .git ]; then git checkout -- internal/server/web_assets/index.html 2>/dev/null || true; fi
+	@# `git rev-parse --git-dir` instead of `[ -d .git ]` because .git is a
+	@# *file* inside `git worktree add` checkouts; the dir test would silently
+	@# skip there and bring back the churn we are eliminating.
+	@if git rev-parse --git-dir >/dev/null 2>&1; then \
+	    git checkout -- internal/server/web_assets/index.html 2>/dev/null \
+	      || echo "warn: could not restore stub web_assets/index.html — run 'git checkout -- internal/server/web_assets/index.html' manually"; \
+	fi
 
 build-no-viewer:
 	$(GO) build -o bin/ckg ./cmd/ckg
