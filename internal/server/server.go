@@ -16,9 +16,10 @@ import (
 // one per `ckg serve` invocation. Server implements http.Handler so callers
 // (and tests via httptest) can drive it directly.
 type Server struct {
-	store *persist.Store
-	mux   *http.ServeMux
-	log   *slog.Logger
+	store     *persist.Store
+	mux       *http.ServeMux
+	log       *slog.Logger
+	community communityCache // lazy-loaded topic_tree projection (see community.go)
 }
 
 // New wires routes against store and returns a ready-to-serve Server.

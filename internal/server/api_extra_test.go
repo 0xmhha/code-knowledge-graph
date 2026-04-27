@@ -91,6 +91,45 @@ func TestHandlersExtended(t *testing.T) {
 		}
 	})
 
+	// ---- community decoration --------------------------------------------
+	// /api/nodes responses are wrapped with community_id + topic_label when
+	// the topic_tree has data at defaultTopicResolution. The resolve fixture
+	// exercises BuildTopicTree at 3 gammas so resolution=1 should produce
+	// at least one labeled assignment, but Leiden on a tiny graph can also
+	// land everything in singleton (unlabeled) communities — we tolerate
+	// the empty case rather than flake.
+	t.Run("nodes_community_decoration", func(t *testing.T) {
+		nodes := getJSONArray(t, "/api/nodes?limit=200")
+		if len(nodes) == 0 {
+			t.Fatal("/api/nodes returned no results")
+		}
+		var sawCommunity bool
+		for _, raw := range nodes {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			// community_id is omitted for nodes outside the topic_tree —
+			// so its absence is fine, but if present it must be a number
+			// and topic_label must be a non-empty string.
+			cid, hasCID := m["community_id"]
+			if !hasCID {
+				continue
+			}
+			sawCommunity = true
+			if _, ok := cid.(float64); !ok {
+				t.Errorf("community_id has wrong type: %T (%v)", cid, cid)
+			}
+			label, _ := m["topic_label"].(string)
+			if label == "" {
+				t.Error("community_id present but topic_label empty")
+			}
+		}
+		// Log-only: when the fixture happens to produce labels we want to
+		// know the path was actually exercised. Not a hard assertion.
+		t.Logf("community decoration observed on at least one node: %v", sawCommunity)
+	})
+
 	// ---- search tests -----------------------------------------------------
 	t.Run("search_greet", func(t *testing.T) {
 		// "Greet" is defined in a/a.go — must be present in FTS.

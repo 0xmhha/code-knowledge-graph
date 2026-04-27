@@ -53,6 +53,11 @@ func (s *Server) handleHierarchy(w http.ResponseWriter, r *http.Request) {
 // handleNodes returns nodes either at the top level (parent="" → packages)
 // or scoped under a parent via pkg_tree. Limit is bounded to 50k to keep
 // JSON payload bounded.
+//
+// Responses are decorated with community_id + topic_label from the
+// topic_tree projection (see community.go). The viewer reads these for
+// COMMUNITY colour mode; if the topic_tree is missing or sparse the fields
+// are omitted and the viewer falls back to LANG colouring.
 func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	parent := r.URL.Query().Get("parent")
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
@@ -64,7 +69,7 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, nodes)
+	writeJSON(w, s.decorateNodes(nodes))
 }
 
 // handleEdges accepts a JSON body {"ids":[...]} and returns every edge
@@ -116,7 +121,7 @@ func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(body.IDs) == 0 {
-		writeJSON(w, []types.Node{})
+		writeJSON(w, []apiNode{})
 		return
 	}
 	nodes, err := s.store.NodesByIDs(body.IDs)
@@ -124,7 +129,7 @@ func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, nodes)
+	writeJSON(w, s.decorateNodes(nodes))
 }
 
 // handleSearch delegates the smart routing (FTS / CJK substring,
@@ -133,7 +138,7 @@ func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query().Get("q")
 	if q == "" {
-		writeJSON(w, []types.Node{})
+		writeJSON(w, []apiNode{})
 		return
 	}
 	hits, err := s.store.Search(q, 20)
@@ -141,5 +146,5 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, hits)
+	writeJSON(w, s.decorateNodes(hits))
 }
