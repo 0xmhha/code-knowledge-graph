@@ -1,10 +1,29 @@
-# Viewer 성능·클러스터링·코드 트레이스 개선 (검토 문서)
+# Viewer 성능·클러스터링·코드 트레이스 개선
 
 작성일: 2026-04-27
-대상: `web/viewer/`
-상태: 검토 단계 — 결정 후 Phase 0 부터 착수
+대상: `web/viewer-next/` (마이그레이션 완료) — 이전 `web/viewer/` 는 `make viewer-old` 로 폴백 가능, 검증 후 제거 예정
+상태: **Phase 0~3 shipped + Next.js migration shipped (2026-04-27)** — 아래 Status 섹션 참조
 참조: `docs/VIEWER-ROADMAP.md`(L1~L4), `docs/ARCHITECTURE.md`,
 `internal/cluster/leiden.go`, `internal/persist/sqlite.go`(topic_tree)
+
+---
+
+## Status (2026-04-27)
+
+| Phase | 상태 | 시점 | 주요 커밋 |
+|-------|------|------|----------|
+| **Migration**: vanilla esbuild → Next.js 14 (App Router, TS) | ✓ shipped | 2026-04-27 | `46bab08` |
+| **Phase 0**: store.commit() + RAF coalescer + sync 인덱스화 | ✓ shipped | 2026-04-27 | `46bab08` |
+| **Phase 1**: communityColor() hash→HSL + LANG/COMMUNITY 토글 + Legend (frontend) | ✓ shipped | 2026-04-27 | `46bab08` |
+| **Phase 1 (backend)**: `/api/nodes` 에 `community_id` + `topic_label` 합류 | ✓ shipped | 2026-04-27 | `74f4bcf` |
+| **Phase 2**: 자동 anchor 제거 + traceFromNode (callers/callees/both, asymmetric depth, edge-type 화이트리스트) | ✓ shipped | 2026-04-27 | `46bab08` |
+| **Phase 3**: Legend dim/isolate (click/shift-click) + EdgeTypeFilters | ✓ shipped | 2026-04-27 | `46bab08` |
+| **M4 integration**: Makefile swap, web_assets embed, viewer-old fallback | ✓ shipped | 2026-04-27 | `dcae9b4` |
+| **Polish 1**: web_assets gitignore (build 산출물 churn 제거, stub fallback) | ✓ shipped | 2026-04-27 | `cd4f8d7`, `86c197e` |
+| **Polish 2**: npm audit moderate (postcss override) | ✓ shipped | 2026-04-27 | `36dbdb4` |
+| **Polish 3**: 단축키 (`m v t 1-4 ? +/-/0`) + on-canvas ControlLayer + HelpOverlay | ✓ shipped | 2026-04-27 | `54108cb`, `0095a62` |
+
+**경로 변경**: 본 문서의 4·9 절은 변경 전 `web/viewer/src/*.js` 기준으로 작성됨. 실제 구현은 `web/viewer-next/src/{components,lib,store}/*.{ts,tsx}` 에 안착. 본문은 *원본 계획·근거 문서* 로 보존하고, **현재 작업 위치는 11절(Next Directions) 참고**.
 
 ---
 
@@ -396,8 +415,129 @@ internal/server/api.go (또는 viewer.go) : nodes 응답에 community_id/topic_l
 
 ---
 
-## 10. 다음 액션
+## 10. 다음 액션 (원본 — Phase 0 착수 직전)
 
 1. 위 결정 포인트 5건 중 #1·#2·#4 답변 → Phase 1·2 코드 모양 확정
 2. Phase 0 PR 분리 착수 (결정 무관)
 3. Phase 0 머지 후 측정 → ROI 비교 → Phase 1·2 우선순위 재확정
+
+> 위 원본 계획은 4-7번 커밋에서 모두 이행됨. 결정 포인트 5건의 채택 결과는 11절 참고.
+
+---
+
+## 11. Next Directions (2026-04-27 기준, Phase 0~3 + Migration 완료 후)
+
+Phase 0~3 와 Next.js 마이그레이션이 모두 머지된 시점에서 *그 다음* 무엇을 할지 정리. 우선순위는 **사용자 가치 / 코드 리뷰 효용 / 위험 노출** 순.
+
+### 11.1 채택된 결정 포인트 (5건의 결과)
+
+| # | 결정 | 채택안 | 구현 위치 |
+|---|------|--------|----------|
+| 1 | 커뮤니티 색 매핑 | (a) hash→HSL (137.5° 골든앵글) | `web/viewer-next/src/lib/encoding.ts` `communityColorHex()` |
+| 2 | 트레이스 기본 방향 | `both` | `web/viewer-next/src/store/store.ts` `traceDirection: 'both'` |
+| 3 | 트레이스 깊이 정책 | 1~4 슬라이더 + asymmetric (callers = depth+2) | `web/viewer-next/src/lib/trace.ts` |
+| 4 | edge-type 화이트리스트 기본값 | `calls / invokes / binds_to / extends / implements` | `web/viewer-next/src/lib/edges.ts` `DEFAULT_EDGE_TYPES` |
+| 5 | 렌더 commit 트리거 | 200ms debounce(검색) + RAF coalescer(navigation/trace) | `web/viewer-next/src/store/store.ts` `commit()` |
+
+추가 채택 (계획 외):
+- **단축키**: `[`, `]`, `Home`, `/`, `Esc`, `m`, `v`, `t`, `1-4`, `?`, `+/=`, `-`, `0`
+- **on-canvas ControlLayer** (top-right, glass) + **HelpOverlay modal** — 사이드바 패널 숨겨도 모든 컨트롤 접근 가능
+- **stub `index.html`** — `make viewer` 안 돌린 상태에서도 `go build` 가 작동하는 binary 생성
+
+### 11.2 권장 다음 작업 (우선순위순)
+
+#### A. 실 그래프 검증 — **권장 P0 (즉시)**
+
+**무엇을**: `make build && bin/ckg serve --db <real-graph.db>` 로 띄우고 실제 코드베이스(go-stablenet 같은 ~200K node 그래프)에서 새 viewer 의 perf·UX 를 사용자가 직접 검증.
+
+**왜 가장 중요한가**: 모든 Phase 가 통과했지만, 검증된 건 합성 fixture(10 nodes / 9 edges) 와 `npm run build` 까지. 실 데이터에서:
+- Phase 0 commit 패턴이 200K 노드 / 314K 엣지 환경에서 약속된 만큼 빠른가
+- communityColor hash→HSL 이 188개 community(reference graph 기준)에서 실제로 시각적으로 구별 가능한가
+- `t` 키 + 노드 클릭 = 트레이스 워크플로가 *코드 추적* 도구로서 실제로 쓸만한가
+
+**산출물**: `docs/VIEWER-PERF-CLUSTERING.md` 의 §7 측정 표 채우기 (현재 ms 값 미입력). 미달 시 Phase 0+ 추가 최적화 결정.
+
+**시간 예상**: 30분~2시간 (실 그래프 빌드는 이미 있음)
+
+**위험**: 낮음. 발견된 perf 미달은 별도 PR.
+
+#### B. 사이드바·ControlLayer DRY 정리 (Final review B1) — **권장 P1**
+
+**무엇을**: `viewMode` / `colorMode` localStorage 쓰기가 3곳에 중복(`App.tsx:181`, `ControlLayer.tsx:40`, `TopBar.tsx:34`). Zustand 스토어의 `setViewMode` / `setColorMode` 액션이 직접 localStorage 까지 책임지도록 통합.
+
+**왜**: 같은 키에 같은 값을 쓰는 코드가 3개 — 미래에 한 곳만 변경되면 silent drift. `coding-style.md` 의 DRY 위반.
+
+**파일**: `web/viewer-next/src/store/store.ts` (`setViewMode`/`setColorMode` 안에 try/catch localStorage 흡수), 호출 3곳에서 localStorage 라인 제거.
+
+**시간**: 15분. 위험 0.
+
+#### C. `as never` / `Record<string, unknown>` 타입 캐스트 정리 — **권장 P2**
+
+**무엇을**: `web/viewer-next/src/components/GraphCanvas.tsx` 에는 react-force-graph 타입 부재로 인한 캐스트가 다수. Polish 3 에서 일부 정리(typed `FGShim` 인터페이스 추출)했지만 `as never` 가 prop level 에 6군데 남아있음. 
+
+옵션:
+- (i) 별도 `.d.ts` 모듈을 작성해 `react-force-graph-2d`/`-3d` 의 NodeAccessor / Link 시그니처를 우리 도메인 타입에 맞게 재선언
+- (ii) `react-force-graph` 의 GitHub 에 PR 보내기 (장기적으로 가장 깨끗)
+
+**왜**: 코드 리뷰 효용. 현재는 strict TS 의 안전망이 라이브러리 경계에서 끊김. 신규 contributor 가 prop callback 시그니처를 리팩토링할 때 컴파일러 보호 못 받음.
+
+**시간**: (i) 1~2시간, (ii) 며칠 (커뮤니티 응답 대기). (i) 부터.
+
+#### D. 기존 `web/viewer/` retire — **권장 P2**
+
+**무엇을**: `web/viewer/` 디렉토리 + `make viewer-old` 타겟 제거. 한 단계: `git mv web/viewer web/viewer-legacy` 로 rename 후 deprecation 표시 → 다음 사이클에 삭제. 또는 한 번에 `git rm`.
+
+**전제 조건**: A 완료 (실 검증) 후. 그 전엔 fallback 가치 있음.
+
+**시간**: 30분 (Makefile 정리 + `.gitignore` `/web/viewer/` 라인 제거 + git rm 또는 mv).
+
+#### E. App.tsx 키보드 핸들러 테스트 (Final review B2) — **권장 P2**
+
+**무엇을**: `App.tsx:147-229` (~80 LOC) 가 user-facing 의 절반인데 테스트 0. Vitest + @testing-library/react 로 smoke 테스트:
+- "press 'v' → store.viewMode flips"
+- "press '?' → helpOpen=true → press Escape → helpOpen=false"
+- "press 'm' while focus on input → store.colorMode unchanged" (input-focus guard)
+
+**왜**: 단축키 추가는 앞으로 자연스럽게 늘어남. 한 번 테스트 인프라 구축해두면 이후 추가는 cheap.
+
+**파일**: `web/viewer-next/src/components/__tests__/App.test.tsx` 신규. `package.json` 에 vitest scripts 추가.
+
+**시간**: 처음 인프라 구축 1.5~2시간 + 테스트 작성 1시간.
+
+#### F. e2e 테스트 포팅 — **권장 P3**
+
+**무엇을**: 기존 `web/viewer/tests/` (Playwright) 가 있다면 `web/viewer-next/` 로 이전 + 새 단축키 / ControlLayer 시나리오 추가.
+
+**왜**: D (web/viewer 제거) 의 전제 조건. 또는 D 후에 새로 작성.
+
+**시간**: 4~6시간 (시나리오 4~6개 기준).
+
+#### G. 부수 정리 (낮은 우선순위, batch 가능)
+
+| 항목 | 출처 | 시간 |
+|------|------|------|
+| Community decoration 음성 케이스 테스트 (sparse topic_tree → 필드 부재 검증) | Final review B3 | 30분 |
+| Help overlay Escape 핸들러 중복 (App + Component) — 한쪽으로 정리 | Task 3 review M5 | 10분 |
+| `_RefHack` 같은 dead export 잔재 sweep | 일반 cleanup | 30분 |
+| `web_assets/` allowlist 패턴 정착 (favicon 등 추가 파일 대비) | Final review B5 | 1시간 |
+| ESLint 설정 (Next.js 권장) | M1 잔여 | 30분 |
+| Static 모드 검색 (MiniSearch) | `VIEWER-ROADMAP.md` L? | 4~8시간 |
+
+#### H. 보안 후속 — `next` major bump (별도 작업)
+
+`npm audit` 의 high (next 14.2.x 의 5건 server-runtime CVE) 는 우리 deploy 모델(`output: 'export'` 정적 export, Go binary embed)에선 unreachable 이라 비차단. 그러나 next 16+ 으로 가면 사라짐. 단 App Router behavior 변경 영향이 있으므로 **별도 마이그레이션 PR** 로 관리. 현재 없음 = 정상 결정.
+
+### 11.3 권장 진행 순서
+
+```
+P0:    A (실 검증, 30분~2h)
+       ↓ 결과에 따라 분기
+       ├── perf 충분 → B → C → D → E → F → G
+       └── perf 미달 → 추가 Phase 0+ 최적화 (별도 PR)
+
+병렬 가능: B (DRY) 와 G(부수) 는 A·C·D 와 독립
+```
+
+### 11.4 한 문장 요약
+
+**A 만 하고 나머지는 다음 사이클** 이 가장 비용 효율적. A 결과에 따라 우선순위가 *데이터 기반* 으로 재배치됨. B·E 는 합쳐서 30~120분이라 "겸사겸사 PR" 후보. C·D·F 는 코드 리뷰 가치 vs 비용 균형으로 다음 마일스톤 분리.
