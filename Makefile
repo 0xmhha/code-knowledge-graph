@@ -32,6 +32,11 @@ viewer-old:
 
 build: viewer
 	$(GO) build -o bin/ckg ./cmd/ckg
+	@# The binary already embedded the real Next.js index.html at compile
+	@# time, so restore the tracked stub so `git status` stays clean. No-op
+	@# outside a git repo (CI tarballs etc.) — the stub on disk doesn't
+	@# affect the running binary.
+	@if [ -d .git ]; then git checkout -- internal/server/web_assets/index.html 2>/dev/null || true; fi
 
 build-no-viewer:
 	$(GO) build -o bin/ckg ./cmd/ckg

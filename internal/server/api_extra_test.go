@@ -309,17 +309,17 @@ func TestCopyViewerAssetsTo(t *testing.T) {
 	}
 	t.Logf("CopyViewerAssetsTo wrote: %v", written)
 
-	// index.html is present when `make viewer` has been run; on a fresh clone
-	// the embed contains only .gitkeep so index.html may be absent — log and
-	// continue rather than fail, since the binary still serves API routes.
+	// index.html is always tracked — either as the post-`make viewer` Next.js
+	// page or the committed stub that explains how to build the viewer. Either
+	// way, missing index.html means the embed is broken.
 	indexPath := filepath.Join(dst, "index.html")
 	if _, err := os.Stat(indexPath); err != nil {
-		t.Logf("index.html not present — stub-only mode (run `make viewer` to build the full viewer)")
+		t.Errorf("index.html missing from dst: %v", err)
 	}
 
-	// If _next/static/ is present (i.e. `make viewer` has been run), verify
-	// that it contains at least one .js file. When the embed contains only
-	// .gitkeep (fresh clone), the directory will be absent — log and pass.
+	// _next/static/ is only present after `make viewer` has been run. On a
+	// fresh clone (stub-only) it's gitignored so the directory is absent —
+	// we log and skip the .js-count assertion in that case.
 	staticDir := filepath.Join(dst, "_next", "static")
 	if _, err := os.Stat(staticDir); err != nil {
 		t.Logf("_next/static/ not present in embedded assets — stub-only mode (run `make viewer` to build the full viewer)")
