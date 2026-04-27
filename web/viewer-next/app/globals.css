@@ -197,3 +197,163 @@ html, body {
   align-items: center;
 }
 .stale-banner { background: #5a4a00; color: #fff; padding: 4px 8px; font-size: 11px; }
+
+/* ── ControlLayer ────────────────────────────────────────────────────────── */
+.control-layer {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  width: 180px;
+  background: rgba(26, 28, 31, 0.85);
+  border: 1px solid #2a2c30;
+  border-radius: 4px;
+  color: #e6e7e9;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+}
+
+.cl-section {
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cl-divider {
+  height: 1px;
+  background: #2a2c30;
+}
+
+.cl-label {
+  color: #888;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.cl-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cl-muted {
+  color: #888;
+  font-size: 10px;
+  min-width: 36px;
+}
+
+.cl-btn {
+  background: #232529;
+  color: #e6e7e9;
+  border: 1px solid #2a2c30;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  border-radius: 2px;
+  line-height: 1.4;
+}
+
+.cl-btn:hover { background: #2a2c30; }
+.cl-btn.active { background: #2a3140; border-color: #7ab8ff; color: #7ab8ff; }
+
+.cl-toggle { min-width: 44px; text-align: center; }
+
+.cl-help-btn {
+  width: 100%;
+  text-align: left;
+  padding: 3px 6px;
+}
+
+/* ── HelpOverlay ─────────────────────────────────────────────────────────── */
+.help-overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-overlay-panel {
+  background: #1a1c1f;
+  border: 1px solid #2a2c30;
+  border-radius: 6px;
+  padding: 16px 20px;
+  min-width: 300px;
+  max-width: 420px;
+  color: #e6e7e9;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.ho-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.ho-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cfd0d3;
+}
+
+.ho-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  line-height: 1;
+}
+.ho-close:hover { color: #e6e7e9; }
+
+.ho-section {
+  margin-bottom: 12px;
+}
+.ho-section:last-child { margin-bottom: 0; }
+
+.ho-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7ab8ff;
+  margin-bottom: 6px;
+}
+
+.ho-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.ho-key {
+  display: inline-block;
+  min-width: 52px;
+  background: #232529;
+  border: 1px solid #2a2c30;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #cfd0d3;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ho-desc {
+  color: #9aa;
+  font-size: 11px;
+}

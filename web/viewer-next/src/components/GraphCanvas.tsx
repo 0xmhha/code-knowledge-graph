@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useStore } from '@/store/store';
 import { useShallow } from 'zustand/react/shallow';
@@ -42,8 +42,24 @@ interface Props {
   onNodeClick: (id: NodeId) => void;
 }
 
-export default function GraphCanvas({ onNodeClick }: Props) {
+export interface GraphCanvasHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  zoomReset: () => void;
+}
+
+// 2D zoom uses fg.zoom(factor, durationMs).
+// 3D zoom adjusts cameraPosition distance toward/away from origin.
+const ZOOM_FACTOR_IN = 1.4;
+const ZOOM_FACTOR_OUT = 1 / 1.4;
+const ZOOM_DURATION_MS = 200;
+
+const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
+  { onNodeClick },
+  ref,
+) {
   const fgRef = useRef<unknown>(null);
+  const viewModeRef = useRef<ViewMode>('3d');
 
   // Subscribe with shallow check so we re-render only when these change.
   const { viewMode, colorMode, fontSize, edgeTypeWhitelist, dimmedCommunities, isolatedCommunity } =
@@ -55,6 +71,68 @@ export default function GraphCanvas({ onNodeClick }: Props) {
       dimmedCommunities: s.dimmedCommunities,
       isolatedCommunity: s.isolatedCommunity,
     })));
+
+  // Keep a ref of current viewMode so imperative handle can read it without
+  // re-creating the handle on every viewMode change.
+  viewModeRef.current = viewMode;
+
+  useImperativeHandle(ref, () => ({
+    zoomIn() {
+      const fg = fgRef.current as Record<string, unknown> | null;
+      if (!fg) return;
+      if (viewModeRef.current === '2d') {
+        const zoom = fg.zoom as ((factor: number, duration?: number) => void) | undefined;
+        zoom?.(ZOOM_FACTOR_IN, ZOOM_DURATION_MS);
+      } else {
+        const camPos = fg.cameraPosition as
+          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => { x: number; y: number; z: number } | void) | undefined;
+        if (!camPos) return;
+        const cur = camPos() as { x: number; y: number; z: number } | undefined;
+        if (!cur) return;
+        const dist = Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2);
+        const factor = ZOOM_FACTOR_IN;
+        const newDist = dist / factor;
+        camPos(
+          { x: (cur.x / dist) * newDist, y: (cur.y / dist) * newDist, z: (cur.z / dist) * newDist },
+          null,
+          ZOOM_DURATION_MS,
+        );
+      }
+    },
+    zoomOut() {
+      const fg = fgRef.current as Record<string, unknown> | null;
+      if (!fg) return;
+      if (viewModeRef.current === '2d') {
+        const zoom = fg.zoom as ((factor: number, duration?: number) => void) | undefined;
+        zoom?.(ZOOM_FACTOR_OUT, ZOOM_DURATION_MS);
+      } else {
+        const camPos = fg.cameraPosition as
+          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => { x: number; y: number; z: number } | void) | undefined;
+        if (!camPos) return;
+        const cur = camPos() as { x: number; y: number; z: number } | undefined;
+        if (!cur) return;
+        const dist = Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2);
+        const newDist = dist / ZOOM_FACTOR_OUT;
+        camPos(
+          { x: (cur.x / dist) * newDist, y: (cur.y / dist) * newDist, z: (cur.z / dist) * newDist },
+          null,
+          ZOOM_DURATION_MS,
+        );
+      }
+    },
+    zoomReset() {
+      const fg = fgRef.current as Record<string, unknown> | null;
+      if (!fg) return;
+      if (viewModeRef.current === '2d') {
+        const zoomToFit = fg.zoomToFit as ((duration?: number) => void) | undefined;
+        zoomToFit?.(ZOOM_DURATION_MS);
+      } else {
+        const camPos = fg.cameraPosition as
+          ((pos?: { x: number; y: number; z: number }, lookAt?: null, duration?: number) => void) | undefined;
+        camPos?.({ x: 0, y: 0, z: 600 }, null, ZOOM_DURATION_MS);
+      }
+    },
+  }), []);
 
   // graphData re-derives on visibleIds / edges / nodes change. We use the
   // edge index to avoid scanning the full edges array.
@@ -231,7 +309,9 @@ export default function GraphCanvas({ onNodeClick }: Props) {
       }) as never}
     />
   );
-}
+});
+
+export default GraphCanvas;
 
 function buildTooltip(node: GraphNode, focusDistance: Map<NodeId, number>, fs: number): string {
   const t = node.type ?? '?';
