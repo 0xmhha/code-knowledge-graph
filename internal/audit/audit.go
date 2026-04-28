@@ -129,11 +129,15 @@ func loadModule(absRoot, modDir string, set map[string]struct{}) error {
 	if err != nil {
 		return fmt.Errorf("packages.Load in %s: %w", modDir, err)
 	}
+	// Tests:true also synthesizes a `*.test` main package whose generated main
+	// file lives in the build cache, OUTSIDE srcRoot. The HasPrefix("..") check
+	// below filters those (and stdlib paths reachable via NeedDeps) so only
+	// files under the user's source tree end up in the build set.
 	for _, pkg := range pkgs {
 		for _, abs := range pkg.GoFiles {
 			rel, err := filepath.Rel(absRoot, abs)
 			if err != nil || strings.HasPrefix(rel, "..") {
-				continue // outside srcRoot (stdlib via NeedDeps, etc.)
+				continue
 			}
 			set[filepath.ToSlash(rel)] = struct{}{}
 		}
