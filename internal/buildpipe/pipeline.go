@@ -48,17 +48,25 @@ func Run(opt Options) (persist.Manifest, error) {
 	}
 
 	// (1) detect
+	// TS/Sol use extension-based discovery (detect.Walk) — they have no host
+	// build system to consult. Go uses go/packages.Load (detect.GoFiles)
+	// because Go's build constraints (//go:build, host OS/arch shims, CGO
+	// alternates) cannot be reproduced from filename extensions alone.
 	files, err := detect.Walk(opt.SrcRoot)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect: %w", err)
 	}
-	log.Info("detected files", "go", len(files.Go), "ts", len(files.TS), "sol", len(files.Sol))
+	goFiles, err := detect.GoFiles(opt.SrcRoot)
+	if err != nil {
+		return persist.Manifest{}, fmt.Errorf("detect go: %w", err)
+	}
+	log.Info("detected files", "go", len(goFiles), "ts", len(files.TS), "sol", len(files.Sol))
 
 	// (2)+(3) parse + link, per language
 	resolved := []*parse.ResolvedGraph{}
 	parseErrs := 0
-	if shouldRun("go", opt.Languages) && len(files.Go) > 0 {
-		rg, n, err := runGoPipeline(opt.SrcRoot, files.Go, log)
+	if shouldRun("go", opt.Languages) && len(goFiles) > 0 {
+		rg, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("go pipeline: %w", err)
 		}
@@ -152,7 +160,7 @@ func Run(opt Options) (persist.Manifest, error) {
 		CKGVersion:     opt.CKGVersion,
 		BuildTimestamp: time.Now().UTC().Format(time.RFC3339),
 		SrcRoot:        opt.SrcRoot,
-		Languages:      map[string]int{"go": len(files.Go), "ts": len(files.TS), "sol": len(files.Sol)},
+		Languages:      map[string]int{"go": len(goFiles), "ts": len(files.TS), "sol": len(files.Sol)},
 		Stats: map[string]int{
 			"nodes":          len(g.Nodes),
 			"edges":          len(g.Edges),

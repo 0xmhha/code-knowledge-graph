@@ -167,10 +167,12 @@ func TestServeCmd_PortInUse(t *testing.T) {
 // the binary. openBrowser silently swallows the Start() error, so all of its
 // statements still execute (preserving coverage) but no GUI window appears.
 func TestServeCmd_PortInUseWithOpen(t *testing.T) {
-	t.Setenv("PATH", "")
-
+	// buildGraph runs first so go/packages can locate the `go` toolchain on
+	// PATH; the openBrowser goroutine that needs PATH="" comes after.
 	graphDir := t.TempDir()
 	buildGraph(t, graphDir)
+
+	t.Setenv("PATH", "")
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

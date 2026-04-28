@@ -9,12 +9,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"golang.org/x/tools/go/packages"
+	"github.com/0xmhha/code-knowledge-graph/internal/detect"
 )
 
 // store is the read surface audit needs from persist.
@@ -28,7 +26,7 @@ type Report struct {
 	BuildCount  int      `json:"build_count"`
 	DBCount     int      `json:"db_count"`
 	InBuildOnly []string `json:"in_build_only"` // missing from DB — bug
-	InDBOnly    []string `json:"in_db_only"`    // over-included by detect.Walk
+	InDBOnly    []string `json:"in_db_only"`    // over-included relative to build oracle
 	InBoth      int      `json:"in_both"`
 }
 
@@ -73,76 +71,23 @@ func RunGo(srcRoot string, s store) (Report, error) {
 	return r, nil
 }
 
-// collectBuildSet finds every go.mod under srcRoot and unions the
-// pkg.GoFiles output of go/packages.Load("./...") in each module.
+// collectBuildSet delegates to detect.GoFiles — the single source of truth
+// for "what is a Go build file under srcRoot". Audit and the production
+// build pipeline must agree on this set; sharing the implementation makes
+// drift between them structurally impossible.
 //
-// We walk for go.mod files (rather than calling Load once at srcRoot)
-// because a corpus may contain multiple modules (testdata/synthetic has
-// go-backend/go.mod nested) or none at the root. Load is read-only so
-// repeating it per module is safe.
+// Returns a set form (map keyed by slash-rel-path) for fast lookup against
+// the DB set during diff computation.
 func collectBuildSet(srcRoot string) (map[string]struct{}, error) {
-	absRoot, err := filepath.Abs(srcRoot)
+	files, err := detect.GoFiles(srcRoot)
 	if err != nil {
-		return nil, fmt.Errorf("abs srcRoot: %w", err)
+		return nil, err
 	}
-	if st, err := os.Stat(absRoot); err != nil || !st.IsDir() {
-		return nil, fmt.Errorf("src not a directory: %s", srcRoot)
-	}
-	out := map[string]struct{}{}
-	err = filepath.WalkDir(absRoot, func(p string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if d.IsDir() {
-			n := d.Name()
-			if p != absRoot && (n == "vendor" || n == "node_modules" || n == ".git") {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() == "go.mod" {
-			return loadModule(absRoot, filepath.Dir(p), out)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk for go.mod: %w", err)
+	out := make(map[string]struct{}, len(files))
+	for _, p := range files {
+		out[p] = struct{}{}
 	}
 	return out, nil
-}
-
-// loadModule runs packages.Load("./...") in modDir and adds GoFiles to set.
-//
-// Tests:true is set so external test packages (`pkg_test`) and the test
-// variants of regular packages surface as their own pkg entries with the
-// `_test.go` files in GoFiles. Without this flag, packages.Load excludes
-// every `_test.go` file by default — and since detect.Walk's production
-// path indexes them by extension, omitting them from the build oracle
-// would surface as a 100% spurious DRIFT signal.
-func loadModule(absRoot, modDir string, set map[string]struct{}) error {
-	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedFiles | packages.NeedModule,
-		Dir:   modDir,
-		Tests: true,
-	}
-	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil {
-		return fmt.Errorf("packages.Load in %s: %w", modDir, err)
-	}
-	// Tests:true also synthesizes a `*.test` main package whose generated main
-	// file lives in the build cache, OUTSIDE srcRoot. The HasPrefix("..") check
-	// below filters those (and stdlib paths reachable via NeedDeps) so only
-	// files under the user's source tree end up in the build set.
-	for _, pkg := range pkgs {
-		for _, abs := range pkg.GoFiles {
-			rel, err := filepath.Rel(absRoot, abs)
-			if err != nil || strings.HasPrefix(rel, "..") {
-				continue
-			}
-			set[filepath.ToSlash(rel)] = struct{}{}
-		}
-	}
-	return nil
 }
 
 // WriteText emits a human-readable summary plus first-N examples for diffs.

@@ -310,9 +310,13 @@ Next.js 14 + react-force-graph-2d/3d + zustand + lit-html 잔재 정리 중.
 ### Wave 2 (E1 + E2)
 - [x] `ckg audit --src=… --graph=…` 동작
 - [x] testdata/synthetic 빌드 후 audit zero-diff 확인 (3/3 parity, exit 0)
-- [ ] Go production path가 `go/packages.Load(./...)` 사용
-- [ ] build constraint 무시 case 회귀 테스트 통과
+- [x] Go production path가 `go/packages.Load(./...)` 사용
+- [x] build constraint 무시 case 회귀 테스트 통과
 - [ ] `go.work` 또는 generated 파일 inclusion 회귀 테스트
+      <!-- TODO(E2-followup): go.work 시나리오는 별도 fixture가 필요. 현재
+           detect.GoFiles는 go.mod 단위로 packages.Load("./...")를 호출하므로
+           workspace 멤버가 srcRoot 외부에 있는 케이스는 미지원 — go.work를
+           쓰는 대형 모노레포에서 회귀 테스트 추가 필요. -->
 
 E1 측정 결과 (go-stablenet-latest 대상, 2026-04-28):
 - build set (go/packages, Tests=true): 1259 files
@@ -320,6 +324,11 @@ E1 측정 결과 (go-stablenet-latest 대상, 2026-04-28):
 - in_build_only: 0 (현재 production은 누락 없음)
 - in_db_only: 41 (build-tag mismatch + `//go:build ignore` 도구 + cross-OS shim 과다 포함)
 - E2 목표: in_db_only를 0으로 수렴시키되, in_build_only도 계속 0 유지
+
+E2 검증 결과 (go-stablenet-latest 대상, 2026-04-28):
+- build set: 1259 / db set: 1259 / in_both: 1259
+- in_build_only: 0 / in_db_only: 0 → **PARITY** (exit 0)
+- testdata/synthetic 동시 검증: 3/3 PARITY 유지
 
 ### Wave 3 (A4 + A5 + A3)
 - [ ] `persist.Store` interface 추출, SQLite는 구현체
