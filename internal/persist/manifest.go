@@ -12,6 +12,7 @@ type Manifest struct {
 	CKGVersion          string         `json:"ckg_version"`
 	BuildTimestamp      string         `json:"build_timestamp"`
 	SrcRoot             string         `json:"src_root"`
+	SrcRelPath          string         `json:"src_rel_path,omitempty"` // src_root relative to git repo root; enables path-aware staleness
 	SrcCommit           string         `json:"src_commit,omitempty"`
 	StalenessMethod     string         `json:"staleness_method"` // "git" | "mtime"
 	StalenessFiles      []string       `json:"staleness_files,omitempty"`
@@ -39,6 +40,7 @@ func (s *Store) SetManifest(m Manifest) error {
 		{"ckg_version", m.CKGVersion},
 		{"build_timestamp", m.BuildTimestamp},
 		{"src_root", m.SrcRoot},
+		{"src_rel_path", m.SrcRelPath},
 		{"src_commit", m.SrcCommit},
 		{"staleness_method", m.StalenessMethod},
 		{"clustering_status", m.ClusteringStatus},
@@ -92,6 +94,7 @@ func (s *Store) GetManifest() (Manifest, error) {
 		CKGVersion:       kv["ckg_version"],
 		BuildTimestamp:   kv["build_timestamp"],
 		SrcRoot:          kv["src_root"],
+		SrcRelPath:       kv["src_rel_path"],
 		SrcCommit:        kv["src_commit"],
 		StalenessMethod:  kv["staleness_method"],
 		ClusteringStatus: kv["clustering_status"],
