@@ -7,6 +7,16 @@ import (
 
 // Manifest captures build-time metadata. Stored as key/value rows in the
 // manifest table; complex fields are JSON-encoded.
+//
+// SchemaVersion policy: bumped on BREAKING changes only — i.e. changes that
+// existing readers cannot transparently tolerate (renamed/removed fields,
+// changed semantics, incompatible row layout). Additive optional fields with
+// `omitempty` do NOT bump SchemaVersion: old readers ignore unknown JSON
+// fields and unset optional fields decode as zero values. Example: the
+// SrcRelPath field was added without a bump (1.0 → still 1.0) because empty
+// SrcRelPath triggers the legacy back-compat branch in callers. Resist the
+// urge to over-bump; spurious bumps force unnecessary rebuilds across all
+// existing graph DBs.
 type Manifest struct {
 	SchemaVersion       string         `json:"schema_version"`
 	CKGVersion          string         `json:"ckg_version"`

@@ -109,6 +109,47 @@ func TestComputeStaleness_LegacyBackcompat(t *testing.T) {
 	}
 }
 
+// TestComputeStaleness_LegacyBackcompat_DiscriminatesPathAware constructs a
+// scenario where the legacy and path-aware branches disagree, so the test
+// will fail loudly if a future refactor accidentally routes legacy manifests
+// through the path-aware branch.
+//
+// Setup: SrcRoot points to a sub-directory inside a repo, SrcRelPath is
+// empty (legacy). A new commit lands OUTSIDE that sub-directory.
+//   - Legacy branch (`git -C srcRoot rev-parse HEAD`): HEAD moved → stale=true.
+//     This is the documented limitation we deliberately retain for back-compat.
+//   - Path-aware branch (`git log -1 -- <relPath>`): the unrelated commit
+//     does NOT touch SrcRelPath → stale=false.
+//
+// If this assertion ever fails ("expected stale=true but got false"), someone
+// has routed legacy manifests through the path-aware branch. That is a
+// back-compat regression: every existing /tmp/ckg-* graph DB without
+// SrcRelPath would silently stop showing the stale banner on HEAD movement.
+func TestComputeStaleness_LegacyBackcompat_DiscriminatesPathAware(t *testing.T) {
+	repo := initRepoFor(t)
+	recordedSHA := commitFileTo(t, repo, "sub/a.go", "package sub\n", "initial in sub")
+
+	// Legacy manifest pointing at a sub-directory. SrcRelPath intentionally
+	// empty — exactly what an old manifest looks like.
+	m := persist.Manifest{
+		SrcRoot:         filepath.Join(repo, "sub"),
+		SrcCommit:       recordedSHA,
+		StalenessMethod: "git",
+		// SrcRelPath intentionally empty (legacy).
+	}
+
+	// Commit OUTSIDE the sub-directory. Path-aware logic would consider this
+	// irrelevant; legacy logic sees HEAD has moved and flips stale.
+	commitFileTo(t, repo, "other/b.go", "package other\n", "outside sub")
+
+	_, stale := computeStaleness(m)
+	if !stale {
+		t.Errorf("stale = false after outside commit; legacy branch must detect HEAD movement.\n" +
+			"If this fails, someone routed legacy manifests through the path-aware branch — " +
+			"that's a back-compat regression for existing /tmp/ckg-* graph DBs without SrcRelPath.")
+	}
+}
+
 // TestComputeStaleness_NotGit verifies the function gracefully returns
 // ("", false) when the recorded SrcRoot is not a git checkout.
 func TestComputeStaleness_NotGit(t *testing.T) {
