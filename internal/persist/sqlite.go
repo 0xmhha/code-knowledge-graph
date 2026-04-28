@@ -208,6 +208,32 @@ func (s *Store) RebuildFTS() error {
 	return err
 }
 
+// DistinctFilePaths returns the unique file_path values recorded on nodes
+// for the given language. Used by `ckg audit` to compare the DB's actual
+// file inclusion set against an authoritative reference (e.g. the Go build
+// system's go/packages.Load output). Empty slice when no rows match.
+func (s *Store) DistinctFilePaths(language string) ([]string, error) {
+	rows, err := s.db.Query(
+		`SELECT DISTINCT file_path FROM nodes WHERE language = ? AND file_path != ''`,
+		language)
+	if err != nil {
+		return nil, fmt.Errorf("distinct file_path (lang=%q): %w", language, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan file_path: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate file_path rows: %w", err)
+	}
+	return out, nil
+}
+
 // QueryEdgesByType returns all edges whose type matches t. Used by tests
 // and downstream consumers (eval/MCP) that want to pull edges by relation
 // kind without scanning the full table.

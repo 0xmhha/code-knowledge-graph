@@ -133,6 +133,43 @@ func containsID(ids []string, id string) bool {
 }
 
 // ---------------------------------------------------------------------------
+// TestDistinctFilePaths
+// ---------------------------------------------------------------------------
+
+func TestDistinctFilePaths_Go(t *testing.T) {
+	s := newFixtureStore(t)
+
+	paths, err := s.DistinctFilePaths("go")
+	if err != nil {
+		t.Fatalf("DistinctFilePaths: %v", err)
+	}
+	// Fixture has 4 nodes across 4 distinct file paths
+	// (mypkg/mypkg.go, mypkg/a.go, mypkg/b.go, pkg2/c.go).
+	sort.Strings(paths)
+	want := []string{"mypkg/a.go", "mypkg/b.go", "mypkg/mypkg.go", "pkg2/c.go"}
+	if len(paths) != len(want) {
+		t.Fatalf("DistinctFilePaths len = %d, want %d (got %v)", len(paths), len(want), paths)
+	}
+	for i, p := range want {
+		if paths[i] != p {
+			t.Errorf("DistinctFilePaths[%d] = %q, want %q", i, paths[i], p)
+		}
+	}
+}
+
+func TestDistinctFilePaths_OtherLang(t *testing.T) {
+	s := newFixtureStore(t)
+
+	paths, err := s.DistinctFilePaths("ts")
+	if err != nil {
+		t.Fatalf("DistinctFilePaths(ts): %v", err)
+	}
+	if len(paths) != 0 {
+		t.Errorf("expected 0 ts paths, got %v", paths)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestQueryNodes
 // ---------------------------------------------------------------------------
 

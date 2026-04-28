@@ -7,7 +7,7 @@ import (
 
 func TestSubcommandsRegistered(t *testing.T) {
 	root := newRootCmd()
-	want := []string{"build", "eval", "export-static", "mcp", "serve"}
+	want := []string{"audit", "build", "eval", "export-static", "mcp", "serve"}
 	got := []string{}
 	for _, c := range root.Commands() {
 		got = append(got, c.Use)

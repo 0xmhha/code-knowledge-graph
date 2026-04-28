@@ -308,11 +308,18 @@ Next.js 14 + react-force-graph-2d/3d + zustand + lit-html 잔재 정리 중.
       backend가 emit 시작하도록 정렬 결정 commit
 
 ### Wave 2 (E1 + E2)
-- [ ] `ckg audit --src=… --graph=…` 동작
-- [ ] testdata/synthetic 빌드 후 audit zero-diff 확인
+- [x] `ckg audit --src=… --graph=…` 동작
+- [x] testdata/synthetic 빌드 후 audit zero-diff 확인 (3/3 parity, exit 0)
 - [ ] Go production path가 `go/packages.Load(./...)` 사용
 - [ ] build constraint 무시 case 회귀 테스트 통과
 - [ ] `go.work` 또는 generated 파일 inclusion 회귀 테스트
+
+E1 측정 결과 (go-stablenet-latest 대상, 2026-04-28):
+- build set (go/packages, Tests=true): 1259 files
+- DB set (detect.Walk): 1300 files
+- in_build_only: 0 (현재 production은 누락 없음)
+- in_db_only: 41 (build-tag mismatch + `//go:build ignore` 도구 + cross-OS shim 과다 포함)
+- E2 목표: in_db_only를 0으로 수렴시키되, in_build_only도 계속 0 유지
 
 ### Wave 3 (A4 + A5 + A3)
 - [ ] `persist.Store` interface 추출, SQLite는 구현체
