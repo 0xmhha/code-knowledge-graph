@@ -46,17 +46,18 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
 
   // solidity mapping reads/writes + event emission
   reads_mapping:   { color: 0x66cc99, width: 1 },
-  writes_mapping: { color: 0xcc6666, width: 1 },
-  emits_event:     { color: 0xffaa00, width: 1, dash: true },
+  writes_mapping:  { color: 0xcc6666, width: 1 },
+  emits_event:     { color: 0xff7733, width: 1, dash: true },
 
   // attached metadata
   has_modifier:    { color: 0x66e0e0, width: 1 },
   has_decorator:   { color: 0xcc99ff, width: 1 },
 
-  // concurrency / channels / goroutines
+  // concurrency / channels / goroutines (kept tightly within the magenta family
+  // so the triple reads as a group; recvs_from stays distinct from has_decorator)
   spawns:          { color: 0xff66cc, width: 1 },
   sends_to:        { color: 0xff99cc, width: 1 },
-  recvs_from:      { color: 0xcc99ff, width: 1 },
+  recvs_from:      { color: 0xcc66cc, width: 1 },
 
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },
