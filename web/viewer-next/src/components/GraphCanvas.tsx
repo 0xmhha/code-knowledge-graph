@@ -133,23 +133,28 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     };
   }, []);
 
-  // graphData re-derives on visibleIds / edges / nodes change. We use the
-  // edge index to avoid scanning the full edges array.
-  const graphData = useStore(s => {
-    const visible = s.visibleIds;
+  // graphData re-derives on visibleIds / edges / nodes change. We split
+  // into individual selectors and useMemo because returning a fresh object
+  // literal from a single selector defeats zustand's Object.is bail-out and
+  // re-fires every store update — which then cascades into a render loop
+  // through ForceGraph3D's simulation callbacks (React error #185).
+  const visibleIds = useStore(s => s.visibleIds);
+  const allNodes = useStore(s => s.nodes);
+  const edgesBySrc = useStore(s => s.edgesBySrc);
+  const graphData = useMemo(() => {
     const nodes: GraphNode[] = [];
-    for (const id of visible) {
-      const n = s.nodes.get(id);
+    for (const id of visibleIds) {
+      const n = allNodes.get(id);
       if (n) nodes.push(n);
     }
     const links: GraphEdge[] = [];
-    for (const id of visible) {
-      const outs = s.edgesBySrc.get(id);
+    for (const id of visibleIds) {
+      const outs = edgesBySrc.get(id);
       if (!outs) continue;
-      for (const e of outs) if (visible.has(e.dst)) links.push(e);
+      for (const e of outs) if (visibleIds.has(e.dst)) links.push(e);
     }
     return { nodes, links };
-  });
+  }, [visibleIds, allNodes, edgesBySrc]);
 
   const focusDistance = useStore(s => s.focusDistance);
 

@@ -11,7 +11,10 @@ html, body {
 
 #app {
   display: grid;
-  grid-template-rows: 32px 1fr 28px;
+  /* Row 1 (auto) is reserved for the optional stale-banner. When the banner
+     is absent the row collapses to 0px (no children). Without this row the
+     banner shoves TopBar into the 1fr canvas row, breaking the layout. */
+  grid-template-rows: auto 32px 1fr 28px;
   grid-template-columns: 1fr 280px;
   height: 100vh;
   width: 100vw;
@@ -58,7 +61,11 @@ html, body {
 }
 
 .canvas-host { position: relative; min-width: 0; }
-.canvas-host > div { width: 100%; height: 100%; }
+/* Target only the ForceGraph wrapper (the first child div), not the
+   absolutely-positioned ControlLayer that's also a direct child. Without
+   the :not, ControlLayer gets width: 100% which combined with its
+   right: 12px pushes it off-screen left. */
+.canvas-host > div:not(.control-layer) { width: 100%; height: 100%; }
 
 .panel {
   background: #1a1c1f;

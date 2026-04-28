@@ -24,6 +24,9 @@ coverage.out
 *.db-shm
 *.db-wal
 
+# Local test build outputs (graph.db + manifest.json from ad-hoc `ckg build` runs)
+/go-stable-code/
+
 # Local Claude settings
 .claude/settings.local.json
 

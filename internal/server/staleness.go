@@ -26,7 +26,19 @@ func computeStaleness(m persist.Manifest) (current string, stale bool) {
 		return "", false
 	}
 	if m.SrcRelPath == "" {
-		return legacyHead(m.SrcRoot, m.SrcCommit)
+		// Legacy branch: manifests written before SrcRelPath existed compare
+		// the whole-repo HEAD via `git -C srcRoot rev-parse HEAD`. Retained
+		// so existing /tmp/ckg-* graphs still resolve to *some* answer
+		// rather than silently disabling the stale banner — but this path
+		// keeps the documented false-positive behaviour for sub-directory
+		// builds. TestComputeStaleness_LegacyBackcompat_DiscriminatesPathAware
+		// pins this branch in place.
+		out, err := exec.Command("git", "-C", m.SrcRoot, "rev-parse", "HEAD").Output()
+		if err != nil {
+			return "", false
+		}
+		current = strings.TrimSpace(string(out))
+		return current, current != m.SrcCommit
 	}
 	repoRoot, err := repoToplevel(m.SrcRoot)
 	if err != nil {
@@ -41,20 +53,6 @@ func computeStaleness(m persist.Manifest) (current string, stale bool) {
 		return "", false
 	}
 	return current, current != m.SrcCommit
-}
-
-// legacyHead implements the pre-path-aware behaviour: read the whole-repo
-// HEAD via `git -C srcRoot rev-parse HEAD` and compare to the recorded
-// commit. Retained so manifests written before the SrcRelPath field was
-// introduced still resolve to *some* answer rather than silently disabling
-// the stale banner.
-func legacyHead(srcRoot, recordedCommit string) (string, bool) {
-	out, err := exec.Command("git", "-C", srcRoot, "rev-parse", "HEAD").Output()
-	if err != nil {
-		return "", false
-	}
-	current := strings.TrimSpace(string(out))
-	return current, current != recordedCommit
 }
 
 // repoToplevel returns the absolute path of the git repository that contains

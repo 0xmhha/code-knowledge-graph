@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/store/store';
 import type { IAPI } from '@/lib/api';
 
@@ -8,11 +8,20 @@ interface Props { api: IAPI; }
 
 export default function NodeDetail({ api }: Props) {
   const selectedId = useStore(s => s.selectedId);
-  const node = useStore(s => (selectedId ? s.nodes.get(selectedId) : null));
-  const edges = useStore(s => {
+  const nodes = useStore(s => s.nodes);
+  const edgesBySrc = useStore(s => s.edgesBySrc);
+  const edgesByDst = useStore(s => s.edgesByDst);
+  // Derive via useMemo: returning a fresh array literal from a useStore
+  // selector defeats Object.is equality and causes a render loop
+  // (React error #185). Same pitfall as GraphCanvas.graphData.
+  const node = useMemo(
+    () => (selectedId ? nodes.get(selectedId) ?? null : null),
+    [selectedId, nodes],
+  );
+  const edges = useMemo(() => {
     if (!selectedId) return [];
-    return (s.edgesBySrc.get(selectedId) ?? []).concat(s.edgesByDst.get(selectedId) ?? []);
-  });
+    return (edgesBySrc.get(selectedId) ?? []).concat(edgesByDst.get(selectedId) ?? []);
+  }, [selectedId, edgesBySrc, edgesByDst]);
   const [blob, setBlob] = useState<string>('');
 
   useEffect(() => {
