@@ -52,6 +52,12 @@ func Run(opt Options) (persist.Manifest, error) {
 	// build system to consult. Go uses go/packages.Load (detect.GoFiles)
 	// because Go's build constraints (//go:build, host OS/arch shims, CGO
 	// alternates) cannot be reproduced from filename extensions alone.
+	// detect.Walk is now consulted only for TS/Sol classification — those
+	// languages have no build oracle (Go's `packages.Load` equivalent), so
+	// extension-based discovery is the right tool. The Walk's `Go` field is
+	// intentionally ignored; Go uses detect.GoFiles below to honor build
+	// constraints, //go:build ignore, CGO alternates, etc. (see WORK-PLAN
+	// Wave-2 E2 for the 41-file drift this eliminates).
 	files, err := detect.Walk(opt.SrcRoot)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect: %w", err)
@@ -346,6 +352,13 @@ func setStaleness(m *persist.Manifest, log *slog.Logger) {
 		}
 	}
 	m.StalenessMethod = "mtime"
+	// Mtime fallback only needs a stable, deterministic subset of source
+	// files — it doesn't need to mirror the build oracle exactly. detect.Walk
+	// is intentionally reused here (rather than detect.GoFiles + the TS/Sol
+	// halves of detect.Walk) because the cost of forking another packages.Load
+	// for fingerprinting outweighs the cost of a few build-tag-excluded paths
+	// landing in the StalenessFiles list — the resulting hash is still
+	// deterministic and that's all this codepath needs.
 	files, _ := detect.Walk(m.SrcRoot)
 	all := append(append([]string{}, files.Go...), files.TS...)
 	all = append(all, files.Sol...)

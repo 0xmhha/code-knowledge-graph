@@ -128,9 +128,11 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 | ID | 작업 | 상태 |
 |---|---|---|
-| G1 | `.gitignore`에 `.playwright-mcp/` + `ckg-*.png` 추가 | ✅ 본 commit |
-| G2 | repo root의 `ckg-*.png` 디버그 스크린샷 5개 삭제 | ✅ 본 commit |
-| G3 | NEXT-SESSION.md 정리 → 본 문서로 대체 | ✅ 본 commit |
+| G1 | `.gitignore`에 `.playwright-mcp/` + `ckg-*.png` 추가 | ✅ `df70804` |
+| G2 | repo root의 `ckg-*.png` 디버그 스크린샷 5개 삭제 | ✅ `df70804` |
+| G3 | NEXT-SESSION.md 정리 → 본 문서로 대체 | ✅ `df70804` |
+| G4 | `pipeline.go` `Run` 145줄 → `persistAll` helper 추출 (file 418줄 → 400줄 미만) | ⏭️ E2 review follow-up |
+| G5 | `go.work` 회귀 smoke test (workspace root at srcRoot, 2 member modules) | ⏭️ E2 review follow-up |
 
 추정: XS=5분, S=15-30분, M=1-2시간, L=반나절, XL=하루+
 
