@@ -15,8 +15,13 @@ import (
 // Server bundles a read-only Store, a routed mux, and a logger. Construct
 // one per `ckg serve` invocation. Server implements http.Handler so callers
 // (and tests via httptest) can drive it directly.
+//
+// The store field is the read-only persist.StoreReader interface — server
+// has no business writing to the graph. This narrowing also lets the
+// future PostgreSQL backend (spec §3 / WORK-PLAN B2) plug in without
+// rewiring server.
 type Server struct {
-	store     *persist.Store
+	store     persist.StoreReader
 	mux       *http.ServeMux
 	log       *slog.Logger
 	community communityCache // lazy-loaded topic_tree projection (see community.go)
@@ -25,7 +30,7 @@ type Server struct {
 // New wires routes against store and returns a ready-to-serve Server.
 // A nil log is replaced with a stderr text logger so handlers can always
 // log without a nil check.
-func New(store *persist.Store, log *slog.Logger) *Server {
+func New(store persist.StoreReader, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}

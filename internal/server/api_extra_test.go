@@ -18,7 +18,7 @@ import (
 
 // buildFixture compiles the resolve testdata into a temp dir and returns a
 // read-only Store. The caller is responsible for calling store.Close().
-func buildFixture(t *testing.T) *persist.Store {
+func buildFixture(t *testing.T) persist.Store {
 	t.Helper()
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{

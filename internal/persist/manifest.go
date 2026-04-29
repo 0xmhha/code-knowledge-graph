@@ -36,7 +36,7 @@ type Manifest struct {
 }
 
 // SetManifest replaces existing manifest rows with fields from m.
-func (s *Store) SetManifest(m Manifest) error {
+func (s *sqliteStore) SetManifest(m Manifest) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -85,7 +85,7 @@ func (s *Store) SetManifest(m Manifest) error {
 }
 
 // GetManifest reads all manifest rows and reassembles the struct.
-func (s *Store) GetManifest() (Manifest, error) {
+func (s *sqliteStore) GetManifest() (Manifest, error) {
 	rows, err := s.db.Query(`SELECT key, value FROM manifest`)
 	if err != nil {
 		return Manifest{}, err

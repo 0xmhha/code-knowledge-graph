@@ -16,7 +16,10 @@ import (
 //	3 edges : contains(pkg→funcA), calls(funcA→funcB), calls(funcB→funcC)
 //	1 blob  : attached to funcA
 //	FTS     : rebuilt after inserts so SearchFTS works
-func newFixtureStore(t *testing.T) *persist.Store {
+//
+// Returns persist.Store (interface). The concrete *sqliteStore is unexported,
+// so test code interacts with it exclusively through the public interfaces.
+func newFixtureStore(t *testing.T) persist.Store {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "fixture.db")
 	s, err := persist.Open(dbPath)

@@ -19,7 +19,7 @@ import (
 //	  nodes/chunk_NNNN.json
 //	  edges/chunk_NNNN.json
 //	  blobs/<nodeID>.txt
-func (s *Store) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error {
+func (s *sqliteStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error {
 	if err := os.MkdirAll(filepath.Join(outDir, "nodes"), 0o755); err != nil {
 		return err
 	}

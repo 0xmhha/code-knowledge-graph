@@ -12,7 +12,7 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
 
-func newFixtureStore(t *testing.T) *persist.Store {
+func newFixtureStore(t *testing.T) persist.Store {
 	t.Helper()
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{

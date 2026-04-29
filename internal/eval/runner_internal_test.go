@@ -12,7 +12,7 @@ import (
 
 // newEvalFixtureStore runs buildpipe once and returns a read-only Store for
 // the Go resolve testdata fixture.
-func newEvalFixtureStore(t *testing.T) (*persist.Store, string) {
+func newEvalFixtureStore(t *testing.T) (persist.Store, string) {
 	t.Helper()
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{

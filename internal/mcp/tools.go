@@ -16,7 +16,7 @@ import (
 )
 
 // registerFindSymbol resolves an exact-or-suffix qname / name to nodes.
-func registerFindSymbol(s *server.MCPServer, store *persist.Store) {
+func registerFindSymbol(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_symbol",
 		mcp.WithDescription("Find symbols by name or qualified name."),
 		mcp.WithString("name", mcp.Required()),
@@ -45,7 +45,7 @@ func registerFindSymbol(s *server.MCPServer, store *persist.Store) {
 var callEdgeTypes = []string{"calls", "invokes"}
 
 // registerFindCallers returns functions that call the seed symbol (reverse call graph).
-func registerFindCallers(s *server.MCPServer, store *persist.Store) {
+func registerFindCallers(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_callers",
 		mcp.WithDescription("Functions that call the symbol (reverse call graph). Filters to calls/invokes edges only."),
 		mcp.WithString("qname", mcp.Required()),
@@ -68,7 +68,7 @@ func registerFindCallers(s *server.MCPServer, store *persist.Store) {
 }
 
 // registerFindCallees returns functions called by the seed symbol (forward call graph).
-func registerFindCallees(s *server.MCPServer, store *persist.Store) {
+func registerFindCallees(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_callees",
 		mcp.WithDescription("Functions called by the symbol (forward call graph). Filters to calls/invokes edges only."),
 		mcp.WithString("qname", mcp.Required()),
@@ -91,7 +91,7 @@ func registerFindCallees(s *server.MCPServer, store *persist.Store) {
 }
 
 // registerGetSubgraph returns the BFS bidirectional subgraph rooted at qname.
-func registerGetSubgraph(s *server.MCPServer, store *persist.Store) {
+func registerGetSubgraph(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("get_subgraph",
 		mcp.WithDescription("Subgraph rooted at qname, expanded by depth (both directions)."),
 		mcp.WithString("seed_qname", mcp.Required()),
@@ -117,7 +117,7 @@ func registerGetSubgraph(s *server.MCPServer, store *persist.Store) {
 // for ASCII, LIKE substring fallback for CJK). Goes through attachBlobs
 // so the response shape matches find_symbol / find_callers / get_subgraph
 // — LLM clients can parse one schema across the toolbox.
-func registerSearchText(s *server.MCPServer, store *persist.Store) {
+func registerSearchText(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("search_text",
 		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input."),
 		mcp.WithString("query", mcp.Required()),
@@ -141,7 +141,7 @@ func registerSearchText(s *server.MCPServer, store *persist.Store) {
 // inlining the source blob from the blobs table when include is true.
 // Errors from GetBlob are silently swallowed (nodes like Package have no
 // blob — sql.ErrNoRows is expected and harmless).
-func attachBlobs(store *persist.Store, nodes []types.Node, include bool) []map[string]any {
+func attachBlobs(store persist.StoreReader, nodes []types.Node, include bool) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		m := map[string]any{

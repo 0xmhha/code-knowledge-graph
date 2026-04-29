@@ -15,8 +15,13 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-// Store wraps a SQLite database for the CKG graph.
-type Store struct {
+// sqliteStore wraps a SQLite database for the CKG graph. It is the concrete
+// implementation behind the Store / StoreReader / StoreWriter interfaces
+// (see store_interface.go). The struct is unexported because consumers
+// should depend on the interfaces — the only way to obtain an instance is
+// via Open / OpenReadOnly, both of which return through the interface
+// boundary in practice (callers use `:=`).
+type sqliteStore struct {
 	db *sql.DB
 }
 
@@ -26,32 +31,32 @@ type Store struct {
 // This is required because PRAGMA foreign_keys / journal_mode are connection-scoped:
 // setting them once via Migrate() would not propagate to other pooled connections,
 // leaving FK constraints unenforced and WAL inactive on most queries.
-func Open(path string) (*Store, error) {
+func Open(path string) (*sqliteStore, error) {
 	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite at %s: %w", path, err)
 	}
-	return &Store{db: db}, nil
+	return &sqliteStore{db: db}, nil
 }
 
 // OpenReadOnly opens a SQLite file in read-only mode (used by serve/mcp).
 // FK pragma is enforced per-connection via DSN; WAL is omitted because read-only
 // mode cannot mutate journal state.
-func OpenReadOnly(path string) (*Store, error) {
+func OpenReadOnly(path string) (*sqliteStore, error) {
 	dsn := path + "?mode=ro&immutable=1&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite ro at %s: %w", path, err)
 	}
-	return &Store{db: db}, nil
+	return &sqliteStore{db: db}, nil
 }
 
 // Close releases the underlying database handle.
-func (s *Store) Close() error { return s.db.Close() }
+func (s *sqliteStore) Close() error { return s.db.Close() }
 
 // Migrate creates tables if they don't already exist.
-func (s *Store) Migrate() error {
+func (s *sqliteStore) Migrate() error {
 	if _, err := s.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
 	}
@@ -59,7 +64,7 @@ func (s *Store) Migrate() error {
 }
 
 // InsertNodes bulk-inserts nodes (transactional).
-func (s *Store) InsertNodes(nodes []types.Node) error {
+func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -87,7 +92,7 @@ func (s *Store) InsertNodes(nodes []types.Node) error {
 }
 
 // GetNode fetches a node by ID. Returns sql.ErrNoRows if not found.
-func (s *Store) GetNode(id string) (types.Node, error) {
+func (s *sqliteStore) GetNode(id string) (types.Node, error) {
 	row := s.db.QueryRow(`SELECT id, type, name, qualified_name, file_path,
 		start_line, end_line, start_byte, end_byte, language, visibility,
 		signature, doc_comment, complexity, in_degree, out_degree, pagerank,
@@ -124,7 +129,7 @@ type TopicTreeInput interface {
 }
 
 // InsertPkgTree bulk-inserts package-tree edges.
-func (s *Store) InsertPkgTree(edges []ClusterEdge) error {
+func (s *sqliteStore) InsertPkgTree(edges []ClusterEdge) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -145,7 +150,7 @@ func (s *Store) InsertPkgTree(edges []ClusterEdge) error {
 
 // InsertPkgTreeFromCluster adapts cluster.PersistClusterEdge slices to the
 // internal ClusterEdge type and delegates to InsertPkgTree.
-func (s *Store) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) error {
+func (s *sqliteStore) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) error {
 	out := make([]ClusterEdge, len(edges))
 	for i, e := range edges {
 		out[i] = ClusterEdge(e)
@@ -155,7 +160,7 @@ func (s *Store) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) err
 
 // InsertTopicTree persists multi-resolution Leiden communities. Existing rows
 // are dropped first so a full rebuild matches V0 expectations.
-func (s *Store) InsertTopicTree(t TopicTreeInput) error {
+func (s *sqliteStore) InsertTopicTree(t TopicTreeInput) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -183,7 +188,7 @@ func (s *Store) InsertTopicTree(t TopicTreeInput) error {
 }
 
 // InsertBlobs stores per-node source slices keyed by node ID.
-func (s *Store) InsertBlobs(blobs map[string][]byte) error {
+func (s *sqliteStore) InsertBlobs(blobs map[string][]byte) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -203,7 +208,7 @@ func (s *Store) InsertBlobs(blobs map[string][]byte) error {
 }
 
 // RebuildFTS reloads the FTS5 virtual table from the nodes content table.
-func (s *Store) RebuildFTS() error {
+func (s *sqliteStore) RebuildFTS() error {
 	_, err := s.db.Exec(`INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')`)
 	return err
 }
@@ -217,7 +222,7 @@ func (s *Store) RebuildFTS() error {
 // site populates FilePath unconditionally — but kept so that introducing a
 // new node type (e.g. cross-file aggregator) without a file_path won't
 // silently inflate the audit set with empty-string paths.
-func (s *Store) DistinctFilePaths(language string) ([]string, error) {
+func (s *sqliteStore) DistinctFilePaths(language string) ([]string, error) {
 	rows, err := s.db.Query(
 		`SELECT DISTINCT file_path FROM nodes WHERE language = ? AND file_path != ''`,
 		language)
@@ -242,7 +247,7 @@ func (s *Store) DistinctFilePaths(language string) ([]string, error) {
 // QueryEdgesByType returns all edges whose type matches t. Used by tests
 // and downstream consumers (eval/MCP) that want to pull edges by relation
 // kind without scanning the full table.
-func (s *Store) QueryEdgesByType(t string) ([]types.Edge, error) {
+func (s *sqliteStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	rows, err := s.db.Query(`SELECT id, src, dst, type, file_path, line, count, confidence
 		FROM edges WHERE type = ?`, t)
 	if err != nil {
@@ -286,7 +291,7 @@ type HierarchyRow struct {
 // LoadHierarchy returns the package tree (kind="pkg") or topic tree
 // (kind="topic") as a flat slice. The two trees share the wire shape so the
 // viewer can swap data sources without reshaping.
-func (s *Store) LoadHierarchy(kind string) ([]HierarchyRow, error) {
+func (s *sqliteStore) LoadHierarchy(kind string) ([]HierarchyRow, error) {
 	var query string
 	switch kind {
 	case "pkg":
@@ -326,7 +331,7 @@ const nodeColumns = `id, type, name, qualified_name, file_path,
 
 // QueryNodes returns either top-level packages (when parent is empty) or
 // the children of parent via the pkg_tree join. Limit caps the result set.
-func (s *Store) QueryNodes(parent string, limit int) ([]types.Node, error) {
+func (s *sqliteStore) QueryNodes(parent string, limit int) ([]types.Node, error) {
 	var (
 		rows *sql.Rows
 		err  error
@@ -347,7 +352,7 @@ func (s *Store) QueryNodes(parent string, limit int) ([]types.Node, error) {
 
 // QueryEdgesForNodes returns every edge that has src OR dst in ids. Used by
 // the viewer to expand a neighbourhood by node selection.
-func (s *Store) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
+func (s *sqliteStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -371,7 +376,7 @@ func (s *Store) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 
 // GetBlob returns the raw source slice persisted for node id. Returns
 // sql.ErrNoRows when no blob exists (e.g. Package nodes have no body).
-func (s *Store) GetBlob(id string) ([]byte, error) {
+func (s *sqliteStore) GetBlob(id string) ([]byte, error) {
 	var b []byte
 	err := s.db.QueryRow(`SELECT source FROM blobs WHERE node_id = ?`, id).Scan(&b)
 	if err != nil {
@@ -386,7 +391,7 @@ func (s *Store) GetBlob(id string) ([]byte, error) {
 // The projection is fully qualified with the n.* alias because nodes_fts
 // shares column names (name, qualified_name, signature, doc_comment) with
 // the nodes content table — bare references would be ambiguous.
-func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
+func (s *sqliteStore) SearchFTS(q string, limit int) ([]types.Node, error) {
 	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
@@ -413,7 +418,7 @@ func (s *Store) SearchFTS(q string, limit int) ([]types.Node, error) {
 // handleSearch (auto-prefix + CJK) and buildContext (raw FTS, prose
 // queries silently `not_found`); both now call this and get the same
 // behaviour.
-func (s *Store) Search(q string, limit int) ([]types.Node, error) {
+func (s *sqliteStore) Search(q string, limit int) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
@@ -482,7 +487,7 @@ func rewriteFTSQuery(q string) string {
 // whitespace separators. It runs `LIKE '%q%'` against name + qualified_name
 // and is intentionally O(n) on the nodes table; expect 50–100ms on 200K
 // rows. Use only when FTS isn't viable; see docs/VIEWER-ROADMAP.md L1.
-func (s *Store) SearchSubstr(q string, limit int) ([]types.Node, error) {
+func (s *sqliteStore) SearchSubstr(q string, limit int) ([]types.Node, error) {
 	pat := "%" + q + "%"
 	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
@@ -559,7 +564,7 @@ func scanEdges(rows *sql.Rows) ([]types.Edge, error) {
 // true, only equality matches are returned; when false, a LIKE '%.<name>'
 // suffix match is also accepted (so "Foo" hits "pkg.Foo"). lang optionally
 // filters by language. Capped at 100 rows to bound MCP response size.
-func (s *Store) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
+func (s *sqliteStore) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
 	args := []any{}
 	q := `SELECT ` + nodeColumns + ` FROM nodes WHERE 1=1 `
 	if exact {
@@ -592,7 +597,7 @@ func (s *Store) FindSymbol(name, lang string, exact bool) ([]types.Node, error) 
 // get_subgraph semantics. Pass e.g. ("calls","invokes") to restrict
 // find_callers / find_callees to actual call edges and skip the
 // containment / definition relationships that share the same Store.
-func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
+func (s *sqliteStore) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
 	roots, err := s.FindSymbol(qname, "", true)
 	if err != nil {
 		return nil, nil, err
@@ -647,7 +652,7 @@ func (s *Store) NeighborhoodByQname(qname string, depth int, reverse bool, edgeT
 // set is the union of forward and reverse traversals from qname's roots.
 // Always traverses every edge type (passing no filter) so callers like
 // `get_subgraph` see the full structural picture.
-func (s *Store) SubgraphByQname(qname string, depth int) ([]types.Node, []types.Edge, error) {
+func (s *sqliteStore) SubgraphByQname(qname string, depth int) ([]types.Node, []types.Edge, error) {
 	fwdN, fwdE, err := s.NeighborhoodByQname(qname, depth, false)
 	if err != nil {
 		return nil, nil, err
@@ -672,7 +677,7 @@ func (s *Store) SubgraphByQname(qname string, depth int) ([]types.Node, []types.
 
 // edgesFrom returns every edge whose src is in ids. When edgeTypes is
 // non-empty, the result is filtered to those types (e.g. just `calls`).
-func (s *Store) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge, error) {
+func (s *sqliteStore) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -693,7 +698,7 @@ func (s *Store) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge, error
 
 // edgesPointingTo returns every edge whose dst is in ids. When edgeTypes
 // is non-empty, the result is filtered to those types.
-func (s *Store) edgesPointingTo(ids []string, edgeTypes []string) ([]types.Edge, error) {
+func (s *sqliteStore) edgesPointingTo(ids []string, edgeTypes []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -714,7 +719,7 @@ func (s *Store) edgesPointingTo(ids []string, edgeTypes []string) ([]types.Edge,
 
 // NodesByIDs fetches nodes by primary key. Empty input yields a nil slice
 // without hitting the database.
-func (s *Store) NodesByIDs(ids []string) ([]types.Node, error) {
+func (s *sqliteStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -747,7 +752,7 @@ func anys(ss []string) []any {
 }
 
 // InsertEdges bulk-inserts edges (transactional).
-func (s *Store) InsertEdges(edges []types.Edge) error {
+func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

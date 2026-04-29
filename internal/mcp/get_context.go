@@ -22,7 +22,7 @@ type scoredNode struct {
 
 // registerGetContextForTask is the single "smart" tool: BM25 retrieve → 1-hop
 // expand → score-fuse → diversify (V0: simple cap) → pack within token budget.
-func registerGetContextForTask(s *server.MCPServer, store *persist.Store) {
+func registerGetContextForTask(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("get_context_for_task",
 		mcp.WithDescription("Smart 1-shot retrieval: BM25 -> 1-hop expand -> score -> diversify -> pack."),
 		mcp.WithString("task_description", mcp.Required()),
@@ -57,7 +57,7 @@ func registerGetContextForTask(s *server.MCPServer, store *persist.Store) {
 //   (c) Score     — 0.5 * BM25_rank_norm + 0.3 * PageRank_norm + 0.2 * Usage_norm
 //   (d) Diversify — V0: simple cap of top-30 (no per-cluster cap)
 //   (e) Pack      — top maxBodies get full source; next ≤15 get sig+doc summary
-func buildContext(store *persist.Store, query string, budget int, includeBlobs bool, maxBodies int) (map[string]any, error) {
+func buildContext(store persist.StoreReader, query string, budget int, includeBlobs bool, maxBodies int) (map[string]any, error) {
 	// (a) Retrieve: top 30 via the smart router.
 	cands, err := store.Search(query, 30)
 	if err != nil {

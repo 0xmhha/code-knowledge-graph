@@ -13,7 +13,7 @@ import (
 )
 
 // Run starts a stdio MCP server bound to store. Returns when stdin closes.
-func Run(ctx context.Context, store *persist.Store) error {
+func Run(ctx context.Context, store persist.StoreReader) error {
 	s := server.NewMCPServer("ckg", "0.1.0")
 
 	registerFindSymbol(s, store)
