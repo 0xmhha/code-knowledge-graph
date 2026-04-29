@@ -6,7 +6,7 @@ export interface EdgeStyle {
 }
 
 // Per-edge-type rendering style. Keys MUST match the backend EdgeType
-// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (25 edges).
+// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (28 edges).
 //
 // `contains` is intentionally hidden in the viewer: it's the structural
 // parent-child edge that would otherwise dominate the layout.
@@ -69,6 +69,15 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   acquires_lock:        { color: 0xff5577, width: 1 },
   releases_lock:        { color: 0x55cc77, width: 1 },
   accessed_under_lock:  { color: 0xffcc66, width: 1, dash: true },
+
+  // G5 Distributed (handler/RPC topology — schema 1.3, E3).
+  // Off by default like other extension graphs; opt-in via filter UI.
+  // Color choice: bright blue for entry points (HTTP/RPC routes), teal
+  // dashed for message-dispatch annotation (mirrors uses_type idiom),
+  // orange for outbound RPC client→server flow (mirrors invokes warmth).
+  listens_on:        { color: 0x44aaff, width: 2 },
+  handles_message:   { color: 0x44ccaa, width: 1, dash: true },
+  rpc_calls:         { color: 0xff9944, width: 1 },
 
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },

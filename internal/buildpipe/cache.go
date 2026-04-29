@@ -21,12 +21,15 @@ import (
 )
 
 // SchemaVersion is the cache-key contributor for the extraction schema. Bumped
-// from "1.1" to "1.2" by A3 because the FK ON DELETE CASCADE addition is a
-// breaking schema change (pre-1.2 DBs need a clean rebuild for incremental
-// invalidation to cascade correctly). Kept here (not in pkg/types) because
-// only the cache key needs it; pkg/types schema version bumps already trigger
+// from "1.1" to "1.2" by A3 (FK ON DELETE CASCADE on edges/blobs/pkg_tree/
+// topic_tree). Bumped from "1.2" to "1.3" by E3 because new node kinds
+// (Endpoint, MessageType) and edge kinds (listens_on, handles_message,
+// rpc_calls) materially change the extraction surface — pre-1.3 DBs are
+// missing those rows, so incremental invalidation must force a cold rebuild
+// on first run with this binary. Kept here (not in pkg/types) because only
+// the cache key needs it; pkg/types schema version bumps already trigger
 // rebuilds via this constant.
-const SchemaVersion = "1.2"
+const SchemaVersion = "1.3"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

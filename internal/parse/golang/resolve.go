@@ -73,8 +73,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if parentID, ok := callSiteParent[src]; ok {
 				src = parentID
 			}
+			// E3: listens_on PendingRefs from the distributed pass encode
+			// (endpoint, handler-name) — but the conventional edge direction
+			// is handler → endpoint. Swap src↔dst so downstream consumers
+			// don't have to special-case this edge type. Documented in
+			// distributed.go's maybeEmitHTTPListensOn fallback comment.
+			finalSrc, finalDst := src, id
+			if pr.EdgeType == types.EdgeListensOn {
+				finalSrc, finalDst = id, src
+			}
 			out.Edges = append(out.Edges, types.Edge{
-				Src: src, Dst: id, Type: pr.EdgeType,
+				Src: finalSrc, Dst: finalDst, Type: pr.EdgeType,
 				Line: pr.Line, Count: 1, Confidence: conf,
 			})
 		}

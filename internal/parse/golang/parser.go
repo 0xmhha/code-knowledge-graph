@@ -111,6 +111,10 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		// node that doesn't need a pre-walk index.
 		v.emitConcurrencyDecls(tf.file)
 		ast.Walk(v, tf.file)
+		// E3 (G5 Distributed): runs AFTER ast.Walk so v.nodes already contains
+		// the Function/Method node IDs we resolve handler / RPC-target args
+		// against. Idempotent within a single file.
+		v.emitDistributedDecls(tf.file)
 		return &parse.ParseResult{
 			Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 		}, nil
@@ -122,6 +126,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	v := newDeclVisitor(p.fset, rel, f.Name.Name)
 	v.emitConcurrencyDecls(f)
 	ast.Walk(v, f)
+	v.emitDistributedDecls(f)
 	return &parse.ParseResult{
 		Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 	}, nil

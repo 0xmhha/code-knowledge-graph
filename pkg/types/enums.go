@@ -1,6 +1,7 @@
 package types
 
-// NodeType enumerates the 30 node kinds (spec §5.1; v0.2 schema 1.1 added Mutex).
+// NodeType enumerates the 32 node kinds (spec §5.1; v0.2 schema 1.1 added
+// Mutex; schema 1.3 appended Endpoint + MessageType for CKS G5 Distributed).
 type NodeType string
 
 const (
@@ -37,9 +38,16 @@ const (
 	NodeCallSite   NodeType = "CallSite"
 	NodeReturnStmt NodeType = "ReturnStmt"
 	NodeSwitchStmt NodeType = "SwitchStmt"
+	// Schema 1.3 (E3 — CKS G5 Distributed): handler/route topology entries.
+	// NodeEndpoint  : an HTTP/RPC route literal (`http:/users`, `rpc:Foo.Bar`).
+	// NodeMessageType: a request/response message type a handler dispatches on
+	//                  (e.g. `pkg.MyRequest`). Appended at the end so existing
+	//                  positional indices stay stable (see TestAllNodeTypes_Stable).
+	NodeEndpoint    NodeType = "Endpoint"
+	NodeMessageType NodeType = "MessageType"
 )
 
-// AllNodeTypes returns all 30 node types in a stable order.
+// AllNodeTypes returns all 32 node types in a stable order.
 // NOTE: identifier names are stable; positional indices are load-bearing
 // only for tests that snapshot the full slice (TestAllNodeTypes_Stable).
 // NodeMutex was inserted at index 24 to keep the concurrency family
@@ -47,7 +55,9 @@ const (
 // nodes (NodeIfStmt..NodeSwitchStmt) from indices 24-28 to 25-29 — no
 // callers key on those indices, so the shift is safe; future additions
 // should prefer append over insert when no grouping reason argues
-// otherwise.
+// otherwise. NodeEndpoint + NodeMessageType (schema 1.3, E3) are appended
+// (indices 30-31) — distributed topology is a distinct family from
+// concurrency / statements, no grouping argument applied.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -57,10 +67,13 @@ func AllNodeTypes() []NodeType {
 		NodeImport, NodeExport, NodeDecorator,
 		NodeGoroutine, NodeChannel, NodeMutex,
 		NodeIfStmt, NodeLoopStmt, NodeCallSite, NodeReturnStmt, NodeSwitchStmt,
+		NodeEndpoint, NodeMessageType,
 	}
 }
 
-// EdgeType enumerates the 25 edge kinds (spec §5.2; v0.2 schema 1.1 added 3 lock edges).
+// EdgeType enumerates the 28 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
+// for CKS G5 Distributed).
 type EdgeType string
 
 const (
@@ -93,9 +106,18 @@ const (
 	EdgeAcquiresLock      EdgeType = "acquires_lock"
 	EdgeReleasesLock      EdgeType = "releases_lock"
 	EdgeAccessedUnderLock EdgeType = "accessed_under_lock"
+	// Schema 1.3 (E3 — CKS G5 Distributed): handler/RPC topology edges.
+	// listens_on:      handler function/method → endpoint route
+	// handles_message: handler function/method → message type it dispatches on
+	// rpc_calls:       caller function → server method (or message-type placeholder)
+	// Appended (not interleaved) so existing edge-type hash positions / test
+	// snapshots stay stable.
+	EdgeListensOn      EdgeType = "listens_on"
+	EdgeHandlesMessage EdgeType = "handles_message"
+	EdgeRPCCalls       EdgeType = "rpc_calls"
 )
 
-// AllEdgeTypes returns all 25 edge types in stable order.
+// AllEdgeTypes returns all 28 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -105,6 +127,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeHasModifier, EdgeEmitsEvent, EdgeReadsMapping, EdgeWritesMapping,
 		EdgeHasDecorator, EdgeSpawns, EdgeSendsTo, EdgeRecvsFrom, EdgeBindsTo,
 		EdgeAcquiresLock, EdgeReleasesLock, EdgeAccessedUnderLock,
+		EdgeListensOn, EdgeHandlesMessage, EdgeRPCCalls,
 	}
 }
 

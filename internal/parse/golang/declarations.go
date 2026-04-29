@@ -33,6 +33,14 @@ type declVisitor struct {
 	// Populated during decl walk; consumed by Lock/Unlock detection so
 	// acquires_lock edges resolve to the same Mutex node the field declared.
 	mutexNodeIDs map[gotypes.Object]string
+	// endpointNodeIDs maps an Endpoint qname (e.g. "http:/users") to its node
+	// ID, deduping repeat HandleFunc calls on the same route within a file.
+	// E3 (G5 Distributed).
+	endpointNodeIDs map[string]string
+	// messageNodeIDs maps a MessageType qname (e.g. "pkg.Args" or
+	// "rpc:Service.Method") to its node ID, deduping handles_message and
+	// rpc_calls targets that resolve to the same logical message. E3.
+	messageNodeIDs map[string]string
 }
 
 func newDeclVisitor(fset *token.FileSet, relPath, pkgName string) *declVisitor {

@@ -177,4 +177,4 @@ func TestManifestRoundTrip_FilesAbsent_LegacyCompat(t *testing.T) {
 // persistSchemaVersionForTest mirrors the buildpipe.SchemaVersion constant
 // without importing the package (avoids import cycle in persist tests).
 // Update when the constant moves.
-func persistSchemaVersionForTest() string { return "1.2" }
+func persistSchemaVersionForTest() string { return "1.3" }

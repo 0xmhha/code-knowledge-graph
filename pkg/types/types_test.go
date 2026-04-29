@@ -8,30 +8,36 @@ import (
 )
 
 func TestAllNodeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllNodeTypes()), 30; got != want {
+	if got, want := len(types.AllNodeTypes()), 32; got != want {
 		t.Fatalf("AllNodeTypes count = %d, want %d", got, want)
 	}
 }
 
 func TestAllEdgeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllEdgeTypes()), 25; got != want {
+	if got, want := len(types.AllEdgeTypes()), 28; got != want {
 		t.Fatalf("AllEdgeTypes count = %d, want %d", got, want)
 	}
 }
 
 func TestAllNodeTypes_Contains(t *testing.T) {
-	want := types.NodeMutex
+	wants := []types.NodeType{
+		types.NodeMutex, types.NodeEndpoint, types.NodeMessageType,
+	}
+	have := make(map[types.NodeType]struct{}, len(types.AllNodeTypes()))
 	for _, n := range types.AllNodeTypes() {
-		if n == want {
-			return
+		have[n] = struct{}{}
+	}
+	for _, w := range wants {
+		if _, ok := have[w]; !ok {
+			t.Errorf("AllNodeTypes missing %q", w)
 		}
 	}
-	t.Fatalf("AllNodeTypes missing %q", want)
 }
 
 func TestAllEdgeTypes_Contains(t *testing.T) {
 	wants := []types.EdgeType{
 		types.EdgeAcquiresLock, types.EdgeReleasesLock, types.EdgeAccessedUnderLock,
+		types.EdgeListensOn, types.EdgeHandlesMessage, types.EdgeRPCCalls,
 	}
 	have := make(map[types.EdgeType]struct{}, len(types.AllEdgeTypes()))
 	for _, e := range types.AllEdgeTypes() {
@@ -51,6 +57,7 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 // family contiguous, which shifted statement nodes from 24-28 to 25-29 —
 // the test snapshot below records the post-A5 reality. Future additions
 // should prefer append over insert when no grouping argument applies.
+// E3 appended NodeEndpoint + NodeMessageType at indices 30-31.
 func TestAllNodeTypes_Stable(t *testing.T) {
 	want := []types.NodeType{
 		types.NodePackage, types.NodeFile, types.NodeStruct, types.NodeInterface, types.NodeClass,
@@ -60,6 +67,7 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 		types.NodeImport, types.NodeExport, types.NodeDecorator,
 		types.NodeGoroutine, types.NodeChannel, types.NodeMutex,
 		types.NodeIfStmt, types.NodeLoopStmt, types.NodeCallSite, types.NodeReturnStmt, types.NodeSwitchStmt,
+		types.NodeEndpoint, types.NodeMessageType,
 	}
 	if !reflect.DeepEqual(types.AllNodeTypes(), want) {
 		t.Fatalf("AllNodeTypes order changed:\n got=%v\nwant=%v", types.AllNodeTypes(), want)
@@ -67,7 +75,7 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 }
 
 // TestAllEdgeTypes_Stable mirrors the node-stability check for edges.
-// Lock edges are appended at the end — never interleaved.
+// Lock edges and distributed edges are appended at the end — never interleaved.
 func TestAllEdgeTypes_Stable(t *testing.T) {
 	want := []types.EdgeType{
 		types.EdgeContains, types.EdgeDefines, types.EdgeCalls, types.EdgeInvokes, types.EdgeUsesType,
@@ -76,6 +84,7 @@ func TestAllEdgeTypes_Stable(t *testing.T) {
 		types.EdgeHasModifier, types.EdgeEmitsEvent, types.EdgeReadsMapping, types.EdgeWritesMapping,
 		types.EdgeHasDecorator, types.EdgeSpawns, types.EdgeSendsTo, types.EdgeRecvsFrom, types.EdgeBindsTo,
 		types.EdgeAcquiresLock, types.EdgeReleasesLock, types.EdgeAccessedUnderLock,
+		types.EdgeListensOn, types.EdgeHandlesMessage, types.EdgeRPCCalls,
 	}
 	if !reflect.DeepEqual(types.AllEdgeTypes(), want) {
 		t.Fatalf("AllEdgeTypes order changed:\n got=%v\nwant=%v", types.AllEdgeTypes(), want)

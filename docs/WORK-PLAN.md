@@ -105,7 +105,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 |---|---|---|---|
 | E1 | `ckg audit` 명령: `go list -deps -json ./...` vs DB의 `SELECT DISTINCT file_path` set-diff | #1, #2 | M |
 | E2 | Go file inclusion: production path를 `go/packages.Load(./...)` 기반으로 교체 | #1 | L |
-| E3 | 6 graphs G5 Distributed: `listens_on`, `handles_message`, `rpc_calls` | #3 | L |
+| E3 | 6 graphs G5 Distributed: `listens_on`, `handles_message`, `rpc_calls` | #3 | L ✅ (NodeEndpoint + NodeMessageType slot adds; net/http HandleFunc/Handle + ServeMux + JSON-RPC handler signature + net/rpc client.Call detectors; schema 1.2→1.3; deferred: gRPC stubs, P2P broadcasters, consensus_flow) |
 | E4 | 6 graphs G6 Temporal: `git log --follow` 기반 `changed_in`, `blame` | #3 | M |
 | E5 | viewer에 6-graph 그룹 필터 UI (G1~G6별 토글) | #4 | M |
 | E6 | edge type schema vs viewer EDGE_STYLE desync 수정 | #4 | S |
@@ -364,10 +364,19 @@ A1+A2 측정 결과 (2026-04-29):
   go-tree-sitter v0.25 ABI window (13..15) 안에 들어가 regenerate 불필요
 
 ### Wave 5 (B1 + E3 + E4 + E5)
-- [ ] Goroutine/Channel/Mutex 노드 + 엣지 추출 (Stage 1)
-- [ ] G5 Distributed edge 추출 (Go HTTP handler / gRPC service)
+- [x] Goroutine/Channel/Mutex 노드 + 엣지 추출 (Stage 1)
+- [x] G5 Distributed edge 추출 (Go HTTP handler / JSON-RPC handler / net/rpc client)
 - [ ] G6 Temporal edge 추출 (`changed_in`, `blame`)
 - [ ] viewer에 6-graph 그룹 토글 UI
+
+E3 측정 결과 (go-stablenet-latest, 2026-04-29):
+- Endpoint: 2 (metrics/exp 모듈의 `http.Handle` 호출 — corpus는 대부분 `httprouter` 사용으로 stdlib HandleFunc/Handle 직접 사용 거의 없음)
+- MessageType: 48 (JSON-RPC 시그니처 일치하는 `func (T) M(args A, reply *R) error` 메서드의 args 타입)
+- listens_on: 0 (Endpoint은 잡았으나 핸들러가 함수 반환값/computed value라 anchor할 named function 없음 — V0 한계로 문서화)
+- handles_message: 57 (모두 INFERRED — 시그니처 패턴만으로 판정, false positive 가능성 surfaces)
+- rpc_calls: 0 (corpus는 Ethereum-style `client.Call(&result, "method", args...)` 형태 — net/rpc의 첫 인자가 메서드 문자열인 패턴과 다름)
+- schema_version: 1.2 → 1.3 (manifest 검증 완료)
+- 향후 보강 후보: httprouter / gorilla/mux / chi router 패턴 추가, Ethereum RPC client.Call(&result, method, ...) 시그니처 추가
 
 ---
 

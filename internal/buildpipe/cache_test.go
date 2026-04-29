@@ -238,7 +238,7 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	out := t.TempDir()
 
 	first := runBuild(t, src, out)
-	if first.SchemaVersion != "1.2" {
+	if first.SchemaVersion != "1.3" {
 		t.Fatalf("first build SchemaVersion = %q, want 1.2", first.SchemaVersion)
 	}
 
@@ -255,7 +255,7 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	store.Close()
 
 	second := runBuild(t, src, out)
-	if second.SchemaVersion != "1.2" {
+	if second.SchemaVersion != "1.3" {
 		t.Errorf("post-rebuild SchemaVersion = %q, want 1.2", second.SchemaVersion)
 	}
 	// Files block is fresh (different timestamp guarantees fresh build).
