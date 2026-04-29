@@ -51,16 +51,16 @@ type StoreReader interface {
 
 	// Source bodies
 	GetBlob(id string) ([]byte, error)
+
+	// Static export (chunked JSON, spec §6.6). On StoreReader rather than
+	// StoreWriter because ExportChunked only reads from the store and writes
+	// JSON to disk — its sole caller (cmd/ckg/export_static.go) opens via
+	// OpenReadOnly, which proves it doesn't need write access to the DB.
+	ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error
 }
 
 // StoreWriter is the write surface used by buildpipe to materialise a graph
-// end-to-end (Migrate → Insert* → RebuildFTS → SetManifest) plus the static
-// export hatch used by `ckg export-static`.
-//
-// ExportChunked is included here (rather than as a concrete-only method)
-// because exporting to chunked JSON is a write-style lifecycle operation
-// every backend should implement — operators of any backend (SQLite, PG,
-// etc.) want the static-hosting deliverable.
+// end-to-end (Migrate → Insert* → RebuildFTS → SetManifest).
 type StoreWriter interface {
 	// Lifecycle
 	Close() error
@@ -78,9 +78,6 @@ type StoreWriter interface {
 
 	// Manifest
 	SetManifest(m Manifest) error
-
-	// Static export (chunked JSON, spec §6.6)
-	ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error
 }
 
 // Store is the union of the read and write surfaces — for callers (e.g.
