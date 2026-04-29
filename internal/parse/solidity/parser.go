@@ -1,16 +1,17 @@
 // Package solidity implements the CKG parser for .sol files (spec §4.6.3).
 //
 // We use a vendored copy of github.com/JoranHonig/tree-sitter-solidity v1.2.11
-// (smacker/go-tree-sitter does not ship a `solidity` subpackage, and v1.2.11
-// is the newest tag whose parser ABI version is ≤14 — the maximum supported
-// by smacker's bundled tree-sitter runtime).
+// (LANGUAGE_VERSION=14). Upstream github.com/tree-sitter/go-tree-sitter v0.25
+// supports the ABI window MIN_COMPATIBLE_LANGUAGE_VERSION..LANGUAGE_VERSION
+// (13..15 at the time of writing), so the vendored grammar loads without
+// regeneration.
 package solidity
 
 import (
-	"context"
+	"fmt"
 	"path/filepath"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	solang "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity/binding"
@@ -43,11 +44,15 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	}
 	lang := solang.GetLanguage()
 	parser := sitter.NewParser()
-	parser.SetLanguage(lang)
-	tree, err := parser.ParseCtx(context.Background(), nil, src)
-	if err != nil {
-		return nil, err
+	defer parser.Close()
+	if err := parser.SetLanguage(lang); err != nil {
+		return nil, fmt.Errorf("solidity: SetLanguage: %w", err)
 	}
+	tree := parser.Parse(src, nil)
+	if tree == nil {
+		return nil, fmt.Errorf("solidity: parser returned nil tree for %s", rel)
+	}
+	defer tree.Close()
 	v := newDeclVisitor(rel, src, lang, tree.RootNode(), p.abi)
 	v.visit()
 	return &parse.ParseResult{

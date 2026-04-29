@@ -71,8 +71,8 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 | ID | 작업 | 의존 | 추정 |
 |---|---|---|---|
-| A1 | Item 1 Phase 1a: TS/JS tree-sitter smacker → upstream 마이그레이션 | — | M |
-| A2 | Item 1 Phase 1b: Solidity 마이그레이션 + binding 정리 | A1 (병렬 가능) | M |
+| A1 | Item 1 Phase 1a: TS/JS tree-sitter smacker → upstream 마이그레이션 | — | M ✅ (atomic with A2, see below) |
+| A2 | Item 1 Phase 1b: Solidity 마이그레이션 + binding 정리 | A1 (atomic 병합) | M ✅ (vendored grammar v1.2.11 ABI 14 호환, byte-level golden parity 확보) |
 | A3 | Item 4 Phase 1: file-level SHA256 캐시 + manifest schema v2 + 변경 파일만 재파싱 | — | L ✅ (cache_key + manifest v2 + ON DELETE CASCADE + --no-cache/--rebuild-metrics; cold→warm 40s→1s on go-stablenet-latest 2142 files) |
 | A4 | Item 3 Storage abstraction: `Store` interface 추출 (SQLite를 구현체로 정리) | — | M ✅ (ISP split: StoreReader / StoreWriter / Store; struct → unexported sqliteStore) |
 | A5 | Schema bump 1.0→1.1 + concurrency edge 자리 예약 (`acquires_lock` 등) | — | S ✅ (NodeMutex + 3 lock edges 슬롯 예약, viewer styling 추가, 1.0 graph 하위 호환 검증) |
@@ -274,8 +274,10 @@ require (
     github.com/0xmhha/cli-wrapper v0.2.1
     github.com/anthropics/anthropic-sdk-go v1.38.0
     github.com/mark3labs/mcp-go v0.49.0
-    github.com/smacker/go-tree-sitter v0.0.0-20240827...   // A1/A2에서 제거 예정
     github.com/spf13/cobra v1.10.2
+    github.com/tree-sitter/go-tree-sitter v0.25.0          // A1+A2 (smacker 대체)
+    github.com/tree-sitter/tree-sitter-javascript v0.25.0  // A1+A2
+    github.com/tree-sitter/tree-sitter-typescript v0.23.2  // A1+A2
     golang.org/x/tools v0.44.0
     gopkg.in/yaml.v3 v3.0.1
     modernc.org/sqlite v1.49.1
@@ -289,7 +291,8 @@ Next.js 14 + react-force-graph-2d/3d + zustand + lit-html 잔재 정리 중.
 ### Vendored
 
 - `internal/parse/solidity/binding/` — JoranHonig/tree-sitter-solidity v1.2.11
-  (smacker ABI 14 호환. A2에서 upstream 0.25 ABI로 정리 결정 필요.)
+  (LANGUAGE_VERSION=14, upstream go-tree-sitter v0.25 ABI window 13..15 안에 들어가
+  regenerate 없이 그대로 사용. cgo bridge는 어떤 Go binding과도 무관하게 동작.)
 
 ### Build artifacts (gitignored)
 
@@ -346,9 +349,16 @@ A3 측정 결과 (go-stablenet-latest, 2026-04-29):
 - schema bump 1.1 → 1.2 (FK ON DELETE CASCADE for cache invalidation cascading)
 
 ### Wave 4 (A1 + A2)
-- [ ] `go.mod`에서 `smacker/go-tree-sitter` 제거
-- [ ] golden 테스트로 마이그레이션 전후 그래프 동일성 확인 (노드/엣지 1:1)
-- [ ] `ckg build` end-to-end 정상
+- [x] `go.mod`에서 `smacker/go-tree-sitter` 제거 (atomic with A1)
+- [x] golden 테스트로 마이그레이션 전후 그래프 동일성 확인 (노드/엣지 1:1)
+- [x] `ckg build` end-to-end 정상
+
+A1+A2 측정 결과 (2026-04-29):
+- testdata/synthetic 7-pair diff (go/ts/sol nodes.txt + nodes.csv + edges.txt): 모두 0 lines
+- go-stablenet-latest: pre/post 모두 nodes=216200 / edges=317614
+- 244 duplicate C symbol blocker 해소 (smacker + tree-sitter/go-tree-sitter 동시 import 시 발생하던 ts_parser_new 등 중복 정의)
+- Solidity vendored grammar (JoranHonig v1.2.11, LANGUAGE_VERSION=14)는 upstream
+  go-tree-sitter v0.25 ABI window (13..15) 안에 들어가 regenerate 불필요
 
 ### Wave 5 (B1 + E3 + E4 + E5)
 - [ ] Goroutine/Channel/Mutex 노드 + 엣지 추출 (Stage 1)

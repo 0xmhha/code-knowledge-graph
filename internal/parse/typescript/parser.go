@@ -2,13 +2,13 @@
 package typescript
 
 import (
-	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
-	js "github.com/smacker/go-tree-sitter/javascript"
-	ts "github.com/smacker/go-tree-sitter/typescript/typescript"
+	sitter "github.com/tree-sitter/go-tree-sitter"
+	tsjs "github.com/tree-sitter/tree-sitter-javascript/bindings/go"
+	tsts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 )
@@ -33,18 +33,16 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		rel = path
 	}
 	parser := sitter.NewParser()
-	var lang *sitter.Language
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".ts", ".tsx":
-		lang = ts.GetLanguage()
-	default:
-		lang = js.GetLanguage()
+	defer parser.Close()
+	lang := languageForExt(filepath.Ext(path))
+	if err := parser.SetLanguage(lang); err != nil {
+		return nil, fmt.Errorf("typescript: SetLanguage: %w", err)
 	}
-	parser.SetLanguage(lang)
-	tree, err := parser.ParseCtx(context.Background(), nil, src)
-	if err != nil {
-		return nil, err
+	tree := parser.Parse(src, nil)
+	if tree == nil {
+		return nil, fmt.Errorf("typescript: parser returned nil tree for %s", rel)
 	}
+	defer tree.Close()
 	root := tree.RootNode()
 	v := newDeclVisitor(rel, src, lang, root)
 	v.visit()
@@ -54,6 +52,21 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		Edges:   v.edges,
 		Pending: v.pending,
 	}, nil
+}
+
+// languageForExt returns the upstream tree-sitter Language for the given file
+// extension. .ts/.tsx use the typescript grammar (TSX is a superset); .js and
+// friends use the javascript grammar. Caching is unnecessary: NewLanguage just
+// wraps a static C pointer.
+func languageForExt(ext string) *sitter.Language {
+	switch strings.ToLower(ext) {
+	case ".ts":
+		return sitter.NewLanguage(tsts.LanguageTypescript())
+	case ".tsx":
+		return sitter.NewLanguage(tsts.LanguageTSX())
+	default:
+		return sitter.NewLanguage(tsjs.Language())
+	}
 }
 
 // Compile-time check that *Parser satisfies parse.Parser.

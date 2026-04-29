@@ -87,10 +87,10 @@ internal/parse/solidity/*_test.go            (테스트)
 ```
 
 ### Acceptance Criteria
-- [ ] `go.mod`에서 `smacker/go-tree-sitter` 제거.
-- [ ] 기존 `parse/typescript`, `parse/solidity` 테스트 100% 통과.
-- [ ] `testdata/` 기준 그래프 빌드 결과가 마이그레이션 전후 동일 (노드/엣지 ID + count 일치).
-- [ ] `ckg build` end-to-end 정상 동작.
+- [x] `go.mod`에서 `smacker/go-tree-sitter` 제거. (A1+A2 atomic, 2026-04-29)
+- [x] 기존 `parse/typescript`, `parse/solidity` 테스트 100% 통과.
+- [x] `testdata/` 기준 그래프 빌드 결과가 마이그레이션 전후 동일 (노드/엣지 ID + count 일치).
+- [x] `ckg build` end-to-end 정상 동작.
 
 ### Risks
 - **R1.1**: Query DSL 미세 변화로 silent miss-extraction. *완화*: golden 테스트 추가, snapshot 비교.

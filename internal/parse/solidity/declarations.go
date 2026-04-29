@@ -3,7 +3,7 @@ package solidity
 import (
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -49,35 +49,39 @@ func (v *declVisitor) visit() {
 }
 
 func (v *declVisitor) runDecl(q string, nt types.NodeType) {
-	query, err := sitter.NewQuery([]byte(q), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, q)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		for _, c := range m.Captures {
-			if query.CaptureNameForId(c.Index) != "name" {
+			if names[c.Index] != "name" {
 				continue
 			}
-			ident := c.Node.Content(v.src)
-			startByte := int(c.Node.StartByte())
-			endByte := int(c.Node.EndByte())
+			node := c.Node
+			ident := node.Utf8Text(v.src)
+			startByte := int(node.StartByte())
+			endByte := int(node.EndByte())
 			qname := ident
 			if nt == types.NodeFunction {
-				if cn := nearestContractName(c.Node, v.src); cn != "" {
+				if cn := nearestContractName(&node, v.src); cn != "" {
 					qname = cn + "." + ident
 				}
 			}
 			id := parse.MakeID(qname, "sol", startByte)
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: ident, QualifiedName: qname,
-				FilePath: v.rel, StartLine: int(c.Node.StartPoint().Row) + 1,
-				EndLine:   int(c.Node.EndPoint().Row) + 1,
+				FilePath: v.rel, StartLine: int(node.StartPosition().Row) + 1,
+				EndLine:   int(node.EndPosition().Row) + 1,
 				StartByte: startByte, EndByte: endByte,
 				Language: "sol", Confidence: types.ConfExtracted,
 			})
@@ -96,30 +100,34 @@ func (v *declVisitor) runDecl(q string, nt types.NodeType) {
 // expose as a distinct node type) and keeps mapping detection adjacent to its
 // type-introspection logic.
 func (v *declVisitor) runStateVarDecl() {
-	query, err := sitter.NewQuery([]byte(queryStateVarAll), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, queryStateVarAll)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		for _, c := range m.Captures {
-			if query.CaptureNameForId(c.Index) != "decl" {
+			if names[c.Index] != "decl" {
 				continue
 			}
-			nameNode := c.Node.ChildByFieldName("name")
-			typeNode := c.Node.ChildByFieldName("type")
+			declNode := c.Node
+			nameNode := declNode.ChildByFieldName("name")
+			typeNode := declNode.ChildByFieldName("type")
 			if nameNode == nil {
 				continue
 			}
-			name := nameNode.Content(v.src)
+			name := nameNode.Utf8Text(v.src)
 			startByte := int(nameNode.StartByte())
 			endByte := int(nameNode.EndByte())
-			line := int(nameNode.StartPoint().Row) + 1
+			line := int(nameNode.StartPosition().Row) + 1
 			isMapping := typeNode != nil && typeNameIsMapping(typeNode, v.src)
 			var nt types.NodeType
 			var qname string
@@ -158,26 +166,33 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 	q := `(augmented_assignment_expression
 	         (expression (array_access (expression (identifier) @arr))))
 	      @stmt`
-	query, err := sitter.NewQuery([]byte(q), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, q)
+	if qErr != nil {
 		// Fallback: try plain assignment_expression too.
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		var arrName string
 		var stmtNode *sitter.Node
 		for _, c := range m.Captures {
-			cap := query.CaptureNameForId(c.Index)
+			cap := names[c.Index]
+			node := c.Node
 			if cap == "arr" {
-				arrName = c.Node.Content(v.src)
+				arrName = node.Utf8Text(v.src)
 			} else if cap == "stmt" {
-				stmtNode = c.Node
+				// The capture's Node is a value type; we need a stable pointer
+				// for the parent walk below. Take address of the local copy.
+				stmtCopy := node
+				stmtNode = &stmtCopy
 			}
 		}
 		if arrName != mappingName || stmtNode == nil {
@@ -195,21 +210,24 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 			SrcID:       parse.MakeID(fnQ, "sol", fnStart),
 			EdgeType:    types.EdgeWritesMapping,
 			TargetQName: mappingName + ":mapping",
-			Line:        int(stmtNode.StartPoint().Row) + 1,
+			Line:        int(stmtNode.StartPosition().Row) + 1,
 		})
 	}
 }
 
 func (v *declVisitor) runEmits() {
-	query, err := sitter.NewQuery([]byte(queryEmit), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, queryEmit)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		var event string
@@ -218,10 +236,11 @@ func (v *declVisitor) runEmits() {
 		var fnOK bool
 		var line int
 		for _, c := range m.Captures {
-			if query.CaptureNameForId(c.Index) == "event" {
-				event = c.Node.Content(v.src)
-				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(c.Node, v.src)
-				line = int(c.Node.StartPoint().Row) + 1
+			if names[c.Index] == "event" {
+				node := c.Node
+				event = node.Utf8Text(v.src)
+				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(&node, v.src)
+				line = int(node.StartPosition().Row) + 1
 			}
 		}
 		if event == "" || !fnOK {
@@ -237,15 +256,18 @@ func (v *declVisitor) runEmits() {
 }
 
 func (v *declVisitor) runHasModifier() {
-	query, err := sitter.NewQuery([]byte(queryHasModifier), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, queryHasModifier)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		var mod string
@@ -254,10 +276,11 @@ func (v *declVisitor) runHasModifier() {
 		var fnOK bool
 		var line int
 		for _, c := range m.Captures {
-			if query.CaptureNameForId(c.Index) == "mod" {
-				mod = c.Node.Content(v.src)
-				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(c.Node, v.src)
-				line = int(c.Node.StartPoint().Row) + 1
+			if names[c.Index] == "mod" {
+				node := c.Node
+				mod = node.Utf8Text(v.src)
+				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(&node, v.src)
+				line = int(node.StartPosition().Row) + 1
 			}
 		}
 		if mod == "" || !fnOK {
@@ -302,10 +325,10 @@ func (v *declVisitor) collectABI() {
 // contract_declaration and returns its name (empty if none).
 func nearestContractName(n *sitter.Node, src []byte) string {
 	for cur := n; cur != nil; cur = cur.Parent() {
-		if cur.Type() == "contract_declaration" {
+		if cur.Kind() == "contract_declaration" {
 			id := cur.ChildByFieldName("name")
 			if id != nil {
-				return id.Content(src)
+				return id.Utf8Text(src)
 			}
 		}
 	}
@@ -326,12 +349,12 @@ func nearestContractName(n *sitter.Node, src []byte) string {
 func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool) {
 	cn := nearestContractName(n, src)
 	for cur := n; cur != nil; cur = cur.Parent() {
-		if cur.Type() == "function_definition" {
+		if cur.Kind() == "function_definition" {
 			id := cur.ChildByFieldName("name")
 			if id == nil {
 				return "", 0, false
 			}
-			ident := id.Content(src)
+			ident := id.Utf8Text(src)
 			qname := ident
 			if cn != "" {
 				qname = cn + "." + ident

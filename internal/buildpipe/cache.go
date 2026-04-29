@@ -115,9 +115,9 @@ func parserVersionFor(lang string) string {
 // binding module from the embedded BuildInfo. Returns "unknown" when
 // BuildInfo isn't available (test runs without -buildvcs, for instance).
 //
-// The current dependency is github.com/smacker/go-tree-sitter; A1 will swap
-// it for github.com/tree-sitter/go-tree-sitter. Either path resolves the
-// same way.
+// The current dependency is github.com/tree-sitter/go-tree-sitter (after the
+// A1+A2 migration off smacker/go-tree-sitter). Both modules sort under
+// "tree-sitter" so the substring match resolves either correctly.
 func treeSitterModuleVersion() string {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {

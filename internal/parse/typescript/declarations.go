@@ -3,7 +3,7 @@ package typescript
 import (
 	"strings"
 
-	sitter "github.com/smacker/go-tree-sitter"
+	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -45,30 +45,33 @@ func (v *declVisitor) visit() {
 }
 
 func (v *declVisitor) runQuery(q string, nt types.NodeType) {
-	query, err := sitter.NewQuery([]byte(q), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, q)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		for _, c := range m.Captures {
-			name := query.CaptureNameForId(c.Index)
-			if name != "name" {
+			if names[c.Index] != "name" {
 				continue
 			}
-			ident := c.Node.Content(v.src)
-			startByte := int(c.Node.StartByte())
-			endByte := int(c.Node.EndByte())
-			startLine := int(c.Node.StartPoint().Row) + 1
-			endLine := int(c.Node.EndPoint().Row) + 1
+			node := c.Node
+			ident := node.Utf8Text(v.src)
+			startByte := int(node.StartByte())
+			endByte := int(node.EndByte())
+			startLine := int(node.StartPosition().Row) + 1
+			endLine := int(node.EndPosition().Row) + 1
 			qname := ident
 			if nt == types.NodeMethod {
-				if className := nearestClassName(c.Node, v.src); className != "" {
+				if className := nearestClassName(&node, v.src); className != "" {
 					qname = className + "." + ident
 				}
 			}
@@ -88,30 +91,34 @@ func (v *declVisitor) runQuery(q string, nt types.NodeType) {
 }
 
 func (v *declVisitor) runImports() {
-	query, err := sitter.NewQuery([]byte(queryImport), v.lang)
-	if err != nil {
+	query, qErr := sitter.NewQuery(v.lang, queryImport)
+	if qErr != nil {
 		return
 	}
+	defer query.Close()
 	cur := sitter.NewQueryCursor()
-	cur.Exec(query, v.root)
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
 	for {
-		m, ok := cur.NextMatch()
-		if !ok {
+		m := matches.Next()
+		if m == nil {
 			break
 		}
 		for _, c := range m.Captures {
-			if query.CaptureNameForId(c.Index) != "path" {
+			if names[c.Index] != "path" {
 				continue
 			}
-			path := trimQuotes(c.Node.Content(v.src))
+			node := c.Node
+			path := trimQuotes(node.Utf8Text(v.src))
 			qname := "import:" + path
-			startByte := int(c.Node.StartByte())
-			endByte := int(c.Node.EndByte())
+			startByte := int(node.StartByte())
+			endByte := int(node.EndByte())
 			id := makeID(qname, "ts", startByte)
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: types.NodeImport, Name: path, QualifiedName: qname,
-				FilePath: v.rel, StartLine: int(c.Node.StartPoint().Row) + 1,
-				EndLine:   int(c.Node.EndPoint().Row) + 1,
+				FilePath: v.rel, StartLine: int(node.StartPosition().Row) + 1,
+				EndLine:   int(node.EndPosition().Row) + 1,
 				StartByte: startByte, EndByte: endByte,
 				Language: "ts", Confidence: types.ConfExtracted,
 			})
@@ -127,10 +134,10 @@ func (v *declVisitor) runImports() {
 // class_declaration and returns its name (empty if none).
 func nearestClassName(n *sitter.Node, src []byte) string {
 	for cur := n; cur != nil; cur = cur.Parent() {
-		if cur.Type() == "class_declaration" {
+		if cur.Kind() == "class_declaration" {
 			id := cur.ChildByFieldName("name")
 			if id != nil {
-				return id.Content(src)
+				return id.Utf8Text(src)
 			}
 		}
 	}
