@@ -33,6 +33,12 @@ type declVisitor struct {
 	// Populated during decl walk; consumed by Lock/Unlock detection so
 	// acquires_lock edges resolve to the same Mutex node the field declared.
 	mutexNodeIDs map[gotypes.Object]string
+	// fieldNodeIDs maps a *types.Object (a struct Field declaration) to its
+	// NodeField ID. Populated during emitFields when typesInfo is available.
+	// Consumed by the accessed_under_lock pass (B1 Phase 4 / G8) to translate
+	// `x.field` references inside locked functions into edges anchored at the
+	// owning Field node.
+	fieldNodeIDs map[gotypes.Object]string
 	// endpointNodeIDs maps an Endpoint qname (e.g. "http:/users") to its node
 	// ID, deduping repeat HandleFunc calls on the same route within a file.
 	// E3 (G5 Distributed).
@@ -136,6 +142,18 @@ func (v *declVisitor) emitFields(parentID, parentQname string, f *ast.Field) {
 		v.edges = append(v.edges, types.Edge{
 			Src: parentID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
+		// G8: index by *types.Object so the accessed_under_lock pass can
+		// resolve `recv.field` references back to this NodeField. Empty when
+		// typesInfo is nil — that path emits nothing in G8 (avoids false
+		// positives on AST-only mode where field receivers are ambiguous).
+		if v.typesInfo != nil {
+			if obj := v.typesInfo.Defs[name]; obj != nil {
+				if v.fieldNodeIDs == nil {
+					v.fieldNodeIDs = map[gotypes.Object]string{}
+				}
+				v.fieldNodeIDs[obj] = id
+			}
+		}
 	}
 }
 
@@ -206,6 +224,10 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 	})
 	v.emitFunctionBodyPos(qname, id, d.Body)
+	// G8 (B1 Phase 4): emit accessed_under_lock(field, mutex) for fields
+	// referenced inside a function that holds at least one lock. No-op when
+	// typesInfo is nil or the body holds no lock — keeps AST-only mode safe.
+	v.emitAccessedUnderLock(id, d.Body)
 }
 
 // helpers

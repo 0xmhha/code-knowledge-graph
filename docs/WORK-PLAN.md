@@ -135,7 +135,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | G5 | `go.work` 회귀 smoke test (workspace root at srcRoot, 2 member modules) | ✅ TestGoFiles_GoWorkspace ([G5 commit]) — outside-srcRoot members 미지원 documented |
 | G6 | A3 incremental 경로 재활성화: cached_src→dirty_dst cross-file edge 손실 해결 (옵션 C: cached caller 재파싱 OR 옵션 D: pending refs 영속화). 현재는 partial-cache → cold 폴백. C1과 함께 진행 권장. | ⏭️ A3 review follow-up |
 | G7 | TS/Sol parser 패키지에 committed golden test 추가 (fixture parse → 안정 marshalling → checked-in golden 비교). 미래 tree-sitter 버전 bump 시 silent miss-extraction을 CI에서 즉시 감지. | ✅ TestGolden_TypeScript / TestGolden_Solidity (G7 commit) — `-update` flag로 golden 갱신 |
-| G8 | B1 Phase 4: `accessed_under_lock` edges (Lock~Unlock 사이 변수 접근 추적). 현재 0개 emission. types.Info로 field 식별 + lexical scope 추적 필요. | ⏭️ B1 follow-up |
+| G8 | B1 Phase 4: `accessed_under_lock` edges (Lock~Unlock 사이 변수 접근 추적). | ✅ go-stable-code 0 → 2916 edges; intra-function lexical heuristic (cross-function propagation은 D1 SSA territory) |
 | G9 | B1 Mutex emission 보강: 현재 go-stable-code 8개만 (대부분 embedded `sync.Mutex` 패턴이나 wrapper struct를 못 잡음). embedding chain 추적 추가. | ⏭️ B1 follow-up |
 
 추정: XS=5분, S=15-30분, M=1-2시간, L=반나절, XL=하루+
