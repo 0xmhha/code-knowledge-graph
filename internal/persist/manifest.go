@@ -33,6 +33,27 @@ type Manifest struct {
 	ParseErrorsCount    int            `json:"parse_errors_count"`
 	UnresolvedRefsCount int            `json:"unresolved_refs_count"`
 	ClusteringStatus    string         `json:"clustering_status"` // "ok" | "pkg_only"
+	// Files is the per-file incremental-cache record (A3 Phase 1, schema 1.2).
+	// Each entry tracks the SHA256 + cache key of one source file plus the
+	// node/edge IDs it produced, enabling subsequent builds to skip parsing
+	// for unchanged files. omitempty so pre-1.2 manifests reload as nil and
+	// trigger a full rebuild on the next ckg build invocation.
+	Files []FileEntry `json:"files,omitempty"`
+}
+
+// FileEntry records the cache fingerprint and produced node/edge IDs for one
+// source file. CacheKey covers content + ckg_version + parser_version +
+// schema_version (see internal/buildpipe/cache.go ComputeCacheKey) so any
+// upstream change correctly invalidates the entry.
+type FileEntry struct {
+	Path          string  `json:"path"`           // srcRoot-relative slash form
+	Language      string  `json:"language"`       // "go" | "ts" | "sol"
+	SHA256        string  `json:"sha256"`         // hex of file content
+	CacheKey      string  `json:"cache_key"`      // hex of full key
+	MTime         int64   `json:"mtime"`          // unix nanoseconds (fast path)
+	NodeIDs       []string `json:"node_ids"`      // IDs this file produced
+	EdgeIDs       []int64 `json:"edge_ids"`       // edge row IDs
+	ParserVersion string  `json:"parser_version"` // see ComputeCacheKey
 }
 
 // SetManifest replaces existing manifest rows with fields from m.
@@ -71,6 +92,11 @@ func (s *sqliteStore) SetManifest(m Manifest) error {
 		{"ckgignore", m.CKGIgnore},
 		{"parse_errors_count", m.ParseErrorsCount},
 		{"unresolved_refs_count", m.UnresolvedRefsCount},
+		// "files" is the A3 incremental-cache fingerprint blob. It can be large
+		// on big repos (~120 bytes per file), but JSON-blob storage in the
+		// existing kv table is fine for v0.2 — A3 Phase 2/3 may move this to
+		// per-file rows for partial query performance.
+		{"files", m.Files},
 	}
 	for _, r := range jsonRows {
 		buf, err := json.Marshal(r.v)
@@ -120,6 +146,9 @@ func (s *sqliteStore) GetManifest() (Manifest, error) {
 		{"ckgignore", &m.CKGIgnore},
 		{"parse_errors_count", &m.ParseErrorsCount},
 		{"unresolved_refs_count", &m.UnresolvedRefsCount},
+		// pre-1.2 manifests have no "files" key; the empty branch leaves
+		// m.Files as nil, which buildpipe interprets as "no cache available".
+		{"files", &m.Files},
 	} {
 		if v, ok := kv[j.k]; ok && v != "" {
 			if err := json.Unmarshal([]byte(v), j.dst); err != nil {

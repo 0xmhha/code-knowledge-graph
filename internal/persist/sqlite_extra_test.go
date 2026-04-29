@@ -646,3 +646,198 @@ func TestNodesByIDs_AllInvalid(t *testing.T) {
 		t.Errorf("expected 0 nodes for all-invalid IDs, got %d", len(nodes))
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A3 incremental cache: NodesByFilePath / EdgesByFilePath / BlobsByFilePath
+// + DeleteNodesByFilePath FK CASCADE behavior
+// ---------------------------------------------------------------------------
+
+// TestNodesByFilePath_Hit verifies the per-file lookup returns the exact set
+// of nodes whose file_path matches and nothing else. funcA lives in
+// "mypkg/a.go" alone in the fixture, so the result is exactly one node.
+func TestNodesByFilePath_Hit(t *testing.T) {
+	s := newFixtureStore(t)
+	nodes, err := s.NodesByFilePath("mypkg/a.go")
+	if err != nil {
+		t.Fatalf("NodesByFilePath: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].ID != "funcA00000000000" {
+		t.Errorf("expected [funcA], got %v", nodeIDs(nodes))
+	}
+}
+
+// TestNodesByFilePath_Empty verifies path with no rows returns empty slice
+// (not error). Empty input path returns nil without DB hit.
+func TestNodesByFilePath_Empty(t *testing.T) {
+	s := newFixtureStore(t)
+	nodes, err := s.NodesByFilePath("does/not/exist.go")
+	if err != nil {
+		t.Fatalf("NodesByFilePath empty: %v", err)
+	}
+	if len(nodes) != 0 {
+		t.Errorf("expected 0 nodes, got %d", len(nodes))
+	}
+	nodes, err = s.NodesByFilePath("")
+	if err != nil || nodes != nil {
+		t.Errorf("empty path should return (nil,nil), got (%v,%v)", nodes, err)
+	}
+}
+
+// TestEdgesByFilePath needs an edge with a file_path. The fixture's edges
+// don't have one, so we insert a dedicated edge here.
+func TestEdgesByFilePath_Hit(t *testing.T) {
+	s := newFixtureStore(t)
+	if err := s.InsertEdges([]types.Edge{{
+		Src: "funcA00000000000", Dst: "funcB00000000000", Type: types.EdgeCalls,
+		FilePath: "mypkg/a.go", Line: 5, Count: 1, Confidence: types.ConfExtracted,
+	}}); err != nil {
+		t.Fatalf("InsertEdges: %v", err)
+	}
+	got, err := s.EdgesByFilePath("mypkg/a.go")
+	if err != nil {
+		t.Fatalf("EdgesByFilePath: %v", err)
+	}
+	if len(got) != 1 || got[0].FilePath != "mypkg/a.go" {
+		t.Errorf("expected 1 edge for mypkg/a.go, got %+v", got)
+	}
+	if got[0].ID == 0 {
+		t.Errorf("expected non-zero edge ID, got %d", got[0].ID)
+	}
+}
+
+// TestBlobsByFilePath verifies blobs are returned keyed by node_id, scoped to
+// only the nodes living in path. funcA has a blob and lives in mypkg/a.go;
+// funcB has no blob; funcC is in pkg2/c.go.
+func TestBlobsByFilePath(t *testing.T) {
+	s := newFixtureStore(t)
+	got, err := s.BlobsByFilePath("mypkg/a.go")
+	if err != nil {
+		t.Fatalf("BlobsByFilePath: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 blob for mypkg/a.go, got %d", len(got))
+	}
+	if _, ok := got["funcA00000000000"]; !ok {
+		t.Errorf("expected funcA blob, got keys %v", mapKeysForTest(got))
+	}
+	// Non-blob file returns empty map (not nil).
+	got2, err := s.BlobsByFilePath("mypkg/b.go")
+	if err != nil {
+		t.Fatalf("BlobsByFilePath b: %v", err)
+	}
+	if got2 == nil {
+		t.Errorf("expected non-nil empty map, got nil")
+	}
+	if len(got2) != 0 {
+		t.Errorf("expected 0 blobs for mypkg/b.go, got %d", len(got2))
+	}
+}
+
+// TestIncremental_FKCascadeOnDelete is the unit test called out in the work
+// plan: insert nodes for files A and B with edges between them and a blob on
+// A, delete file A's nodes, assert (a) A's nodes and blobs are gone, (b)
+// edges sourcing from OR pointing to A are gone (CASCADE), (c) B's nodes
+// and edges-not-touching-A survive.
+func TestIncremental_FKCascadeOnDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "cascade.db")
+	s, err := persist.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// File A: funcA. File B: funcB1, funcB2.
+	nodes := []types.Node{
+		{
+			ID: "funcA00000000000", Type: types.NodeFunction, Name: "FuncA",
+			QualifiedName: "pkg.FuncA", FilePath: "pkg/a.go",
+			StartLine: 1, EndLine: 2, StartByte: 0, EndByte: 10,
+			Language: "go", Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "funcB100000000000"[:16], Type: types.NodeFunction, Name: "FuncB1",
+			QualifiedName: "pkg.FuncB1", FilePath: "pkg/b.go",
+			StartLine: 1, EndLine: 2, StartByte: 0, EndByte: 10,
+			Language: "go", Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "funcB200000000000"[:16], Type: types.NodeFunction, Name: "FuncB2",
+			QualifiedName: "pkg.FuncB2", FilePath: "pkg/b.go",
+			StartLine: 3, EndLine: 4, StartByte: 11, EndByte: 20,
+			Language: "go", Confidence: types.ConfExtracted,
+		},
+	}
+	if err := s.InsertNodes(nodes); err != nil {
+		t.Fatalf("InsertNodes: %v", err)
+	}
+	// B1 → A and B1 → B2. Deleting A's nodes must cascade B1→A but leave B1→B2.
+	edges := []types.Edge{
+		{Src: "funcB100000000000"[:16], Dst: "funcA00000000000",
+			Type: types.EdgeCalls, FilePath: "pkg/b.go",
+			Count: 1, Confidence: types.ConfExtracted},
+		{Src: "funcB100000000000"[:16], Dst: "funcB200000000000"[:16],
+			Type: types.EdgeCalls, FilePath: "pkg/b.go",
+			Count: 1, Confidence: types.ConfExtracted},
+	}
+	if err := s.InsertEdges(edges); err != nil {
+		t.Fatalf("InsertEdges: %v", err)
+	}
+	if err := s.InsertBlobs(map[string][]byte{
+		"funcA00000000000": []byte("body A"),
+	}); err != nil {
+		t.Fatalf("InsertBlobs: %v", err)
+	}
+
+	// Sanity: 3 nodes, 2 edges, 1 blob exist before delete.
+	if got, _ := s.NodesByFilePath("pkg/a.go"); len(got) != 1 {
+		t.Fatalf("pre-delete pkg/a.go nodes = %d, want 1", len(got))
+	}
+	if got, _ := s.EdgesByFilePath("pkg/b.go"); len(got) != 2 {
+		t.Fatalf("pre-delete pkg/b.go edges = %d, want 2", len(got))
+	}
+
+	// Delete file A's nodes.
+	if err := s.DeleteNodesByFilePath("pkg/a.go"); err != nil {
+		t.Fatalf("DeleteNodesByFilePath: %v", err)
+	}
+
+	// (a) A's nodes gone.
+	if got, _ := s.NodesByFilePath("pkg/a.go"); len(got) != 0 {
+		t.Errorf("post-delete pkg/a.go nodes = %d, want 0", len(got))
+	}
+	// (a) A's blob cascaded.
+	if _, err := s.GetBlob("funcA00000000000"); err == nil {
+		t.Errorf("expected blob delete to cascade, but blob still present")
+	}
+	// (b) Edge B1→A cascaded; edge B1→B2 survives.
+	bEdges, err := s.EdgesByFilePath("pkg/b.go")
+	if err != nil {
+		t.Fatalf("EdgesByFilePath post: %v", err)
+	}
+	if len(bEdges) != 1 {
+		t.Errorf("post-delete pkg/b.go edges = %d, want 1 (B1→A cascaded, B1→B2 survives): %+v",
+			len(bEdges), bEdges)
+	}
+	if len(bEdges) == 1 && bEdges[0].Dst != "funcB200000000000"[:16] {
+		t.Errorf("survivor edge dst = %q, want funcB2", bEdges[0].Dst)
+	}
+	// (c) File B's nodes intact.
+	bNodes, _ := s.NodesByFilePath("pkg/b.go")
+	if len(bNodes) != 2 {
+		t.Errorf("post-delete pkg/b.go nodes = %d, want 2", len(bNodes))
+	}
+}
+
+// mapKeysForTest is a sortable-key helper used by the BlobsByFilePath
+// assertion to keep the diagnostic message readable.
+func mapKeysForTest(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

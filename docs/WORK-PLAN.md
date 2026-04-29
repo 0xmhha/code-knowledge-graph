@@ -73,7 +73,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 |---|---|---|---|
 | A1 | Item 1 Phase 1a: TS/JS tree-sitter smacker → upstream 마이그레이션 | — | M |
 | A2 | Item 1 Phase 1b: Solidity 마이그레이션 + binding 정리 | A1 (병렬 가능) | M |
-| A3 | Item 4 Phase 1: file-level SHA256 캐시 + manifest schema v2 + 변경 파일만 재파싱 | — | L |
+| A3 | Item 4 Phase 1: file-level SHA256 캐시 + manifest schema v2 + 변경 파일만 재파싱 | — | L ✅ (cache_key + manifest v2 + ON DELETE CASCADE + --no-cache/--rebuild-metrics; cold→warm 40s→1s on go-stablenet-latest 2142 files) |
 | A4 | Item 3 Storage abstraction: `Store` interface 추출 (SQLite를 구현체로 정리) | — | M ✅ (ISP split: StoreReader / StoreWriter / Store; struct → unexported sqliteStore) |
 | A5 | Schema bump 1.0→1.1 + concurrency edge 자리 예약 (`acquires_lock` 등) | — | S ✅ (NodeMutex + 3 lock edges 슬롯 예약, viewer styling 추가, 1.0 graph 하위 호환 검증) |
 
@@ -333,10 +333,16 @@ E2 검증 결과 (go-stablenet-latest 대상, 2026-04-28):
 - testdata/synthetic 동시 검증: 3/3 PARITY 유지
 
 ### Wave 3 (A4 + A5 + A3)
-- [ ] `persist.Store` interface 추출, SQLite는 구현체
-- [ ] schema_version 1.0 → 1.1, 새 edge 자리 (`acquires_lock` 등) 정의
-- [ ] file-level SHA256 캐시 동작 (재빌드 시 변경 없는 파일 0건 재파싱)
-- [ ] `--no-cache` 플래그로 강제 전체 재빌드 가능
+- [x] `persist.Store` interface 추출, SQLite는 구현체
+- [x] schema_version 1.0 → 1.1, 새 edge 자리 (`acquires_lock` 등) 정의
+- [x] file-level SHA256 캐시 동작 (재빌드 시 변경 없는 파일 0건 재파싱)
+- [x] `--no-cache` 플래그로 강제 전체 재빌드 가능
+
+A3 측정 결과 (go-stablenet-latest, 2026-04-29):
+- cold rebuild: 40.4s (1259 .go + 320 .ts + 563 .sol = 2142 files)
+- warm rebuild: 0.99s (full cache hit, manifest timestamp refresh only)
+- 1-file modify: ~0.2s (synthetic) — "Cache: 7 hits, 1 misses, 0 removed; parsed 1 files"
+- schema bump 1.1 → 1.2 (FK ON DELETE CASCADE for cache invalidation cascading)
 
 ### Wave 4 (A1 + A2)
 - [ ] `go.mod`에서 `smacker/go-tree-sitter` 제거

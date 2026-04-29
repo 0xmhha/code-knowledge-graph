@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
@@ -33,11 +32,25 @@ type Options struct {
 	Languages  []string // {"auto"} | subset of {"go","ts","sol"}
 	Logger     *slog.Logger
 	CKGVersion string
+	// NoCache forces a full rebuild — bypasses the A3 incremental cache and
+	// wipes graph.db at start. Use when the cache is suspect, or for clean
+	// benchmark runs.
+	NoCache bool
+	// RebuildMetrics forces PageRank/Leiden recompute even when the cache
+	// would otherwise reuse them. Phase 1 ALWAYS recomputes when any file
+	// is dirty (see Run below) — this flag is the explicit operator escape
+	// for the "all-cached but I want fresh metrics" case.
+	RebuildMetrics bool
 }
 
 // Run executes the full pipeline. Side effects: writes OutDir/graph.db
 // and OutDir/manifest.json. Returns the persisted Manifest summary so the
 // caller can print stats without re-reading SQLite.
+//
+// Cache routing (A3 Phase 1):
+//   - --no-cache OR no prior manifest OR schema/version mismatch → cold rebuild
+//   - all-cached AND no removals → short-circuit (timestamp refresh only)
+//   - mixed dirty/cached → incremental (parse only dirty, reuse cached node sets)
 func Run(opt Options) (persist.Manifest, error) {
 	log := opt.Logger
 	if log == nil {
@@ -47,17 +60,42 @@ func Run(opt Options) (persist.Manifest, error) {
 		return persist.Manifest{}, fmt.Errorf("mkdir out: %w", err)
 	}
 
-	// (1) detect
-	// TS/Sol use extension-based discovery (detect.Walk) — they have no host
-	// build system to consult. Go uses go/packages.Load (detect.GoFiles)
-	// because Go's build constraints (//go:build, host OS/arch shims, CGO
-	// alternates) cannot be reproduced from filename extensions alone.
-	// detect.Walk is now consulted only for TS/Sol classification — those
-	// languages have no build oracle (Go's `packages.Load` equivalent), so
-	// extension-based discovery is the right tool. The Walk's `Go` field is
-	// intentionally ignored; Go uses detect.GoFiles below to honor build
-	// constraints, //go:build ignore, CGO alternates, etc. (see WORK-PLAN
-	// Wave-2 E2 for the 41-file drift this eliminates).
+	// (1) detect — discovery is shared by all three paths.
+	// TS/Sol use extension-based discovery (detect.Walk); Go uses
+	// go/packages.Load (detect.GoFiles) to honor build constraints. See
+	// pipeline_test.go for the 41-file drift this eliminates.
+	discovery, _, goCount, tsCount, solCount, err := discoveryAll(opt.SrcRoot, opt.Languages)
+	if err != nil {
+		return persist.Manifest{}, err
+	}
+	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
+
+	// (2) cache routing
+	dbPath := filepath.Join(opt.OutDir, "graph.db")
+	old := readOldManifestFromDB(dbPath)
+	if !opt.NoCache && ManifestUsable(old, opt.CKGVersion) {
+		decisions, derr := DiffManifest(opt.SrcRoot, discovery, old, opt.CKGVersion)
+		if derr != nil {
+			return persist.Manifest{}, fmt.Errorf("cache diff: %w", derr)
+		}
+		switch {
+		case decisions.IsAllCached():
+			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount)
+		case decisions.Hits > 0:
+			return runIncremental(opt, log, discovery, decisions, goCount, tsCount, solCount)
+		}
+		// fallthrough: zero hits is no win — fall through to cold rebuild
+	}
+	if opt.NoCache {
+		log.Info("Cache: bypassed (--no-cache); full rebuild")
+	}
+	return runCold(opt, log, discovery, goCount, tsCount, solCount)
+}
+
+// runCold is the V0-equivalent full-rebuild path: wipe DB, parse every file,
+// rebuild every artifact. Always emits a fresh manifest (with Files block).
+func runCold(opt Options, log *slog.Logger,
+	discovery []DiscoveredFile, goCount, tsCount, solCount int) (persist.Manifest, error) {
 	files, err := detect.Walk(opt.SrcRoot)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect: %w", err)
@@ -66,7 +104,6 @@ func Run(opt Options) (persist.Manifest, error) {
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect go: %w", err)
 	}
-	log.Info("detected files", "go", len(goFiles), "ts", len(files.TS), "sol", len(files.Sol))
 
 	// (2)+(3) parse + link, per language
 	resolved := []*parse.ResolvedGraph{}
@@ -129,56 +166,24 @@ func Run(opt Options) (persist.Manifest, error) {
 	// (6) score
 	score.Compute(g)
 
-	// (7) persist — V0 = full rebuild only. Wipe any existing graph.db so we
-	// don't accumulate stale rows between builds.
-	dbPath := filepath.Join(opt.OutDir, "graph.db")
-	_ = os.Remove(dbPath)
-	store, err := persist.Open(dbPath)
+	// (7) persist — cold rebuild wipes graph.db so we don't accumulate stale
+	// rows. Incremental path lives in incremental.go and reuses prior rows.
+	store, err := openColdStore(opt.OutDir)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
 	defer store.Close()
-	if err := store.Migrate(); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.InsertNodes(g.Nodes); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.InsertEdges(g.Edges); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.InsertPkgTreeFromCluster(pkgTree.PersistEdges()); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.InsertTopicTree(topicTree); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.InsertBlobs(extractBlobs(opt.SrcRoot, g.Nodes)); err != nil {
-		return persist.Manifest{}, err
-	}
-	if err := store.RebuildFTS(); err != nil {
+	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree); err != nil {
 		return persist.Manifest{}, err
 	}
 
-	// Manifest with staleness fingerprint.
-	// SchemaVersion 1.1 (A5): NodeMutex + acquires_lock / releases_lock /
-	// accessed_under_lock slot reservation. Old 1.0 graph DBs remain
-	// readable (TEXT columns accept any string; queries for the new
-	// types simply return empty until B1 starts emitting in Wave 5).
-	m := persist.Manifest{
-		SchemaVersion:  "1.1",
-		CKGVersion:     opt.CKGVersion,
-		BuildTimestamp: time.Now().UTC().Format(time.RFC3339),
-		SrcRoot:        opt.SrcRoot,
-		Languages:      map[string]int{"go": len(goFiles), "ts": len(files.TS), "sol": len(files.Sol)},
-		Stats: map[string]int{
-			"nodes":          len(g.Nodes),
-			"edges":          len(g.Edges),
-			"pkg_tree_edges": len(pkgTree.Edges),
-		},
-		ParseErrorsCount: parseErrs,
-		ClusteringStatus: "ok",
-	}
+	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol),
+		g, pkgTree, parseErrs)
+	// Files: every discovered file becomes an entry. This is the cache
+	// fingerprint that subsequent builds will diff against. We computed
+	// SHAs / cache_keys lazily here — once per cold build, so the cost
+	// is amortised against the parse pass.
+	m.Files = computeColdFileEntries(opt.SrcRoot, opt.CKGVersion, discovery, g.Nodes, g.Edges)
 	setStaleness(&m, log)
 	if err := store.SetManifest(m); err != nil {
 		return persist.Manifest{}, err
@@ -191,6 +196,90 @@ func Run(opt Options) (persist.Manifest, error) {
 		"pkg_tree_edges", len(pkgTree.Edges),
 		"topic_resolutions", len(topicTree.Resolutions))
 	return m, nil
+}
+
+// openColdStore wipes graph.db and re-opens it. Cold path only — incremental
+// builds reuse the existing DB.
+func openColdStore(outDir string) (persist.Store, error) {
+	dbPath := filepath.Join(outDir, "graph.db")
+	_ = os.Remove(dbPath)
+	store, err := persist.Open(dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Migrate(); err != nil {
+		store.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+// persistColdArtifacts performs the bulk-insert phase of a cold rebuild.
+// All inserts are unconditional — the DB was just wiped by openColdStore.
+func persistColdArtifacts(store persist.Store, srcRoot string,
+	g *graph.Graph, pkgTree *cluster.PkgTree, topicTree TopicTreeForPersist) error {
+	if err := store.InsertNodes(g.Nodes); err != nil {
+		return err
+	}
+	if err := store.InsertEdges(g.Edges); err != nil {
+		return err
+	}
+	if err := store.InsertPkgTreeFromCluster(pkgTree.PersistEdges()); err != nil {
+		return err
+	}
+	if err := store.InsertTopicTree(topicTree); err != nil {
+		return err
+	}
+	if err := store.InsertBlobs(extractBlobs(srcRoot, g.Nodes)); err != nil {
+		return err
+	}
+	return store.RebuildFTS()
+}
+
+// computeColdFileEntries hashes every discovered file and returns FileEntry
+// records for the new manifest. Called on cold rebuild so the next build can
+// diff against this baseline. EdgeIDs are int64 PRIMARY KEY values assigned
+// by the AUTOINCREMENT INSERT just performed.
+func computeColdFileEntries(srcRoot, ckgVersion string, discovery []DiscoveredFile, nodes []types.Node, edges []types.Edge) []persist.FileEntry {
+	nodesByPath := map[string][]string{}
+	for _, n := range nodes {
+		if n.FilePath == "" {
+			continue
+		}
+		nodesByPath[n.FilePath] = append(nodesByPath[n.FilePath], n.ID)
+	}
+	edgesByPath := map[string][]int64{}
+	for _, e := range edges {
+		if e.FilePath == "" {
+			continue
+		}
+		edgesByPath[e.FilePath] = append(edgesByPath[e.FilePath], e.ID)
+	}
+	out := make([]persist.FileEntry, 0, len(discovery))
+	for _, df := range discovery {
+		full := filepath.Join(srcRoot, filepath.FromSlash(df.Path))
+		content, err := os.ReadFile(full)
+		if err != nil {
+			continue
+		}
+		st, _ := os.Stat(full)
+		var mtime int64
+		if st != nil {
+			mtime = st.ModTime().UnixNano()
+		}
+		parserVer := parserVersionFor(df.Language)
+		out = append(out, persist.FileEntry{
+			Path:          df.Path,
+			Language:      df.Language,
+			SHA256:        SHA256Hex(content),
+			CacheKey:      ComputeCacheKey(content, ckgVersion, parserVer),
+			MTime:         mtime,
+			ParserVersion: parserVer,
+			NodeIDs:       nodesByPath[df.Path],
+			EdgeIDs:       edgesByPath[df.Path],
+		})
+	}
+	return out
 }
 
 // shouldRun returns true when lang is requested explicitly or via the "auto"
@@ -225,10 +314,33 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 			errs++
 			continue
 		}
+		stampFilePath(r)
 		results = append(results, r)
 	}
 	rg, err := p.Resolve(results)
 	return rg, errs, err
+}
+
+// stampFilePath populates Edge.FilePath for every per-file edge that lacks
+// one, drawing from the ParseResult.Path the parser already recorded.
+// Required by the A3 incremental cache: EdgesByFilePath reloads cached
+// edges by file_path, and the parsers historically left it blank because
+// the V0 schema didn't surface the field. Stamping is idempotent — pre-set
+// FilePaths (e.g. on edges with line numbers) are preserved.
+//
+// Stamping per-file edges is safe: an edge emitted while parsing file X
+// belongs to X by construction. Cross-file edges come from Pass 2 (Resolve),
+// not per-file ParseFile, so this stamping doesn't touch them.
+func stampFilePath(r *parse.ParseResult) {
+	rel := filepath.ToSlash(r.Path)
+	if rel == "" {
+		return
+	}
+	for i := range r.Edges {
+		if r.Edges[i].FilePath == "" {
+			r.Edges[i].FilePath = rel
+		}
+	}
 }
 
 // runTSPipeline drives Pass 1 + Pass 2 for TypeScript / JavaScript.
@@ -252,6 +364,7 @@ func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 			errs++
 			continue
 		}
+		stampFilePath(r)
 		results = append(results, r)
 	}
 	rg, err := p.Resolve(results)
@@ -278,6 +391,7 @@ func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Re
 			errs++
 			continue
 		}
+		stampFilePath(r)
 		results = append(results, r)
 	}
 	rg, err := p.Resolve(results)

@@ -1,7 +1,17 @@
 # CKG Schema (V0)
 
-Schema version: **1.1** (v0.2 — A5 bumped 1.0 → 1.1 to reserve concurrency
-lock slots; first build under 1.1 invalidates the A3 incremental cache).
+Schema version: **1.2** (v0.2 — A3 added FK `ON DELETE CASCADE` on
+edges/blobs/pkg_tree/topic_tree so the file-level incremental cache can
+delete a file's nodes and have all dependents follow in one statement;
+1.1 → 1.2 because pre-1.2 DBs lack the cascade and silently leak
+orphaned edge/blob rows on incremental rebuild). Manifest schema also
+gained the `files[]` block (per-file SHA256 + cache key + node/edge IDs)
+that powers the cache. Pre-1.2 manifests reload as `files: nil` and
+trigger a full rebuild on the next `ckg build`.
+
+A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
+incremental cache infrastructure. Both bumps invalidate the file-level
+cache by design.
 
 ## Node types (30)
 

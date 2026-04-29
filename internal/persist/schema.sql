@@ -29,10 +29,16 @@ CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file  ON nodes(file_path);
 CREATE INDEX IF NOT EXISTS idx_nodes_type  ON nodes(type);
 
+-- ON DELETE CASCADE on edges/blobs/pkg_tree/topic_tree FK is required by the
+-- A3 incremental cache: when a file's nodes are dropped (because its content
+-- changed or the file was removed), every dependent row must follow. Schema
+-- bump 1.1 → 1.2 marks this; pre-1.2 DBs are not retroactively migrated —
+-- callers detect the missing CASCADE via foreign_key_check at Open() time
+-- and a warning steers operators to --no-cache or a clean rebuild.
 CREATE TABLE IF NOT EXISTS edges (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  src         TEXT NOT NULL REFERENCES nodes(id),
-  dst         TEXT NOT NULL REFERENCES nodes(id),
+  src         TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  dst         TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   type        TEXT NOT NULL,
   file_path   TEXT,
   line        INTEGER,
@@ -44,8 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_edges_dst  ON edges(dst);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(type);
 
 CREATE TABLE IF NOT EXISTS pkg_tree (
-  parent_id TEXT NOT NULL REFERENCES nodes(id),
-  child_id  TEXT NOT NULL REFERENCES nodes(id),
+  parent_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  child_id  TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   level     INTEGER NOT NULL,
   PRIMARY KEY (parent_id, child_id)
 );
@@ -53,14 +59,14 @@ CREATE INDEX IF NOT EXISTS idx_pkg_parent ON pkg_tree(parent_id);
 
 CREATE TABLE IF NOT EXISTS topic_tree (
   parent_id   TEXT,
-  child_id    TEXT NOT NULL REFERENCES nodes(id),
+  child_id    TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
   resolution  INTEGER NOT NULL,
   topic_label TEXT,
   PRIMARY KEY (child_id, resolution, parent_id)
 );
 
 CREATE TABLE IF NOT EXISTS blobs (
-  node_id TEXT PRIMARY KEY REFERENCES nodes(id),
+  node_id TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE,
   source  BLOB NOT NULL
 );
 

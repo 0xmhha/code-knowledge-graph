@@ -52,6 +52,14 @@ type StoreReader interface {
 	// Source bodies
 	GetBlob(id string) ([]byte, error)
 
+	// Per-file lookups (A3 incremental cache, schema 1.2). Used by
+	// buildpipe to load nodes/edges/blobs for files whose content hash
+	// matched the previous manifest — those rows are reused as-is rather
+	// than re-parsing.
+	NodesByFilePath(path string) ([]types.Node, error)
+	EdgesByFilePath(path string) ([]types.Edge, error)
+	BlobsByFilePath(path string) (map[string][]byte, error)
+
 	// Static export (chunked JSON, spec §6.6). On StoreReader rather than
 	// StoreWriter because ExportChunked only reads from the store and writes
 	// JSON to disk — its sole caller (cmd/ckg/export_static.go) opens via
@@ -72,6 +80,17 @@ type StoreWriter interface {
 	InsertBlobs(blobs map[string][]byte) error
 	InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) error
 	InsertTopicTree(t TopicTreeInput) error
+
+	// Per-file delete (A3 incremental cache). Drops every node whose
+	// file_path matches; FK ON DELETE CASCADE wipes the dependent edges
+	// and blobs in the same statement. Caller is responsible for then
+	// re-inserting the new parse output.
+	DeleteNodesByFilePath(path string) error
+
+	// Per-type edge delete (A3 incremental cache). Used to clear
+	// cross-language edges (e.g. binds_to) before they are recomputed —
+	// they have no FilePath so the per-file delete cannot reach them.
+	DeleteEdgesByType(t string) error
 
 	// Indexing
 	RebuildFTS() error

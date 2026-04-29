@@ -751,6 +751,93 @@ func anys(ss []string) []any {
 	return out
 }
 
+// NodesByFilePath returns every node whose file_path equals path. Empty path
+// returns nil (no rows). Used by buildpipe to reload nodes for files that hit
+// the A3 incremental cache instead of re-parsing them.
+func (s *sqliteStore) NodesByFilePath(path string) ([]types.Node, error) {
+	if path == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes WHERE file_path = ?`, path)
+	if err != nil {
+		return nil, fmt.Errorf("nodes by file_path %q: %w", path, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// EdgesByFilePath returns every edge whose file_path equals path. Edges
+// without a file_path (cross-file links emitted by graph.Build) are NOT
+// returned — the cache only reuses per-file edges.
+func (s *sqliteStore) EdgesByFilePath(path string) ([]types.Edge, error) {
+	if path == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		FROM edges WHERE file_path = ?`, path)
+	if err != nil {
+		return nil, fmt.Errorf("edges by file_path %q: %w", path, err)
+	}
+	defer rows.Close()
+	return scanEdges(rows)
+}
+
+// BlobsByFilePath returns blobs keyed by node_id for every node whose
+// file_path equals path. Empty result is a non-nil empty map.
+func (s *sqliteStore) BlobsByFilePath(path string) (map[string][]byte, error) {
+	out := map[string][]byte{}
+	if path == "" {
+		return out, nil
+	}
+	rows, err := s.db.Query(`SELECT b.node_id, b.source FROM blobs b
+		JOIN nodes n ON n.id = b.node_id WHERE n.file_path = ?`, path)
+	if err != nil {
+		return nil, fmt.Errorf("blobs by file_path %q: %w", path, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var b []byte
+		if err := rows.Scan(&id, &b); err != nil {
+			return nil, fmt.Errorf("scan blob: %w", err)
+		}
+		out[id] = b
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate blob rows: %w", err)
+	}
+	return out, nil
+}
+
+// DeleteNodesByFilePath drops every node whose file_path matches. The schema
+// 1.2 FK definitions (edges.src/dst, blobs.node_id, pkg_tree.*, topic_tree.*)
+// all carry ON DELETE CASCADE, so dependent rows are removed by SQLite
+// automatically inside this statement. Pre-1.2 DBs lack CASCADE; Open()
+// reports a warning when foreign_key_check fails on the schema invariant.
+func (s *sqliteStore) DeleteNodesByFilePath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if _, err := s.db.Exec(`DELETE FROM nodes WHERE file_path = ?`, path); err != nil {
+		return fmt.Errorf("delete nodes by file_path %q: %w", path, err)
+	}
+	return nil
+}
+
+// DeleteEdgesByType drops every edge of type t. Used by the incremental
+// build path to clear cross-language edges (e.g. binds_to) whose endpoints
+// span files — they don't carry their own file_path and so are not reached
+// by DeleteNodesByFilePath cascade.
+func (s *sqliteStore) DeleteEdgesByType(t string) error {
+	if t == "" {
+		return nil
+	}
+	if _, err := s.db.Exec(`DELETE FROM edges WHERE type = ?`, t); err != nil {
+		return fmt.Errorf("delete edges by type %q: %w", t, err)
+	}
+	return nil
+}
+
 // InsertEdges bulk-inserts edges (transactional).
 func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()
