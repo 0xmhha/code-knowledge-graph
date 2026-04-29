@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
-	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
@@ -112,25 +111,39 @@ func parserVersionFor(lang string) string {
 }
 
 // treeSitterModuleVersion reads the resolved version of the tree-sitter
-// binding module from the embedded BuildInfo. Returns "unknown" when
+// runtime binding from the embedded BuildInfo. Returns "unknown" when
 // BuildInfo isn't available (test runs without -buildvcs, for instance).
 //
-// The current dependency is github.com/tree-sitter/go-tree-sitter (after the
-// A1+A2 migration off smacker/go-tree-sitter). Both modules sort under
-// "tree-sitter" so the substring match resolves either correctly.
+// Pinned to the exact runtime path github.com/tree-sitter/go-tree-sitter
+// (post-A1+A2 migration). An earlier substring match on "tree-sitter"
+// matched THREE deps (the runtime + tree-sitter-typescript +
+// tree-sitter-javascript grammar bindings) and returned whichever
+// BuildInfo's Deps iteration happened to surface first — non-deterministic
+// across builds. Pinning to the runtime gives a single deterministic
+// version contributor to the cache key. The grammar bindings are
+// transitively versioned through the runtime release; bumping either
+// grammar without bumping the runtime is unusual.
+//
+// Cache invalidation across A1+A2: pre-migration manifests recorded
+// "tree-sitter/v0.0.0-20240827..." (the smacker pseudo-version);
+// post-migration records "tree-sitter/v0.25.0". The string mismatch
+// fires the slow-path reparse on first build of any pre-A1+A2 graph dir.
+const tsRuntimePath = "github.com/tree-sitter/go-tree-sitter"
+
 func treeSitterModuleVersion() string {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
 		return "unknown"
 	}
 	for _, dep := range bi.Deps {
-		if strings.Contains(dep.Path, "tree-sitter") {
-			if dep.Replace != nil && dep.Replace.Version != "" {
-				return dep.Replace.Version
-			}
-			if dep.Version != "" {
-				return dep.Version
-			}
+		if dep.Path != tsRuntimePath {
+			continue
+		}
+		if dep.Replace != nil && dep.Replace.Version != "" {
+			return dep.Replace.Version
+		}
+		if dep.Version != "" {
+			return dep.Version
 		}
 	}
 	return "unknown"

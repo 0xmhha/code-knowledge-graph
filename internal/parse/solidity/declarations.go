@@ -184,11 +184,11 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 		var arrName string
 		var stmtNode *sitter.Node
 		for _, c := range m.Captures {
-			cap := names[c.Index]
+			capName := names[c.Index]
 			node := c.Node
-			if cap == "arr" {
+			if capName == "arr" {
 				arrName = node.Utf8Text(v.src)
-			} else if cap == "stmt" {
+			} else if capName == "stmt" {
 				// The capture's Node is a value type; we need a stable pointer
 				// for the parent walk below. Take address of the local copy.
 				stmtCopy := node
