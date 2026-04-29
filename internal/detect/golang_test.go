@@ -194,3 +194,43 @@ func TestGoFiles_ErrorOnMissingSrc(t *testing.T) {
 		t.Error("expected error for non-existent srcRoot")
 	}
 }
+
+// TestGoFiles_GoWorkspace verifies that a srcRoot with a go.work pointing
+// to two member modules surfaces files from BOTH members. Closes WORK-PLAN
+// G5 (E2 review follow-up) — workspace handling was previously unverified.
+//
+// Layout:
+//
+//	root/
+//	  go.work          (use ./alpha + ./beta)
+//	  alpha/go.mod
+//	  alpha/a.go
+//	  beta/go.mod
+//	  beta/b.go
+//
+// Expected: GoFiles returns {alpha/a.go, beta/b.go} sorted.
+//
+// Note: detect.GoFiles walks for go.mod files (not go.work) — the workspace
+// root itself has no go.mod, so the walker descends into alpha/ and beta/
+// independently. packages.Load("./...") in each module finds its own files.
+// Workspace MEMBERS that live OUTSIDE srcRoot (e.g. ../shared) would not be
+// surfaced — documented as out-of-scope; if it ever becomes load-bearing,
+// add a `go.work` aware discovery pass.
+func TestGoFiles_GoWorkspace(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "go.work", "go 1.22\n\nuse (\n\t./alpha\n\t./beta\n)\n")
+	writeGoMod(t, root, "alpha", "example.com/alpha")
+	writeFile(t, root, "alpha/a.go", "package alpha\n\nfunc A() int { return 1 }\n")
+	writeGoMod(t, root, "beta", "example.com/beta")
+	writeFile(t, root, "beta/b.go", "package beta\n\nfunc B() int { return 2 }\n")
+
+	got, err := detect.GoFiles(root)
+	if err != nil {
+		t.Fatalf("GoFiles: %v", err)
+	}
+	want := []string{"alpha/a.go", "beta/b.go"}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
