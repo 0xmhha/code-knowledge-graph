@@ -6,7 +6,7 @@ export interface EdgeStyle {
 }
 
 // Per-edge-type rendering style. Keys MUST match the backend EdgeType
-// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (28 edges).
+// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (30 edges).
 //
 // `contains` is intentionally hidden in the viewer: it's the structural
 // parent-child edge that would otherwise dominate the layout.
@@ -78,6 +78,14 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   listens_on:        { color: 0x44aaff, width: 2 },
   handles_message:   { color: 0x44ccaa, width: 1, dash: true },
   rpc_calls:         { color: 0xff9944, width: 1 },
+
+  // G6 Temporal (git history — schema 1.4, E4).
+  // Off by default like other extension graphs; opt-in via filter UI.
+  // Color choice: muted blue-grey + dashed for `changed_in` (annotation,
+  // not a flow edge); muted brown for `blame` (file→last-touch commit).
+  // Both kept low-contrast so they don't dominate when toggled on.
+  changed_in:        { color: 0x888899, width: 1, dash: true },
+  blame:             { color: 0xaa9988, width: 1 },
 
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },

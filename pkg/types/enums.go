@@ -1,7 +1,8 @@
 package types
 
-// NodeType enumerates the 32 node kinds (spec §5.1; v0.2 schema 1.1 added
-// Mutex; schema 1.3 appended Endpoint + MessageType for CKS G5 Distributed).
+// NodeType enumerates the 33 node kinds (spec §5.1; v0.2 schema 1.1 added
+// Mutex; schema 1.3 appended Endpoint + MessageType for CKS G5 Distributed;
+// schema 1.4 appended Commit for CKS G6 Temporal — git history nodes).
 type NodeType string
 
 const (
@@ -45,9 +46,15 @@ const (
 	//                  positional indices stay stable (see TestAllNodeTypes_Stable).
 	NodeEndpoint    NodeType = "Endpoint"
 	NodeMessageType NodeType = "MessageType"
+	// Schema 1.4 (E4 — CKS G6 Temporal): a git commit that touched one or
+	// more source files. Name = first 12 chars of SHA, QualifiedName =
+	// `commit:<full-sha>`. SubKind = "git". StartLine/EndLine = 1 (commits
+	// have no source range). Appended at the end so existing positional
+	// indices stay stable (TestAllNodeTypes_Stable).
+	NodeCommit NodeType = "Commit"
 )
 
-// AllNodeTypes returns all 32 node types in a stable order.
+// AllNodeTypes returns all 33 node types in a stable order.
 // NOTE: identifier names are stable; positional indices are load-bearing
 // only for tests that snapshot the full slice (TestAllNodeTypes_Stable).
 // NodeMutex was inserted at index 24 to keep the concurrency family
@@ -57,7 +64,9 @@ const (
 // should prefer append over insert when no grouping reason argues
 // otherwise. NodeEndpoint + NodeMessageType (schema 1.3, E3) are appended
 // (indices 30-31) — distributed topology is a distinct family from
-// concurrency / statements, no grouping argument applied.
+// concurrency / statements, no grouping argument applied. NodeCommit
+// (schema 1.4, E4) is appended at index 32 — temporal/git history is a
+// distinct family from everything above.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -68,12 +77,14 @@ func AllNodeTypes() []NodeType {
 		NodeGoroutine, NodeChannel, NodeMutex,
 		NodeIfStmt, NodeLoopStmt, NodeCallSite, NodeReturnStmt, NodeSwitchStmt,
 		NodeEndpoint, NodeMessageType,
+		NodeCommit,
 	}
 }
 
-// EdgeType enumerates the 28 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 30 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
-// for CKS G5 Distributed).
+// for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
+// G6 Temporal — git history derived).
 type EdgeType string
 
 const (
@@ -115,9 +126,20 @@ const (
 	EdgeListensOn      EdgeType = "listens_on"
 	EdgeHandlesMessage EdgeType = "handles_message"
 	EdgeRPCCalls       EdgeType = "rpc_calls"
+	// Schema 1.4 (E4 — CKS G6 Temporal): git-history derived edges.
+	// changed_in: any symbol whose file was touched by a commit → that
+	//             commit. Heuristic — file-level (not line-level). Bounded
+	//             by Options.TemporalDepth (default 10) most-recent commits
+	//             per file. Line-level blame is deferred (G6 Phase 2).
+	// blame:      File node → most-recent commit touching that file
+	//             (V0 simplification of `file:line → commit`).
+	// Appended (not interleaved) so existing edge-type hash positions /
+	// test snapshots stay stable.
+	EdgeChangedIn EdgeType = "changed_in"
+	EdgeBlame     EdgeType = "blame"
 )
 
-// AllEdgeTypes returns all 28 edge types in stable order.
+// AllEdgeTypes returns all 30 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -128,6 +150,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeHasDecorator, EdgeSpawns, EdgeSendsTo, EdgeRecvsFrom, EdgeBindsTo,
 		EdgeAcquiresLock, EdgeReleasesLock, EdgeAccessedUnderLock,
 		EdgeListensOn, EdgeHandlesMessage, EdgeRPCCalls,
+		EdgeChangedIn, EdgeBlame,
 	}
 }
 

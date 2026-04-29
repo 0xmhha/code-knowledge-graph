@@ -1,25 +1,25 @@
 # CKG Schema (V0)
 
-Schema version: **1.3** (v0.2 — E3 added two distributed-graph node kinds
-(`Endpoint`, `MessageType`) and three handler/RPC edge kinds
-(`listens_on`, `handles_message`, `rpc_calls`) for CKS deep-dive § 4.1
-G5 Distributed Interaction. Pre-1.3 DBs lack these rows; the file-level
-cache treats the bump as cache-invalidating, so the next `ckg build`
-falls into the cold path on first run with this binary.)
+Schema version: **1.4** (v0.2 — E4 added one temporal node kind (`Commit`)
+and two git-history edge kinds (`changed_in`, `blame`) for CKS deep-dive
+§ 4.1 G6 Temporal. Pre-1.4 DBs lack these rows; the file-level cache
+treats the bump as cache-invalidating, so the next `ckg build` falls
+into the cold path on first run with this binary.)
 
 A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
 incremental cache infrastructure (FK ON DELETE CASCADE on
-edges/blobs/pkg_tree/topic_tree); E3 (1.2 → 1.3) adds distributed
-topology nodes/edges. All bumps invalidate the file-level cache by
-design.
+edges/blobs/pkg_tree/topic_tree); E3 (1.2 → 1.3) added distributed
+topology nodes/edges; E4 (1.3 → 1.4) adds temporal commit nodes/edges.
+All bumps invalidate the file-level cache by design.
 
-## Node types (32)
+## Node types (33)
 
 `Package, File, Struct, Interface, Class, TypeAlias, Enum, Contract,
 Mapping, Event, Function, Method, Modifier, Constructor, Constant,
 Variable, Field, Parameter, LocalVariable, Import, Export, Decorator,
 Goroutine, Channel, Mutex, IfStmt, LoopStmt, CallSite, ReturnStmt, SwitchStmt,
-Endpoint, MessageType`
+Endpoint, MessageType,
+Commit`
 
 LoopStmt uses `sub_kind ∈ {for, while, range, for_in, for_of}`.
 
@@ -40,14 +40,26 @@ are skipped (a runtime trace is the right hammer for those).
 `client.Call("Service.Method", …)` invocations. `sub_kind ∈
 {rpc_request, rpc_method}`.
 
-## Edge types (28)
+`Commit` (E4): a git commit that touched one or more source files.
+`name` = first 12 chars of the SHA, `qualified_name` = `commit:<full-sha>`,
+`signature` = `<unix-author-time>: <subject>` (truncated to 100 chars),
+`sub_kind` = `git`, `language` = `git` (sentinel — keeps audit's
+per-language file-set diff clean), `file_path` = the build root's
+repo-relative path (stable across builds inside the same repo),
+`start_line`/`end_line` = 1 (commits have no source range). Emitted
+by the post-Build temporal pass (`internal/buildpipe/temporal.go`)
+from a single `git log --raw --no-renames` invocation per build.
+Capped at 10 most-recent commits per file by default.
+
+## Edge types (30)
 
 `contains, defines, calls, invokes, uses_type, instantiates, references,
 reads_field, writes_field, imports, exports, implements, extends,
 has_modifier, emits_event, reads_mapping, writes_mapping, has_decorator,
 spawns, sends_to, recvs_from, binds_to,
 acquires_lock, releases_lock, accessed_under_lock,
-listens_on, handles_message, rpc_calls`
+listens_on, handles_message, rpc_calls,
+changed_in, blame`
 
 `acquires_lock`, `releases_lock`, `accessed_under_lock` are **slot-reserved**
 for B1 (Wave 5) — same status as `NodeMutex` above. The viewer registers
@@ -60,6 +72,14 @@ handler signature `func (T) M(args A, reply *R) error`). `rpc_calls`
 (E3): caller function → `MessageType` placeholder for the
 `Service.Method` target of `client.Call(...)`. All three are off by
 default in the viewer (opt-in via filter UI).
+
+`changed_in` (E4): any symbol whose file was touched by a commit →
+that `Commit`. **File-level heuristic** (V0 simplification): every node
+sharing a touched file emits one edge per commit, not per source line.
+Line-level blame (true `file:line → commit`) is deferred to G6 Phase 2.
+`blame` (E4): `File` node → its most recent commit (V0 simplification
+of the spec's `file:line → commit (마지막 수정)`). Both are off by
+default in the viewer; toggle via filter UI.
 
 ## Confidence
 

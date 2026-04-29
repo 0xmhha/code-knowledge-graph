@@ -26,10 +26,12 @@ import (
 // (Endpoint, MessageType) and edge kinds (listens_on, handles_message,
 // rpc_calls) materially change the extraction surface — pre-1.3 DBs are
 // missing those rows, so incremental invalidation must force a cold rebuild
-// on first run with this binary. Kept here (not in pkg/types) because only
-// the cache key needs it; pkg/types schema version bumps already trigger
-// rebuilds via this constant.
-const SchemaVersion = "1.3"
+// on first run with this binary. Bumped from "1.3" to "1.4" by E4 (CKS G6
+// Temporal): NodeCommit + changed_in/blame edges are emitted by the new
+// post-Build temporal pass; pre-1.4 DBs are missing those rows. Kept here
+// (not in pkg/types) because only the cache key needs it; pkg/types schema
+// version bumps already trigger rebuilds via this constant.
+const SchemaVersion = "1.4"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

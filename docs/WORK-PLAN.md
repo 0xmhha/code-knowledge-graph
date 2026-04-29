@@ -106,7 +106,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | E1 | `ckg audit` 명령: `go list -deps -json ./...` vs DB의 `SELECT DISTINCT file_path` set-diff | #1, #2 | M |
 | E2 | Go file inclusion: production path를 `go/packages.Load(./...)` 기반으로 교체 | #1 | L |
 | E3 | 6 graphs G5 Distributed: `listens_on`, `handles_message`, `rpc_calls` | #3 | L ✅ (NodeEndpoint + NodeMessageType slot adds; net/http HandleFunc/Handle + ServeMux + JSON-RPC handler signature + net/rpc client.Call detectors; schema 1.2→1.3; deferred: gRPC stubs, P2P broadcasters, consensus_flow) |
-| E4 | 6 graphs G6 Temporal: `git log --follow` 기반 `changed_in`, `blame` | #3 | M |
+| E4 | 6 graphs G6 Temporal: `git log` 기반 `changed_in`, `blame` | #3 | M ✅ (NodeCommit slot add; single `git log --raw --no-renames` invocation per build → per-file commit list capped at 10; `changed_in` heuristic = 모든 symbol whose file_path matches × commits touching that file; `blame` = File node → most-recent commit (V0 file-level simplification, line-level deferred); schema 1.3→1.4; graceful skip when not git checkout; deferred: line-level blame, submodule traversal, correlated_with/observed_in/mentioned_in) |
 | E5 | viewer에 6-graph 그룹 필터 UI (G1~G6별 토글) | #4 | M |
 | E6 | edge type schema vs viewer EDGE_STYLE desync 수정 | #4 | S |
 
@@ -366,7 +366,7 @@ A1+A2 측정 결과 (2026-04-29):
 ### Wave 5 (B1 + E3 + E4 + E5)
 - [x] Goroutine/Channel/Mutex 노드 + 엣지 추출 (Stage 1)
 - [x] G5 Distributed edge 추출 (Go HTTP handler / JSON-RPC handler / net/rpc client)
-- [ ] G6 Temporal edge 추출 (`changed_in`, `blame`)
+- [x] G6 Temporal edge 추출 (`changed_in`, `blame`)
 - [ ] viewer에 6-graph 그룹 토글 UI
 
 E3 측정 결과 (go-stablenet-latest, 2026-04-29):
@@ -377,6 +377,16 @@ E3 측정 결과 (go-stablenet-latest, 2026-04-29):
 - rpc_calls: 0 (corpus는 Ethereum-style `client.Call(&result, "method", args...)` 형태 — net/rpc의 첫 인자가 메서드 문자열인 패턴과 다름)
 - schema_version: 1.2 → 1.3 (manifest 검증 완료)
 - 향후 보강 후보: httprouter / gorilla/mux / chi router 패턴 추가, Ethereum RPC client.Call(&result, method, ...) 시그니처 추가
+
+E4 측정 결과 (go-stablenet-latest, 2026-04-29):
+- Commit: 34 (corpus는 main repo가 비교적 얕은 history; default cap = 10 commits/file이라 distinct commit 수가 자연 수렴)
+- changed_in: 344727 (= 평균 ~163 nodes/file × ~2.1 commits/file × 1259 Go files + ts/sol equivalents — file-level heuristic 특성상 high cardinality)
+- blame: 1319 (File node → 최근 commit. corpus의 File 노드 2142개 중 git log이 본 1319개만 매칭 — 차이 823개는 submodule(`.gitmodules` 존재)에 속한 파일들로, V0는 main repo의 `git log -- .` 만 fetch하므로 silently skip — 문서화된 한계)
+- schema_version: 1.3 → 1.4 (manifest 검증 완료)
+- temporal pass 단독 시간: ~0.4s (single `git log --raw` invocation, in-memory parse + edge emission)
+- cold build total: 21:06:03 → 21:06:58 = ~55s (pre-E4 baseline ~40s; +15s overhead은 추가 666332 - 322,...주: 다음 build의 ~344K edge insert가 dominate, git log 자체는 1초 미만)
+- warm rebuild: 0.1s short-circuit (E4 edges 동결 — 모든 cache hit 시 manifest timestamp만 갱신, temporal 재실행 없음)
+- 향후 보강 후보: line-level blame (G6 Phase 2 — `git blame --line-porcelain`), submodule history 트래버스, correlated_with/observed_in/mentioned_in (incident/runtime/PR 통합 D-tier)
 
 ---
 

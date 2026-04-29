@@ -176,6 +176,20 @@ func runCold(opt Options, log *slog.Logger,
 		log.Info("xlang linked", "binds_to", len(xlEdges))
 	}
 
+	// (4c) G6 Temporal: append Commit nodes + changed_in/blame edges from
+	// `git log`. Runs BEFORE cluster + score so PageRank can see the new
+	// nodes if it wants — commits are leaves with no outbound edges so they
+	// don't redirect PageRank mass; including them keeps the cluster pass's
+	// node universe consistent with the persisted DB.
+	// Skips silently for non-git source trees (no fatal). Re-validate so a
+	// regression in the temporal pass surfaces here, not at runtime.
+	if err := emitTemporalEdges(g, opt.SrcRoot, log, 0); err != nil {
+		return persist.Manifest{}, fmt.Errorf("temporal: %w", err)
+	}
+	if err := graph.Validate(g); err != nil {
+		return persist.Manifest{}, fmt.Errorf("validate after temporal: %w", err)
+	}
+
 	// (5) cluster
 	pkgTree := cluster.BuildPkgTree(g)
 	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)

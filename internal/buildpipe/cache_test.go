@@ -230,16 +230,16 @@ func TestIncremental_NoCacheFlag(t *testing.T) {
 }
 
 // TestIncremental_SchemaBumpInvalidates simulates a stored manifest with
-// SchemaVersion="1.0", then runs a build. ManifestUsable returns false (1.0
-// != current 1.2), so the build falls into the cold path — the entire DB
-// is rebuilt and a fresh 1.2 manifest is emitted.
+// SchemaVersion="1.0", then runs a build. ManifestUsable returns false
+// (1.0 != current SchemaVersion), so the build falls into the cold path —
+// the entire DB is rebuilt and a fresh-version manifest is emitted.
 func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	src := makeMiniGoModule(t)
 	out := t.TempDir()
 
 	first := runBuild(t, src, out)
-	if first.SchemaVersion != "1.3" {
-		t.Fatalf("first build SchemaVersion = %q, want 1.2", first.SchemaVersion)
+	if first.SchemaVersion != "1.4" {
+		t.Fatalf("first build SchemaVersion = %q, want 1.4", first.SchemaVersion)
 	}
 
 	// Manually rewrite the manifest's schema_version to "1.0" (legacy).
@@ -255,8 +255,8 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	store.Close()
 
 	second := runBuild(t, src, out)
-	if second.SchemaVersion != "1.3" {
-		t.Errorf("post-rebuild SchemaVersion = %q, want 1.2", second.SchemaVersion)
+	if second.SchemaVersion != "1.4" {
+		t.Errorf("post-rebuild SchemaVersion = %q, want 1.4", second.SchemaVersion)
 	}
 	// Files block is fresh (different timestamp guarantees fresh build).
 	if len(second.Files) != len(first.Files) {
