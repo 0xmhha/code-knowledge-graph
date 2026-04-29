@@ -174,6 +174,38 @@ html, body {
   font-family: ui-monospace, monospace;
 }
 
+/* ── 6-graph group filter UI (E5) ────────────────────────────────────── */
+.edge-filters .graph-group {
+  border-bottom: 1px solid #2a2c30;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
+.edge-filters .graph-group:last-child { border-bottom: none; }
+.edge-filters .graph-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+}
+.edge-filters .graph-group-header:hover { background: #2a2c30; }
+.edge-filters .graph-group-arrow { font-size: 9px; color: #888; width: 10px; text-align: center; }
+.edge-filters .graph-group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.edge-filters .graph-group-label { flex: 1; color: #cfd0d3; font-weight: 500; }
+.edge-filters .graph-group-count { color: #7ab8ff; font-size: 10px; font-family: ui-monospace, monospace; }
+.edge-filters .graph-group-toggle {
+  background: #232529; color: #e6e7e9; border: 1px solid #2a2c30;
+  padding: 1px 5px; cursor: pointer; font-size: 10px;
+  border-radius: 2px; min-width: 36px; text-align: center;
+}
+.edge-filters .graph-group-toggle:hover { background: #2a2c30; }
+.edge-filters .graph-group-toggle.partial { color: #ffaa00; }
+.edge-filters .graph-group-toggle.all-on  { color: #66cc77; }
+.edge-filters .graph-group-toggle.all-off { color: #aaa; }
+.edge-filters .graph-group-edges { padding-left: 14px; padding-top: 2px; }
+
 .trace-controls {
   padding: 6px 8px;
   border-top: 1px solid #2a2c30;

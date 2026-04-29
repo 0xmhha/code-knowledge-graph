@@ -57,6 +57,7 @@ interface State {
   setColorMode: (m: ColorMode) => void;
   setFontSize: (n: number) => void;
   toggleEdgeType: (t: string) => void;
+  setEdgeTypeWhitelistBulk: (edgeTypes: ReadonlyArray<string>, on: boolean) => void;
   toggleDimCommunity: (c: number) => void;
   setIsolatedCommunity: (c: number | null) => void;
   setTraceDirection: (d: TraceDirection) => void;
@@ -156,6 +157,12 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   toggleEdgeType: (t) => {
     const next = new Set(get().edgeTypeWhitelist);
     if (next.has(t)) next.delete(t); else next.add(t);
+    set({ edgeTypeWhitelist: next });
+  },
+  setEdgeTypeWhitelistBulk: (edgeTypes, on) => {
+    const next = new Set(get().edgeTypeWhitelist);
+    if (on) for (const t of edgeTypes) next.add(t);
+    else    for (const t of edgeTypes) next.delete(t);
     set({ edgeTypeWhitelist: next });
   },
   toggleDimCommunity: (c) => {

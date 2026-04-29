@@ -102,3 +102,99 @@ export const DEFAULT_EDGE_TYPES: ReadonlyArray<string> = [
 // Derived from EDGE_STYLE so there is a single source of truth for the key set.
 export const ALL_EDGE_TYPES: ReadonlyArray<string> =
   Object.keys(EDGE_STYLE).filter(k => !EDGE_STYLE[k].hidden);
+
+// 6-graph axis — CKS deep-dive § 4.1. EdgeTypeFilters renders one
+// collapsible section per graph; group toggle selects/deselects all
+// edges in the group at once.
+//
+// Source of truth: the backend AllEdgeTypes() in pkg/types/enums.go.
+// Edges absent from this map (only `contains` today, which is hidden)
+// don't appear in the filter UI.
+//
+// Placement notes (spec deviations):
+//   - `uses_type`, `instantiates` → G2 (type relations; not enumerated
+//     in spec § 4.1 G2 but conceptually fit there).
+//   - `binds_to` → G5 (the existing implementation of `xlang_calls`
+//     enumerated in spec § 4.1 G5).
+//   - `emits_event` → G2 (equivalent to spec's `emits` in § 4.1 G2).
+export type GraphID = 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6';
+
+export interface GraphGroupSpec {
+  id: GraphID;
+  label: string;        // human-readable label (e.g. "Structural")
+  description: string;  // tooltip text
+  color: number;        // header accent (matches dominant edge color in group)
+  edges: ReadonlyArray<string>;  // edge type names belonging to this graph
+}
+
+export const GRAPH_GROUPS: ReadonlyArray<GraphGroupSpec> = [
+  {
+    id: 'G1', label: 'Structural', color: 0x888888,
+    description: 'Physical code structure: contains, defines, imports, exports',
+    edges: ['defines', 'imports', 'exports'],  // contains is hidden
+  },
+  {
+    id: 'G2', label: 'Semantic', color: 0x6699ff,
+    description: 'Type and field relations: references, implements, extends, field/mapping reads/writes, modifier/decorator',
+    edges: ['uses_type', 'instantiates', 'references', 'implements', 'extends',
+            'reads_field', 'writes_field', 'reads_mapping', 'writes_mapping',
+            'emits_event', 'has_modifier', 'has_decorator'],
+  },
+  {
+    id: 'G3', label: 'Execution', color: 0xffffff,
+    description: 'Call and invocation flow',
+    edges: ['calls', 'invokes'],
+  },
+  {
+    id: 'G4', label: 'Concurrency', color: 0xff66cc,
+    description: 'Goroutines, channels, mutexes, lock semantics',
+    edges: ['spawns', 'sends_to', 'recvs_from',
+            'acquires_lock', 'releases_lock', 'accessed_under_lock'],
+  },
+  {
+    id: 'G5', label: 'Distributed', color: 0x44aaff,
+    description: 'Handler/RPC topology and cross-language bindings',
+    edges: ['listens_on', 'handles_message', 'rpc_calls', 'binds_to'],
+  },
+  {
+    id: 'G6', label: 'Temporal', color: 0x888899,
+    description: 'Git history: changed_in (symbol→commit), blame (file→last commit)',
+    edges: ['changed_in', 'blame'],
+  },
+];
+
+// edgeToGroup: reverse lookup. Returns null for unknown/hidden edges.
+export function edgeToGroup(edgeType: string): GraphID | null {
+  for (const g of GRAPH_GROUPS) {
+    if (g.edges.includes(edgeType)) return g.id;
+  }
+  return null;
+}
+
+// groupHasAllEdges: returns true if every edge in the group is in the
+// whitelist (used to render "fully on" group state).
+export function groupHasAllEdges(group: GraphGroupSpec, whitelist: ReadonlySet<string>): boolean {
+  return group.edges.every(e => whitelist.has(e));
+}
+
+// groupHasAnyEdge: returns true if at least one edge in the group is in
+// the whitelist (used to render the indeterminate group toggle state).
+export function groupHasAnyEdge(group: GraphGroupSpec, whitelist: ReadonlySet<string>): boolean {
+  return group.edges.some(e => whitelist.has(e));
+}
+
+// ── Self-check (build-time sanity) ─────────────────────────────────────
+// Every non-hidden edge in EDGE_STYLE MUST appear in exactly one group.
+// When bumping the schema (new EdgeType in pkg/types/enums.go), add an
+// EDGE_STYLE entry AND assign it to a GRAPH_GROUPS bucket — otherwise
+// it silently disappears from the filter UI.
+//
+// Current state (schema 1.4):
+//   29 non-hidden edges in EDGE_STYLE (30 total - `contains` hidden)
+//   29 edges across GRAPH_GROUPS (G1=3, G2=12, G3=2, G4=6, G5=4, G6=2)
+//
+// To verify after editing this file, eyeball the output of:
+//   node -e "const {ALL_EDGE_TYPES, GRAPH_GROUPS} = require('./edges'); \
+//     const g = new Set(GRAPH_GROUPS.flatMap(x => x.edges)); \
+//     console.log('missing:', ALL_EDGE_TYPES.filter(e => !g.has(e))); \
+//     console.log('orphan:', [...g].filter(e => !ALL_EDGE_TYPES.includes(e)));"

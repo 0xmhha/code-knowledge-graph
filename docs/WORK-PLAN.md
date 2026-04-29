@@ -107,7 +107,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | E2 | Go file inclusion: production path를 `go/packages.Load(./...)` 기반으로 교체 | #1 | L |
 | E3 | 6 graphs G5 Distributed: `listens_on`, `handles_message`, `rpc_calls` | #3 | L ✅ (NodeEndpoint + NodeMessageType slot adds; net/http HandleFunc/Handle + ServeMux + JSON-RPC handler signature + net/rpc client.Call detectors; schema 1.2→1.3; deferred: gRPC stubs, P2P broadcasters, consensus_flow) |
 | E4 | 6 graphs G6 Temporal: `git log` 기반 `changed_in`, `blame` | #3 | M ✅ (NodeCommit slot add; single `git log --raw --no-renames` invocation per build → per-file commit list capped at 10; `changed_in` heuristic = 모든 symbol whose file_path matches × commits touching that file; `blame` = File node → most-recent commit (V0 file-level simplification, line-level deferred); schema 1.3→1.4; graceful skip when not git checkout; deferred: line-level blame, submodule traversal, correlated_with/observed_in/mentioned_in) |
-| E5 | viewer에 6-graph 그룹 필터 UI (G1~G6별 토글) | #4 | M |
+| E5 | viewer에 6-graph 그룹 필터 UI (G1~G6별 토글) | #4 | M ✅ (`web/viewer-next/src/lib/edges.ts`에 GRAPH_GROUPS 단일 출처 정의 — G1~G6에 29개 non-hidden edge 매핑; `EdgeTypeFilters.tsx` 재작성 — collapsible group section + 3-state group toggle (all-on / partial / all-off, "all"/"some"/"none" 라벨); group toggle은 `setEdgeTypeWhitelistBulk` store 액션 호출; 접힘 상태는 `localStorage[ckg.edgeFiltersCollapsed]`에 JSON array of GraphID 영속; default-collapsed = G1+G2 (가장 다수, trace mode에서 부차적); 각 헤더에 dominant edge color dot + N/M count + tooltip; backend 변경 0줄) |
 | E6 | edge type schema vs viewer EDGE_STYLE desync 수정 | #4 | S |
 
 사용자 조건 4가지 (이전 분석 세션에서 사용자 제시):
@@ -367,7 +367,7 @@ A1+A2 측정 결과 (2026-04-29):
 - [x] Goroutine/Channel/Mutex 노드 + 엣지 추출 (Stage 1)
 - [x] G5 Distributed edge 추출 (Go HTTP handler / JSON-RPC handler / net/rpc client)
 - [x] G6 Temporal edge 추출 (`changed_in`, `blame`)
-- [ ] viewer에 6-graph 그룹 토글 UI
+- [x] viewer에 6-graph 그룹 토글 UI
 
 E3 측정 결과 (go-stablenet-latest, 2026-04-29):
 - Endpoint: 2 (metrics/exp 모듈의 `http.Handle` 호출 — corpus는 대부분 `httprouter` 사용으로 stdlib HandleFunc/Handle 직접 사용 거의 없음)
