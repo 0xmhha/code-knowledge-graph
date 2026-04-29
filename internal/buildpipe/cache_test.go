@@ -338,3 +338,111 @@ func manifestHasPath(m persist.Manifest, path string) bool {
 	}
 	return false
 }
+
+// TestPartialCache_PreservesCrossFileEdges_ViaColdFallback is the regression
+// guard for the A3 follow-up: previously, when a callee file was modified
+// (cached caller still pointing into it), the partial-cache routing in
+// runIncremental dropped the cross-file `calls` edge because cached files
+// don't re-emit pending refs. Empirical proof: testdata/synthetic vault.go
+// modify took cross-file calls 2 → 0.
+//
+// The fix removes the partial-cache routing — any non-full-hit case now
+// falls back to runCold, which re-runs Pass 2 in full. This test pins
+// the contract: cross-file calls survive a callee-side modification.
+//
+// Module shape:
+//
+//	caller.go: func Use() { Helper() }
+//	callee.go: func Helper() {}
+//
+// Cold build → 1 cross-file `calls` edge (caller.Use → callee.Helper).
+// Modify callee.go → rebuild. Expect: still 1 cross-file `calls` edge.
+func TestPartialCache_PreservesCrossFileEdges_ViaColdFallback(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "go.mod"), `module example.com/edgepin
+
+go 1.21
+`)
+	mustWrite(t, filepath.Join(dir, "caller.go"), `package edgepin
+
+// Use invokes Helper from the same package, different file.
+func Use() { Helper() }
+`)
+	calleePath := filepath.Join(dir, "callee.go")
+	mustWrite(t, calleePath, `package edgepin
+
+// Helper does nothing. The point is that Use() targets it from caller.go.
+func Helper() {}
+`)
+	out := t.TempDir()
+
+	// Cold build — establish baseline cross-file calls count.
+	first := runBuild(t, dir, out)
+	if !manifestHasPath(first, "caller.go") || !manifestHasPath(first, "callee.go") {
+		t.Fatalf("expected both files in first manifest, got %v", manifestPaths(first))
+	}
+	coldCalls := countCrossFileCallsEdges(t, filepath.Join(out, "graph.db"))
+	if coldCalls < 1 {
+		t.Fatalf("cold build must emit ≥1 cross-file calls edge, got %d", coldCalls)
+	}
+
+	// Modify callee.go (callee-side change; caller.go remains cached).
+	// Without the cold-fallback fix this rebuild would silently drop
+	// caller.Use → callee.Helper, taking the cross-file calls count to 0.
+	mustWrite(t, calleePath, `package edgepin
+
+// Helper does nothing — comment edited to invalidate this file's cache.
+func Helper() {}
+`)
+	runBuild(t, dir, out)
+	warmCalls := countCrossFileCallsEdges(t, filepath.Join(out, "graph.db"))
+	if warmCalls != coldCalls {
+		t.Errorf("cross-file calls drifted on partial-cache rebuild: cold=%d warm=%d (regression: A3 partial-cache silent edge loss)",
+			coldCalls, warmCalls)
+	}
+}
+
+// countCrossFileCallsEdges queries the SQLite graph for `calls` edges whose
+// src and dst nodes live in different files. Used by edge-preservation tests.
+func countCrossFileCallsEdges(t *testing.T, dbPath string) int {
+	t.Helper()
+	store, err := persist.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("open db %s: %v", dbPath, err)
+	}
+	defer store.Close()
+	// QueryEdgesByType doesn't filter by file — fetch all calls, then
+	// look up each endpoint's file_path and count cross-file pairs.
+	edges, err := store.QueryEdgesByType("calls")
+	if err != nil {
+		t.Fatalf("query calls edges: %v", err)
+	}
+	if len(edges) == 0 {
+		return 0
+	}
+	idSet := map[string]bool{}
+	for _, e := range edges {
+		idSet[e.Src] = true
+		idSet[e.Dst] = true
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	nodes, err := store.NodesByIDs(ids)
+	if err != nil {
+		t.Fatalf("nodes by ids: %v", err)
+	}
+	pathByID := map[string]string{}
+	for _, n := range nodes {
+		pathByID[n.ID] = n.FilePath
+	}
+	cross := 0
+	for _, e := range edges {
+		if pathByID[e.Src] != "" && pathByID[e.Dst] != "" &&
+			pathByID[e.Src] != pathByID[e.Dst] {
+			cross++
+		}
+	}
+	return cross
+}

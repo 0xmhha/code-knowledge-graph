@@ -133,6 +133,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | G3 | NEXT-SESSION.md 정리 → 본 문서로 대체 | ✅ `df70804` |
 | G4 | `pipeline.go` `Run` 145줄 → `persistAll` helper 추출 (file 418줄 → 400줄 미만) | ⏭️ E2 review follow-up |
 | G5 | `go.work` 회귀 smoke test (workspace root at srcRoot, 2 member modules) | ⏭️ E2 review follow-up |
+| G6 | A3 incremental 경로 재활성화: cached_src→dirty_dst cross-file edge 손실 해결 (옵션 C: cached caller 재파싱 OR 옵션 D: pending refs 영속화). 현재는 partial-cache → cold 폴백. C1과 함께 진행 권장. | ⏭️ A3 review follow-up |
 
 추정: XS=5분, S=15-30분, M=1-2시간, L=반나절, XL=하루+
 

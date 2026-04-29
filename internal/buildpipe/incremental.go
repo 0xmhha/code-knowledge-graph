@@ -86,6 +86,17 @@ func readOldManifestFromDB(dbPath string) *persist.Manifest {
 // runIncremental implements the incremental build path. Caller must have
 // already determined the cache base is usable (ManifestUsable) and that at
 // least one file is cached (so we have something to reuse).
+//
+// CURRENTLY UNROUTED — the routing in pipeline.go Run() falls back to
+// runCold on any non-full-hit case until the cross-file edge handling is
+// fixed (cached_src→dirty_dst edges are silently dropped because cached
+// files' pending refs are not re-emitted; see the Run() doc-comment).
+// This function and its helpers (partitionByLang, runLanguagePipelines,
+// reloadCachedEdges, relinkXLang, persistIncrementalArtifacts) are kept
+// as dead code for the eventual re-enable path (WORK-PLAN.md C1 / Phase
+// 2 reverse-reference index OR a "persisted pending refs" approach).
+// The compile-time reference at the bottom of the file keeps gopls's
+// unusedfunc analyzer quiet without lying about callers.
 func runIncremental(opt Options, log *slog.Logger,
 	discovery []DiscoveredFile, decisions CacheDecisions,
 	goCount, tsCount, solCount int) (persist.Manifest, error) {
@@ -567,3 +578,9 @@ func buildFileEntries(decisions CacheDecisions, nodes []types.Node, edges []type
 	}
 	return out
 }
+
+// _runIncrementalRef keeps runIncremental and its transitive helpers
+// reachable from gopls's unusedfunc perspective while the routing in
+// pipeline.go Run() is suppressed (see runIncremental's doc-comment).
+// Once the routing is restored this can go.
+var _runIncrementalRef = runIncremental

@@ -71,6 +71,25 @@ func Run(opt Options) (persist.Manifest, error) {
 	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
 
 	// (2) cache routing
+	//
+	// Two paths only:
+	//   - runShortCircuit: 100% cache hit (no parse, no graph rewrite, manifest
+	//     timestamp refresh). This is the load-bearing speedup case — CI re-runs
+	//     on unchanged source finish in <1s instead of cold rebuild time.
+	//   - runCold: any miss or removal → full rebuild.
+	//
+	// runIncremental (the partial-rebuild path) is intentionally NOT routed
+	// here. Empirical reproduction (testdata/synthetic, modifying vault.go)
+	// showed cross-file `calls` edges where the caller is cached and callee
+	// is dirty are silently dropped (cold: 2 calls → warm-incremental: 0).
+	// Root cause: cached files are not re-parsed, so their pending refs are
+	// not re-emitted; Pass 2 only sees pending refs from dirty files. The
+	// existing reloadCachedEdges drops cross-file edges spanning dirty↔cached
+	// because the dirty-side node IDs don't match (content-hash IDs change).
+	// runIncremental + helpers are kept as dead code for the eventual
+	// re-enable (see WORK-PLAN.md C1 / Phase 2 reverse-reference index OR a
+	// "persisted pending refs" approach) — until then the safe fallback is
+	// cold rebuild on any non-full-hit case.
 	dbPath := filepath.Join(opt.OutDir, "graph.db")
 	old := readOldManifestFromDB(dbPath)
 	if !opt.NoCache && ManifestUsable(old, opt.CKGVersion) {
@@ -78,13 +97,11 @@ func Run(opt Options) (persist.Manifest, error) {
 		if derr != nil {
 			return persist.Manifest{}, fmt.Errorf("cache diff: %w", derr)
 		}
-		switch {
-		case decisions.IsAllCached():
+		if decisions.IsAllCached() {
 			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount)
-		case decisions.Hits > 0:
-			return runIncremental(opt, log, discovery, decisions, goCount, tsCount, solCount)
 		}
-		// fallthrough: zero hits is no win — fall through to cold rebuild
+		log.Info("Cache: partial hit; falling back to cold rebuild for correctness",
+			"hits", decisions.Hits, "misses", decisions.Misses, "removed", decisions.Removed)
 	}
 	if opt.NoCache {
 		log.Info("Cache: bypassed (--no-cache); full rebuild")

@@ -52,10 +52,33 @@ Routing inside `buildpipe.Run`:
 |---|---|
 | `--no-cache`, OR no prior manifest, OR schema/version mismatch | **cold** — wipe DB + parse all files |
 | All discovered files match cache, no removals | **short-circuit** — refresh manifest timestamp only |
-| Mixed dirty/cached/removed | **incremental** — parse dirty only, reload cached node sets, rerun Pass 2 |
+| Mixed dirty/cached/removed | **cold (fallback for correctness)** — see "Partial-cache fallback" below |
 
-The cache decision log line (`Cache: H hits, M misses, R removed; parsed N files`)
-is emitted by every non-`--no-cache` build for grep-friendly operator visibility.
+The short-circuit log line (`Cache: H hits, M misses, R removed; parsed N files`)
+fires for the all-cached case. Partial-cache cases emit
+`Cache: partial hit; falling back to cold rebuild for correctness`.
+
+### Partial-cache fallback (correctness over speed)
+
+The original A3 design routed mixed dirty/cached/removed cases through
+`runIncremental` (parse dirty only, reload cached node sets, rerun Pass 2).
+Empirical testing surfaced a silent edge-loss class: cross-file `calls`
+edges where the **caller is cached and callee is dirty** were dropped
+because cached files are not re-parsed and therefore do not re-emit their
+pending refs; meanwhile the dirty callee's new node IDs (content-hash
+based) don't match the cached caller's recorded edge endpoints, so
+`reloadCachedEdges` correctly drops the stale edge — leaving no one to
+re-emit it.
+
+Until a reverse-reference index (WORK-PLAN C1) or persisted pending refs
+restore correctness, partial cache cases fall back to cold rebuild.
+`runIncremental` and its helpers are kept as dead code (referenced via
+`_runIncrementalRef` to satisfy gopls) so the eventual re-enable lands
+as a single routing change, not a rewrite.
+
+The genuinely load-bearing speedup — full cache hit on a CI re-run with
+zero source changes — is the **short-circuit** path and remains intact.
+Measured on go-stablenet-latest (2142 files): 40s cold → 1s short-circuit.
 
 ## Manifest v2 schema
 
