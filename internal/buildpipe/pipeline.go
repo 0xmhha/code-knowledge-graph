@@ -160,9 +160,13 @@ func Run(opt Options) (persist.Manifest, error) {
 		return persist.Manifest{}, err
 	}
 
-	// Manifest with staleness fingerprint
+	// Manifest with staleness fingerprint.
+	// SchemaVersion 1.1 (A5): NodeMutex + acquires_lock / releases_lock /
+	// accessed_under_lock slot reservation. Old 1.0 graph DBs remain
+	// readable (TEXT columns accept any string; queries for the new
+	// types simply return empty until B1 starts emitting in Wave 5).
 	m := persist.Manifest{
-		SchemaVersion:  "1.0",
+		SchemaVersion:  "1.1",
 		CKGVersion:     opt.CKGVersion,
 		BuildTimestamp: time.Now().UTC().Format(time.RFC3339),
 		SrcRoot:        opt.SrcRoot,

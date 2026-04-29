@@ -6,7 +6,7 @@ export interface EdgeStyle {
 }
 
 // Per-edge-type rendering style. Keys MUST match the backend EdgeType
-// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (22 edges).
+// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (25 edges).
 //
 // `contains` is intentionally hidden in the viewer: it's the structural
 // parent-child edge that would otherwise dominate the layout.
@@ -18,6 +18,8 @@ export interface EdgeStyle {
 //   - field & mapping reads: green; writes: red; emits_event: orange dashed
 //   - has_modifier / has_decorator: cyan / violet
 //   - concurrency (spawns/sends_to/recvs_from): pink/magenta family
+//   - lock semantics (acquires_lock/releases_lock/accessed_under_lock):
+//       red (acquire/write) / green (release) / amber dashed (annotation, not flow)
 //   - binds_to: gold (highest-attention cross-language link)
 //
 // TODO: when vitest lands (WORK-PLAN Wave-5+), add edges.test.ts asserting
@@ -58,6 +60,15 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   spawns:          { color: 0xff66cc, width: 1 },
   sends_to:        { color: 0xff99cc, width: 1 },
   recvs_from:      { color: 0xcc66cc, width: 1 },
+
+  // lock semantics (schema 1.1 slot reservation; emission lands in B1 / Wave 5).
+  // Off by default like other concurrency edges — toggle on via filters.
+  // Color choice: acquire=red (write/grab), release=green (free), accessed_under_lock=
+  // amber dashed (annotation linking a field-access to the lock that guards it,
+  // not a flow edge — dash signals "metadata", same idiom as uses_type).
+  acquires_lock:        { color: 0xff5577, width: 1 },
+  releases_lock:        { color: 0x55cc77, width: 1 },
+  accessed_under_lock:  { color: 0xffcc66, width: 1, dash: true },
 
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },

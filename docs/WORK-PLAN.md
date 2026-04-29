@@ -75,7 +75,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | A2 | Item 1 Phase 1b: Solidity 마이그레이션 + binding 정리 | A1 (병렬 가능) | M |
 | A3 | Item 4 Phase 1: file-level SHA256 캐시 + manifest schema v2 + 변경 파일만 재파싱 | — | L |
 | A4 | Item 3 Storage abstraction: `Store` interface 추출 (SQLite를 구현체로 정리) | — | M ✅ (ISP split: StoreReader / StoreWriter / Store; struct → unexported sqliteStore) |
-| A5 | Schema bump 1.0→1.1 + concurrency edge 자리 예약 (`acquires_lock` 등) | — | S |
+| A5 | Schema bump 1.0→1.1 + concurrency edge 자리 예약 (`acquires_lock` 등) | — | S ✅ (NodeMutex + 3 lock edges 슬롯 예약, viewer styling 추가, 1.0 graph 하위 호환 검증) |
 
 ### Group B — v0.2.1 Concurrency + PG export
 
