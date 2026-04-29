@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	gotypes "go/types"
 	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
@@ -11,15 +12,27 @@ import (
 )
 
 // declVisitor walks the AST and emits Pass 1 nodes and edges.
+//
+// typesInfo, when non-nil, enables go/types-aware extraction (used by the
+// concurrency pass to resolve sync.Mutex receivers via *types.Object
+// identity rather than name matching). Stays nil when the parser was
+// invoked in AST-only mode (no SetPackages call) — callers must check
+// before dereferencing.
 type declVisitor struct {
-	fset    *token.FileSet
-	relPath string
-	pkgName string
-	pkgID   string
-	fileID  string
-	nodes   []types.Node
-	edges   []types.Edge
-	pending []parse.PendingRef
+	fset      *token.FileSet
+	relPath   string
+	pkgName   string
+	pkgID     string
+	fileID    string
+	nodes     []types.Node
+	edges     []types.Edge
+	pending   []parse.PendingRef
+	typesInfo *gotypes.Info
+	// mutexNodeIDs maps a *types.Object (the var/field declaration of a
+	// sync.Mutex/RWMutex) to the Mutex node ID emitted by emitConcurrencyDecls.
+	// Populated during decl walk; consumed by Lock/Unlock detection so
+	// acquires_lock edges resolve to the same Mutex node the field declared.
+	mutexNodeIDs map[gotypes.Object]string
 }
 
 func newDeclVisitor(fset *token.FileSet, relPath, pkgName string) *declVisitor {

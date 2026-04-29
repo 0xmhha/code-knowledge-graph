@@ -313,8 +313,24 @@ func shouldRun(lang string, opts []string) bool {
 // runGoPipeline drives Pass 1 (per-file ParseFile) + Pass 2 (Resolve) for Go.
 // Returns the resolved graph, count of files that failed to read or parse,
 // and any fatal Resolve error.
+//
+// B1 (Wave 5): loads each module with full go/types info via detect.GoPackages
+// and registers the result on the parser via SetPackages. This enables the
+// concurrency pass to resolve sync.Mutex receivers via *types.Object identity
+// (false-positive guard, spec §2 R2.1). The packages.Load is ~10x slower than
+// the file-list-only mode used by detect.GoFiles, but is amortised against
+// the per-file parse pass below.
+//
+// Failure of the typed load is a soft fallback — the parser will still work
+// in AST-only mode (concurrency edges become INFERRED). Logs the warning so
+// operators can investigate without breaking the build.
 func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
 	p := gop.New(srcRoot)
+	if pkgs, err := detect.GoPackages(srcRoot); err != nil {
+		log.Warn("Go packages typed-load failed; concurrency pass falls back to AST-only", "err", err)
+	} else {
+		p.SetPackages(pkgs)
+	}
 	results := []*parse.ParseResult{}
 	errs := 0
 	for _, rel := range files {

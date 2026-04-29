@@ -84,11 +84,15 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 
 // LoadAndResolve is a convenience for tests: walks Go files under root,
 // runs Pass 1 on each, then Pass 2 across the union.
+//
+// Type-aware: registers the loaded packages with the parser via
+// SetPackages so the concurrency pass (B1) gets EXTRACTED-confidence
+// Mutex / lock-edge emission instead of falling back to AST-only INFERRED.
 func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 			packages.NeedTypes | packages.NeedTypesInfo | packages.NeedDeps |
-			packages.NeedImports | packages.NeedModule,
+			packages.NeedImports | packages.NeedModule | packages.NeedCompiledGoFiles,
 		Dir: root,
 	}
 	pkgs, err := packages.Load(cfg, "./...")
@@ -96,9 +100,15 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 		return nil, fmt.Errorf("packages.Load: %w", err)
 	}
 	p := New(root)
+	p.SetPackages(pkgs)
 	var results []*parse.ParseResult
+	seen := map[string]struct{}{}
 	for _, pkg := range pkgs {
 		for _, path := range pkg.GoFiles {
+			if _, dup := seen[path]; dup {
+				continue
+			}
+			seen[path] = struct{}{}
 			src, err := readFile(path)
 			if err != nil {
 				return nil, err

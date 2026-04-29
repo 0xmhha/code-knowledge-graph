@@ -81,7 +81,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 | ID | 작업 | 의존 | 추정 |
 |---|---|---|---|
-| B1 | Item 2 Stage 1: Go AST 휴리스틱 (Goroutine/Channel/Mutex, types.Info) | A5 | L |
+| B1 | Item 2 Stage 1: Go AST 휴리스틱 (Goroutine/Channel/Mutex, types.Info) | A5 | L ✅ (Mutex/Channel emission, acquires_lock/releases_lock 781/834 on go-stable-code; accessed_under_lock Phase 4 deferred → B1-FOLLOWUP) |
 | B2 | Item 3 Phase 1: `ckg export-postgres --dsn ... --source ...` 명령 | A4 | M |
 | B3 | Item 1 Phase 1c: incremental parsing 인프라 (Tree.Edit() API) | A1, A3 | M |
 
@@ -135,6 +135,8 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | G5 | `go.work` 회귀 smoke test (workspace root at srcRoot, 2 member modules) | ⏭️ E2 review follow-up |
 | G6 | A3 incremental 경로 재활성화: cached_src→dirty_dst cross-file edge 손실 해결 (옵션 C: cached caller 재파싱 OR 옵션 D: pending refs 영속화). 현재는 partial-cache → cold 폴백. C1과 함께 진행 권장. | ⏭️ A3 review follow-up |
 | G7 | TS/Sol parser 패키지에 committed golden test 추가 (fixture parse → 안정 marshalling → checked-in golden 비교). 미래 tree-sitter 버전 bump 시 silent miss-extraction을 CI에서 즉시 감지. | ⏭️ A1+A2 review follow-up |
+| G8 | B1 Phase 4: `accessed_under_lock` edges (Lock~Unlock 사이 변수 접근 추적). 현재 0개 emission. types.Info로 field 식별 + lexical scope 추적 필요. | ⏭️ B1 follow-up |
+| G9 | B1 Mutex emission 보강: 현재 go-stable-code 8개만 (대부분 embedded `sync.Mutex` 패턴이나 wrapper struct를 못 잡음). embedding chain 추적 추가. | ⏭️ B1 follow-up |
 
 추정: XS=5분, S=15-30분, M=1-2시간, L=반나절, XL=하루+
 

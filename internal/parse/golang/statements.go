@@ -40,7 +40,15 @@ func (v *declVisitor) emitFunctionBodyPos(parentQname, parentID string, body *as
 		case *ast.CallExpr:
 			id := v.appendLogicBlockPos(parentID, parentQname, types.NodeCallSite, "", s.Pos(), s.End())
 			// Pending edge: CallSite -calls-> callee — resolved in Pass 2.
-			v.pending = append(v.pending, parsePendingFromCall(id, parentQname, s, v.fset))
+			v.pending = append(v.pending, parsePendingFromCall(id, s, v.fset))
+			// Concurrency phase 2: lock/unlock edges. Receiver resolution
+			// uses types.Info when available; falls back to AST-only INFERRED
+			// matching otherwise. No-op for non-mutex calls.
+			v.maybeEmitLockEdge(parentID, s)
+			// Concurrency phase 3: `make(chan T, n)` → Channel node with
+			// direction/elem/buffer attributes (encoded in Signature). No-op
+			// for non-make calls.
+			v.emitChannelFromMake(parentID, s)
 		case *ast.GoStmt:
 			id := v.appendLogicBlockPos(parentID, parentQname, types.NodeGoroutine, "", s.Pos(), s.End())
 			v.edges = append(v.edges, types.Edge{
@@ -87,7 +95,7 @@ func (v *declVisitor) appendLogicBlockPos(parentID, parentQname string, t types.
 
 // parsePendingFromCall extracts a best-effort callee qname from a *ast.CallExpr.
 // The result is consumed in Pass 2 (Resolve) to materialize a `calls` edge.
-func parsePendingFromCall(srcID, parentQname string, c *ast.CallExpr, fset *token.FileSet) parse.PendingRef {
+func parsePendingFromCall(srcID string, c *ast.CallExpr, fset *token.FileSet) parse.PendingRef {
 	target := exprName(c.Fun)
 	pos := fset.Position(c.Pos())
 	return parse.PendingRef{

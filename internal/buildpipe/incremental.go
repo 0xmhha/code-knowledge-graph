@@ -401,6 +401,16 @@ func hasCached(m map[string][]string, lang string) bool {
 func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
 	p := gop.New(srcRoot)
+	// B1: type-aware concurrency pass needs detect.GoPackages registered
+	// here too. Currently unreachable (incremental path is dead code per
+	// pipeline.go comment) — keeping the call so when G6 re-enables this
+	// path the concurrency edges stay EXTRACTED instead of silently dropping
+	// to AST-only INFERRED.
+	if pkgs, err := detect.GoPackages(srcRoot); err == nil {
+		p.SetPackages(pkgs)
+	} else {
+		log.Warn("Go packages typed-load failed; concurrency falls back to AST-only", "err", err)
+	}
 	results := []*parse.ParseResult{}
 	errs := 0
 	for _, rel := range dirtyFiles {
