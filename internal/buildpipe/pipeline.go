@@ -8,18 +8,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
 	"github.com/0xmhha/code-knowledge-graph/internal/link"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
-	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
-	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/internal/score"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -324,145 +320,6 @@ func shouldRun(lang string, opts []string) bool {
 	return false
 }
 
-// runGoPipeline drives Pass 1 (per-file ParseFile) + Pass 2 (Resolve) for Go.
-// Returns the resolved graph, count of files that failed to read or parse,
-// and any fatal Resolve error.
-//
-// B1 (Wave 5): loads each module with full go/types info via detect.GoPackages
-// and registers the result on the parser via SetPackages. This enables the
-// concurrency pass to resolve sync.Mutex receivers via *types.Object identity
-// (false-positive guard, spec §2 R2.1). The packages.Load is ~10x slower than
-// the file-list-only mode used by detect.GoFiles, but is amortised against
-// the per-file parse pass below.
-//
-// Failure of the typed load is a soft fallback — the parser will still work
-// in AST-only mode (concurrency edges become INFERRED). Logs the warning so
-// operators can investigate without breaking the build.
-func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
-	p := gop.New(srcRoot)
-	if pkgs, err := detect.GoPackages(srcRoot); err != nil {
-		log.Warn("Go packages typed-load failed; concurrency pass falls back to AST-only", "err", err)
-	} else {
-		p.SetPackages(pkgs)
-	}
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("read file", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("parse file", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
-	rg, err := p.Resolve(results)
-	return rg, errs, err
-}
-
-// stampFilePath populates Edge.FilePath for every per-file edge that lacks
-// one, drawing from the ParseResult.Path the parser already recorded.
-// Required by the A3 incremental cache: EdgesByFilePath reloads cached
-// edges by file_path, and the parsers historically left it blank because
-// the V0 schema didn't surface the field. Stamping is idempotent — pre-set
-// FilePaths (e.g. on edges with line numbers) are preserved.
-//
-// Stamping per-file edges is safe: an edge emitted while parsing file X
-// belongs to X by construction. Cross-file edges come from Pass 2 (Resolve),
-// not per-file ParseFile, so this stamping doesn't touch them.
-func stampFilePath(r *parse.ParseResult) {
-	rel := filepath.ToSlash(r.Path)
-	if rel == "" {
-		return
-	}
-	for i := range r.Edges {
-		if r.Edges[i].FilePath == "" {
-			r.Edges[i].FilePath = rel
-		}
-	}
-}
-
-// runTSPipeline drives Pass 1 + Pass 2 for TypeScript / JavaScript.
-// Returns the resolved graph, count of files that failed to read or parse,
-// and any fatal Resolve error. Mirrors runGoPipeline.
-func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
-	p := tsp.New(srcRoot)
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("ts read", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("ts parse", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
-	rg, err := p.Resolve(results)
-	return rg, errs, err
-}
-
-// runSolPipeline drives Pass 1 + Pass 2 for Solidity. Returns the parser
-// instance so callers can read the accumulated ABI for cross-language linking.
-func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, *solp.Parser, error) {
-	p := solp.New(srcRoot)
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("sol read", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("sol parse", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
-	rg, err := p.Resolve(results)
-	return rg, errs, p, err
-}
-
-// convertABI bridges solidity.ABISig (parser output) and link.ABISig (linker
-// input) to keep the link package free of any per-language parser imports.
-func convertABI(in map[string][]solp.ABISig) map[string][]link.ABISig {
-	out := make(map[string][]link.ABISig, len(in))
-	for k, v := range in {
-		converted := make([]link.ABISig, len(v))
-		for i, s := range v {
-			converted[i] = link.ABISig{
-				ContractName: s.ContractName,
-				FunctionName: s.FunctionName,
-				ParamTypes:   s.ParamTypes,
-			}
-		}
-		out[k] = converted
-	}
-	return out
-}
-
 // extractBlobs reads every node's source slice (StartByte..EndByte) into a
 // per-node blob, caching file contents to amortize IO. Package nodes are
 // skipped (they have no syntactic body) and offsets are bounds-checked
@@ -490,100 +347,6 @@ func extractBlobs(root string, nodes []types.Node) map[string][]byte {
 		blobs[n.ID] = append([]byte(nil), src[n.StartByte:n.EndByte]...)
 	}
 	return blobs
-}
-
-// setStaleness records the staleness fingerprint on the manifest. Prefers a
-// path-aware git commit SHA (the last commit that modified files under
-// m.SrcRoot); falls back to summing mtimes of up to 5 detected files when the
-// source root is not a git checkout or has no commit history yet.
-//
-// The path-aware lookup is required for sub-directories of larger repos
-// (monorepos, or tools' own testdata): a plain `git rev-parse HEAD` would
-// flip on every unrelated commit elsewhere in the repo, producing
-// false-positive stale banners in the viewer.
-func setStaleness(m *persist.Manifest, log *slog.Logger) {
-	repoRoot, relPath, ok := gitRepoRel(m.SrcRoot)
-	if ok {
-		commit, err := pathAwareHead(repoRoot, relPath)
-		if err == nil && commit != "" {
-			m.SrcCommit = commit
-			m.SrcRelPath = relPath
-			m.StalenessMethod = "git"
-			return
-		}
-		if err != nil {
-			log.Warn("path-aware git HEAD failed; falling back to mtime",
-				"repo", repoRoot, "rel", relPath, "err", err)
-		}
-	}
-	m.StalenessMethod = "mtime"
-	// Mtime fallback only needs a stable, deterministic subset of source
-	// files — it doesn't need to mirror the build oracle exactly. detect.Walk
-	// is intentionally reused here (rather than detect.GoFiles + the TS/Sol
-	// halves of detect.Walk) because the cost of forking another packages.Load
-	// for fingerprinting outweighs the cost of a few build-tag-excluded paths
-	// landing in the StalenessFiles list — the resulting hash is still
-	// deterministic and that's all this codepath needs.
-	files, _ := detect.Walk(m.SrcRoot)
-	all := append(append([]string{}, files.Go...), files.TS...)
-	all = append(all, files.Sol...)
-	if len(all) > 5 {
-		all = all[:5]
-	}
-	var sum int64
-	for _, rel := range all {
-		st, err := os.Stat(filepath.Join(m.SrcRoot, rel))
-		if err == nil {
-			sum += st.ModTime().UnixNano()
-		}
-	}
-	m.StalenessFiles = all
-	m.StalenessMTimeSum = sum
-}
-
-// gitRepoRel returns (repoRoot, relPathFromRepoRoot, true) when srcRoot lives
-// inside a git checkout, or ("", "", false) otherwise. relPath is normalised
-// to forward slashes and is "." when srcRoot is the repo root itself.
-//
-// Both repoRoot and srcRoot are resolved through filepath.EvalSymlinks before
-// computing filepath.Rel — without this, on macOS where /tmp -> /private/tmp
-// the rel computation walks ../../../ across the symlink boundary and yields
-// a path git cannot resolve.
-func gitRepoRel(srcRoot string) (string, string, bool) {
-	out, err := exec.Command("git", "-C", srcRoot, "rev-parse", "--show-toplevel").Output()
-	if err != nil {
-		return "", "", false
-	}
-	repoRoot := strings.TrimSpace(string(out))
-	if repoRoot == "" {
-		return "", "", false
-	}
-	absSrc, err := filepath.Abs(srcRoot)
-	if err != nil {
-		return "", "", false
-	}
-	if resolved, err := filepath.EvalSymlinks(absSrc); err == nil {
-		absSrc = resolved
-	}
-	if resolved, err := filepath.EvalSymlinks(repoRoot); err == nil {
-		repoRoot = resolved
-	}
-	rel, err := filepath.Rel(repoRoot, absSrc)
-	if err != nil {
-		return "", "", false
-	}
-	return repoRoot, filepath.ToSlash(rel), true
-}
-
-// pathAwareHead runs `git -C <repoRoot> log -1 --format=%H -- <relPath>` and
-// returns the trimmed SHA. Empty output (no commit ever touched relPath) is
-// returned as ("", nil) so callers can fall back to mtime fingerprinting.
-func pathAwareHead(repoRoot, relPath string) (string, error) {
-	out, err := exec.Command("git", "-C", repoRoot, "log", "-1", "--format=%H", "--", relPath).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // writeManifestJSON pretty-prints the manifest to path for human inspection.
