@@ -40,9 +40,14 @@ const (
 )
 
 // AllNodeTypes returns all 30 node types in a stable order.
-// NOTE: order is load-bearing for downstream tests/IDs — append-only.
-// NodeMutex is inserted after NodeChannel (concurrency family group);
-// statement nodes (NodeIfStmt..NodeSwitchStmt) keep their relative order.
+// NOTE: identifier names are stable; positional indices are load-bearing
+// only for tests that snapshot the full slice (TestAllNodeTypes_Stable).
+// NodeMutex was inserted at index 24 to keep the concurrency family
+// (Goroutine/Channel/Mutex) contiguous, which shifted the statement
+// nodes (NodeIfStmt..NodeSwitchStmt) from indices 24-28 to 25-29 — no
+// callers key on those indices, so the shift is safe; future additions
+// should prefer append over insert when no grouping reason argues
+// otherwise.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,

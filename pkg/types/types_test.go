@@ -46,8 +46,11 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 
 // TestAllNodeTypes_Stable locks down the order of the existing entries so a
 // future schema bump can't accidentally reorder them and invalidate
-// hash-derived IDs / cached test snapshots. Append-only is the contract;
-// NodeMutex was inserted right after NodeChannel (concurrency family).
+// hash-derived IDs / cached test snapshots. Identifier names are append-only
+// in spirit; NodeMutex was inserted at index 24 to keep the concurrency
+// family contiguous, which shifted statement nodes from 24-28 to 25-29 —
+// the test snapshot below records the post-A5 reality. Future additions
+// should prefer append over insert when no grouping argument applies.
 func TestAllNodeTypes_Stable(t *testing.T) {
 	want := []types.NodeType{
 		types.NodePackage, types.NodeFile, types.NodeStruct, types.NodeInterface, types.NodeClass,
