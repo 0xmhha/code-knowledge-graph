@@ -50,7 +50,7 @@ func TestConcurrency_Mutex_Embedded(t *testing.T) {
 		if n.Type != types.NodeMutex {
 			continue
 		}
-		if strings.HasSuffix(n.QualifiedName, "Embedded.Mutex") {
+		if strings.HasSuffix(n.QualifiedName, "Embedded.Mutex#mutex") {
 			found = true
 			break
 		}
@@ -100,7 +100,7 @@ func TestConcurrency_RWMutex_LockEdges(t *testing.T) {
 	// Find the Cache.mu Mutex node ID.
 	var cacheMuID string
 	for _, n := range g.Nodes {
-		if n.Type == types.NodeMutex && strings.HasSuffix(n.QualifiedName, "Cache.mu") {
+		if n.Type == types.NodeMutex && strings.HasSuffix(n.QualifiedName, "Cache.mu#mutex") {
 			cacheMuID = n.ID
 			break
 		}

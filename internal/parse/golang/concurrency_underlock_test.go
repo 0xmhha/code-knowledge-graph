@@ -32,7 +32,7 @@ func TestConcurrency_AccessedUnderLock_Basic(t *testing.T) {
 		switch {
 		case n.Type == types.NodeField && strings.HasSuffix(n.QualifiedName, "Counter.count"):
 			counterCountID = n.ID
-		case n.Type == types.NodeMutex && strings.HasSuffix(n.QualifiedName, "Counter.mu"):
+		case n.Type == types.NodeMutex && strings.HasSuffix(n.QualifiedName, "Counter.mu#mutex"):
 			counterMuID = n.ID
 		}
 	}

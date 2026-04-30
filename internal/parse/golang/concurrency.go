@@ -82,8 +82,13 @@ func (v *declVisitor) scanStructForMutex(s *ast.TypeSpec) {
 		}
 		if len(f.Names) == 0 {
 			// Embedded mutex: synthesise a name from the underlying type.
+			// Suffix qname with #mutex to disambiguate from the Field node
+			// emitFields will emit at the same source position (G9 — the
+			// previous shared-qname collision caused emitFields to overwrite
+			// the Mutex node, leaving acquires_lock edges pointing at a Field
+			// node instead of the Mutex node).
 			name := embeddedMutexName(f.Type)
-			id := v.emitMutexNode(name, structQname+"."+name, kind, f.Pos(), f.End())
+			id := v.emitMutexNode(name, structQname+"."+name+"#mutex", kind, f.Pos(), f.End())
 			if v.typesInfo != nil {
 				if obj := v.typesInfo.Defs[asTypeIdent(f.Type)]; obj != nil {
 					v.mutexNodeIDs[obj] = id
@@ -92,7 +97,9 @@ func (v *declVisitor) scanStructForMutex(s *ast.TypeSpec) {
 			continue
 		}
 		for _, name := range f.Names {
-			id := v.emitMutexNode(name.Name, structQname+"."+name.Name, kind, name.Pos(), f.End())
+			// Same #mutex suffix as the embedded branch above — see the
+			// comment there for the collision-avoidance rationale.
+			id := v.emitMutexNode(name.Name, structQname+"."+name.Name+"#mutex", kind, name.Pos(), f.End())
 			if v.typesInfo != nil {
 				if obj := v.typesInfo.Defs[name]; obj != nil {
 					v.mutexNodeIDs[obj] = id
