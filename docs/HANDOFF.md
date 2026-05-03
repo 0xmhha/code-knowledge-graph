@@ -146,6 +146,8 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 **권장 다음 단계**: implement-first가 아니라 **design 문서 작성 우선**. 가능하다면 C1 (reverse-reference index) + spec § 4.2 Phase 2/3 (function body_hash) 함께 검토.
 
+**Design 문서 작성됨**: `docs/G6-INCREMENTAL-REDESIGN.md` — 5 질문 답안, 제안 v3 아키텍처 (pending_refs 테이블 + edge dedup-by-key + unified emitDerivedPasses), C1과의 순서 (v3 먼저 correctness, C1 layered on top), § 7 validation gate (parity + edge bucket diff + 3s 런타임 + audit zero-diff). 다음 세션은 § 8의 4개 결정 답한 뒤 구현 진입.
+
 ### 4.2 v0.2.1 Wave (Group B)
 
 | ID | 작업 | 의존 | 추정 |
