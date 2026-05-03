@@ -1,9 +1,10 @@
 # G6 — Incremental Partial-Cache: Redesign Spec (v3)
 
-> **Status**: design only. No code changes proposed by this document. Two prior
-> implementation attempts (v1, v2) failed on the real corpus; this spec exists
-> to gate the next attempt on a coherent answer to the five spec-level
-> questions surfaced in `docs/HANDOFF.md` § 4.1.
+> **Status**: design approved 2026-05-04 (§ 8 decisions resolved). No code
+> changes yet — implementation is the next session's first task. Two prior
+> attempts (v1, v2) failed on the real corpus; this spec gates the next
+> attempt on the five spec-level answers in § 3 and the validation gate
+> in § 7.
 >
 > **Audience**: the next subagent or session that picks up G6. Read end-to-end
 > before writing any code.
@@ -424,25 +425,69 @@ This proves user condition #1 (no file dropped) survives partial.
 
 ---
 
-## 8. Decision points the next session must explicitly answer
+## 8. Decisions (resolved 2026-05-04)
 
-1. **Is the v3 approach (pending_refs table + dedup-by-key) acceptable?** If
-   no, the alternative is: rewrite Pass 2 to be partition-aware from the
-   ground up (much larger change). This document recommends v3.
+The four decision points below are now closed. Implementation may proceed
+once the next session has read this doc and agrees to honour the validation
+gate in § 7 on every iteration.
 
-2. **Bench Q5 fix first or build full v3 first?** Build full v3 first; if § 7.3
-   fails, then do Q5 optimisation. This avoids designing optimisations for a
-   path that may turn out to need a different shape entirely.
+### D1 — v3 architecture: APPROVED
 
-3. **C1 standalone, or paired with v3?** Recommendation: v3 first (correctness),
-   then C1 (speed). Pairing risks v3 correctness bugs being masked by C1
-   complexity.
+**Decision.** Adopt the v3 approach: `pending_refs` SQLite table + edge
+dedup-by-`(type, src, dst, line)` in `graph.Build` + unified
+`emitDerivedPasses` helper. Schema bump 1.4 → 1.5.
 
-4. **What if the 3-second budget can't be met?** Drop partial-cache from the
-   roadmap. Document as "v0.x architectural limit, requires C1 or LSP-style
-   incremental parsing (B3) to make economical". The short-circuit path
-   (v0.2 today) is the genuine load-bearing speedup; partial is a "nice to
-   have" by comparison.
+**Why v3 over the alternative** (rewriting Pass 2 to be partition-aware from
+scratch): the alternative changes the parser packages too, so a v3 failure
+leaves us with no smaller fallback. v3 keeps the parser surface untouched —
+if v3 itself fails the validation gate we can still drop partial-cache
+cleanly (D4) without unwinding parser changes.
+
+### D2 — Build full v3 first, then optimise Q5: APPROVED
+
+**Decision.** Implement the full v3 pipeline first. Run § 7.3 (3-second
+runtime budget). Only if it fails do we attempt the Q5 optimisations
+(reverse-suffix index, chunked `QueryEdgesForNodes`, etc.).
+
+**Why measure-then-optimise.** Q5's 30-minute runtime in v2 is plausibly
+caused by Resolve's `O(P × Q)` suffix-match loop, but it could equally be
+the SQL `WHERE … IN (200K params)` cost or extractBlobs filtering. Designing
+the v3 structure around an unverified hypothesis risks locking us into a
+shape that doesn't match the actual bottleneck. Build, measure, then
+optimise the real hot path.
+
+### D3 — v3 standalone first, C1 layered later: APPROVED
+
+**Decision.** Land v3 by itself (correctness). Validate parity on
+go-stablenet (§ 7.1, § 7.2, § 7.4). Only then build C1 (reverse-reference
+index) on top of the v3 `pending_refs` table for partial Resolve speed.
+
+**Why not paired.** v1 and v2 both failed because complexity grew faster
+than our ability to isolate root causes. Pairing v3 with C1 doubles the
+in-flight surface and a v3 correctness bug would be masked by C1's
+optimisation logic. Sequential keeps the next failure (if any) diagnosable.
+
+### D4 — Escape hatch if § 7.3 fails: drop partial-cache from roadmap
+
+**Decision.** If after Q5 optimisation the 3-second budget on go-stablenet
+still cannot be met, drop partial-cache from the roadmap. Document as a
+v0.x architectural limit that would require C1 (Phase 2 reverse-reference
+index) **or** B3 (tree-sitter `Tree.Edit()` LSP-style incremental parsing)
+as a prerequisite to make economical.
+
+**Why drop rather than ship a slow-but-correct partial path.** The
+short-circuit path (100% cache hit, ~1s on go-stablenet) is the genuine
+load-bearing speedup — it covers the CI re-run case and most dev sessions
+where source hasn't changed since the last build. The single-file-edit case
+that partial would help is dominated in practice by `go test ./pkg/...`
+(seconds) and viewer iteration (instant via F1's `CKG_DEV_VIEWER_DIR`),
+not full graph rebuilds. Keeping a 10-30s partial path in the codebase
+costs maintenance attention without proportional user value.
+
+**On exit (D4 path).** Update `docs/INCREMENTAL.md` § "Phase 1 limitations"
+to mark partial-cache as deferred-until-prerequisite. Keep the `runIncremental`
+dead code in tree (the v3 attempt is the most informed pass yet — preserved
+for whoever picks up B3 or C1).
 
 ---
 
@@ -460,6 +505,7 @@ This proves user condition #1 (no file dropped) survives partial.
 
 ---
 
-**End of design.** Implementation starts only after a session reviews this
-doc, agrees on the four decisions in § 8, and commits to running § 7's
-validation gate on every iteration.
+**End of design.** § 8 decisions resolved. Implementation may proceed in
+the next session, executing in this order: implement v3 → run § 7
+validation gate → if § 7.3 fails, attempt Q5 optimisation → if still
+failing, exit via D4. C1 layered only after § 7 fully green.
