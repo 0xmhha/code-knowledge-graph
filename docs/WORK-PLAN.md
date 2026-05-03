@@ -116,13 +116,13 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 3. CKS deep-dive 6 graph 지원 (Structural / Semantic / Execution / Concurrency / Distributed / Temporal)
 4. viewer + CLI evaluation 가능
 
-### Group F — viewer 운영성 (사용자 추가 질문 대응)
+### Group F — viewer 운영성 (사용자 추가 질문 대응) — Wave 7 ✅
 
 | ID | 작업 | 추정 |
 |---|---|---|
-| F1 | `CKG_DEV_VIEWER_DIR` env: dev hot reload (viewer 변경 시 ckg 재빌드 불요) | S |
-| F2 | `ckg serve --no-viewer` 옵션: API only (operator의 reverse-proxy 패턴) | S |
-| F3 | README에 production-split 패턴 (export-static + 정적 호스팅) 1차 권장 명시 | S |
+| F1 | `CKG_DEV_VIEWER_DIR` env: dev hot reload (viewer 변경 시 ckg 재빌드 불요) | S ✅ (`server.Options{DevViewerDir}` + os.DirFS swap; commit `1d42787`) |
+| F2 | `ckg serve --no-viewer` 옵션: API only (operator의 reverse-proxy 패턴) | S ✅ (`Options{NoViewer}`; static mount skip; `--open` 자동 suppress; commit `1d42787`) |
+| F3 | README에 production-split 패턴 (export-static + 정적 호스팅) 1차 권장 명시 | S ✅ (export-static + serve --no-viewer + reverse proxy + dev hot-reload 모두 명시; commit `412e622`) |
 
 ### Group G — Tech debt / 위생
 

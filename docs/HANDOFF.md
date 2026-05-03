@@ -1,4 +1,4 @@
-# CKG Session Handoff (post-Wave5 + Group G)
+# CKG Session Handoff (post-Wave5 + Group G + Wave 7)
 
 > 다음 세션 cold-read용. 이 문서만 읽으면 현재 상태 + 남은 작업 + 함정을 모두
 > 파악하고 즉시 작업 재개 가능. WORK-PLAN.md는 작업 실행 tracker, 본 문서는
@@ -6,26 +6,34 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-04-30 |
-| HEAD | `8d5521c` (clean working tree) |
+| Snapshot date | 2026-05-04 |
+| HEAD | `e285d57` (clean working tree) |
 | Branch | `main` (origin과 다수 commit 차이 — push 여부는 사용자 판단) |
 | Test gate | `go test ./...` 17 packages PASS, `go vet ./...` clean, `make build` clean |
-| Schema version | **1.4** (cache key contributor; G6 v3에서 1.5 bump 예정) |
+| Schema version | **1.4** (cache key contributor; G6 v3 ship 시 1.5 bump 예정) |
 | 사용자 4 완성도 조건 | **모두 충족** (#1-#4 ✅) |
-| Open critical | **G6 (incremental partial-cache)** — 두 번 fail, spec-level redesign 필요 |
+| Wave 7 (Group F) | **완료** — F1 + F2 + F3 ship됨 (1d42787, 412e622) |
+| G6 design | **resolved** — `docs/G6-INCREMENTAL-REDESIGN.md` § 8 4 결정 완결 (e285d57). 다음 세션 = v3 구현 진입 |
+| Open critical | G6 v3 implementation (design은 이미 합의 완료, 코드만 남음) |
+| Working machine | 본 세션은 `0xtopaz` 머신 (`/Users/0xtopaz/work/github/0xmhha/code-knowledge-graph`). 이전 metrics는 `wm-it-22-00661` 머신의 go-stablenet corpus 기준 — 본 머신에는 코퍼스 없으므로 v3 검증은 코퍼스 있는 머신에서 진행 권장 |
 
 ---
 
 ## 1. Quick start (cold-read, 5분)
 
 ```bash
-cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
+cd <repo root>                                # current: /Users/0xtopaz/work/github/0xmhha/code-knowledge-graph
 git log --oneline -10
-go test ./...                                 # 17 packages PASS
+go test ./...                                 # 17 packages PASS (cmd/ckg + 16 internal/*)
 make build                                    # full build incl. Next.js viewer
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
 ./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open
 ./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity
+
+# Wave 7 (Group F) 검증
+./bin/ckg serve --graph=/tmp/ckg-synth --no-viewer --port=8788    # API only
+make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
+  ./bin/ckg serve --graph=/tmp/ckg-synth --port=8789              # disk viewer
 ```
 
 핵심 reference 문서:
@@ -82,6 +90,16 @@ make build                                    # full build incl. Next.js viewer
 - 6-graph axis filter UI (E5) — collapsible group sections + 3-state group toggle
 - localStorage 영속 (collapse state, view/color/font prefs)
 
+### serve options (Wave 7 — Group F)
+
+`server.Options{DevViewerDir, NoViewer}` + `NewWithOptions` 도입. 기존 `New(store, log)`는 zero-options wrapper로 그대로 유지 (test 호환).
+
+- **F1** `CKG_DEV_VIEWER_DIR` env: viewer asset을 disk path에서 serve. `make viewer` 후 브라우저 reload만으로 viewer 변경 반영, ckg 재빌드 불요.
+- **F2** `--no-viewer` flag: static mount 생략. `/api/*` 만 노출. operator의 reverse-proxy 패턴용. `--open`은 `--no-viewer`와 함께면 자동 suppress.
+- **F3** README에 production-split 패턴 (`export-static` + `serve --no-viewer` + reverse proxy) + dev hot-reload 패턴 명시.
+
+테스트: `internal/server/options_test.go` — `TestOptions_NoViewer` (api OK / `/` 404), `TestOptions_DevViewerDir` (marker 파일이 disk에서 serve됨 검증).
+
 ### 검증된 동작 (go-stablenet-latest 2142 files / 217K nodes / 669K edges)
 
 ```bash
@@ -125,28 +143,30 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 ## 4. 남은 작업 우선순위 (다음 세션용)
 
-### 4.1 ⛔ Critical — G6 incremental partial-cache (두 번 fail)
+### 4.1 G6 v3 implementation — design 합의됨, 코드만 남음
 
-**현재 상태**: 부분 캐시 hit 시 **cold rebuild로 폴백** (commit `a684239`). short-circuit (full hit, 0.99s on go-stablenet) 만 진짜 incremental 가치를 가짐.
+**진입점**: `docs/G6-INCREMENTAL-REDESIGN.md` 단일 문서. 본 HANDOFF의 § 4.1는 요약만 둠.
 
-**왜 두 번 실패?**
+**현재 상태**: 부분 캐시 hit 시 **cold rebuild로 폴백** 중 (`a684239`). short-circuit (full hit, ~1s on go-stablenet)만 진짜 incremental 가치를 가짐. 부분 hit (single-file edit) 시 40-55s 소요.
+
+**design 합의 (§ 8, resolved 2026-05-04)**:
+- **D1** — v3 architecture 채택: `pending_refs` SQLite 테이블 + `graph.Build` edge dedup-by-`(type,src,dst,line)` + `emitDerivedPasses` 통합 helper. Schema 1.4→1.5.
+- **D2** — 풀 v3 먼저 구현, § 7.3 (3s budget) 측정 후 미달 시에만 Q5 (Resolve 복잡도) 최적화.
+- **D3** — v3 standalone 먼저 (correctness), C1 (reverse-reference index)는 § 7 green 후 layered.
+- **D4** — escape hatch: § 7.3 미달 시 partial-cache를 roadmap에서 drop, "C1/B3 선행 필요"로 문서화.
+
+**v1+v2 실패 history (참고)**:
 
 | 시도 | 접근 | 결과 |
 |---|---|---|
-| v1 (commit `31a17f0` 분석) | option D — pending refs만 manifest에 persist | small fixture PASS / go-stablenet에서 changed_in dangling + 92201 calls 전부 손실 |
-| v2 (commit `8d5521c` 분석) | corrected: cached files도 Nodes+Pending 둘 다 reload, temporal/xlang은 always-recompute로 분리 | small fixture PASS / go-stablenet에서 -347986 edges (52%), -576 calls, changed_in 0건 (silent delete), **30분 runtime** (cold 1:15의 24×) |
+| v1 (`31a17f0`) | pending refs를 manifest에 persist | go-stablenet: -92201 calls 전부 손실 |
+| v2 (`8d5521c`) | cached files도 Nodes+Pending reload, temporal/xlang을 always-recompute 분리 | go-stablenet: -347986 edges (52%), changed_in 0건 DB, **30분 runtime** |
 
-**다음 시도(v3) 전 반드시 해결할 spec-level 질문 5개**:
-
-1. Pass 2 Resolve의 qIndex namespace + qname-suffix 매칭이 cached + dirty 두 출처를 동시에 처리할 때 정합성 어떻게 보장?
-2. graph.Build dedup-by-ID에서 cached file 재emit edges와 freshly Pass 2가 만든 edges가 충돌하면?
-3. always-recompute 패스 (cluster/score/temporal/xlang)의 incremental 분리 — DB 옛 row drop 타이밍 vs 새 emit 타이밍?
-4. ID 안정성 — file 내용 외 surrounding context (예: enclosing struct rename) 변화 시 unchanged function의 ID가 보존되는가?
-5. 217K-node corpus에서 Resolve의 O(n) / O(n²) 분석 (v2가 30분 걸린 원인)
-
-**권장 다음 단계**: implement-first가 아니라 **design 문서 작성 우선**. 가능하다면 C1 (reverse-reference index) + spec § 4.2 Phase 2/3 (function body_hash) 함께 검토.
-
-**Design 문서 작성됨**: `docs/G6-INCREMENTAL-REDESIGN.md` — 5 질문 답안, 제안 v3 아키텍처 (pending_refs 테이블 + edge dedup-by-key + unified emitDerivedPasses), C1과의 순서 (v3 먼저 correctness, C1 layered on top), § 7 validation gate (parity + edge bucket diff + 3s 런타임 + audit zero-diff). **§ 8 4개 결정은 2026-05-04에 모두 resolved** — D1 v3 채택, D2 풀 v3 먼저 후 Q5 측정-기반 최적화, D3 v3 standalone first / C1 layered after § 7 green, D4 § 7.3 미달 시 partial-cache drop (B3 또는 C1 선행 전제로 문서화). 다음 세션은 본 doc 읽고 곧장 v3 구현 진입.
+**다음 세션 첫 액션**:
+1. design 문서 `docs/G6-INCREMENTAL-REDESIGN.md` 통독 (§ 4 architecture + § 7 validation gate + § 8 decisions)
+2. v3 구현 — § 4.2 (pending_refs schema) → § 4.3 (graph.Build dedup) → § 4.4 (unified emitDerivedPasses)
+3. § 7 validation gate를 go-stablenet (코퍼스 있는 머신) 위에서 통과
+4. § 8 D4 escape hatch는 § 7.3 미달 시에만 발동
 
 ### 4.2 v0.2.1 Wave (Group B)
 
@@ -169,13 +189,9 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | D1 | Item 2 Stage 2 — SSA 정밀 동시성 (`--deep` opt-in) | B1 (✅) | XL (하루+) |
 | D2 | Item 3 Phase 3 — pgvector + Apache AGE 통합 | C2 | XL |
 
-### 4.5 viewer 운영성 (Group F, 모두 독립)
+### 4.5 viewer 운영성 (Group F) — ✅ Wave 7 완료
 
-| ID | 작업 | 추정 |
-|---|---|---|
-| F1 | `CKG_DEV_VIEWER_DIR` env (dev hot reload) | S (15-30분) |
-| F2 | `ckg serve --no-viewer` (operator reverse-proxy) | S |
-| F3 | README production-split 패턴 명시 | S |
+F1 + F2 + F3 모두 ship됨 (1d42787, 412e622). 본 HANDOFF § 2 "serve options (Wave 7)" 참조.
 
 ### 4.6 알려진 minor issues
 
@@ -183,7 +199,9 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 - G4-1 (E3 follow-up): Ethereum-style RPC `client.Call(&result, "method", ...)` 시그니처 추가 (현재 net/rpc 시그니처만 detect)
 - G6-temporal (E4 follow-up): line-level blame (G6 Phase 2 — `git blame --line-porcelain`); submodule traversal; correlated_with/observed_in/mentioned_in (D-tier)
 - B1-1 (G9 follow-up): 1건 남은 Field-targeting acquires_lock — 함수 local mutex literal (`var mu = sync.Mutex{}`) edge case
-- G6 partial-cache routing: cold fallback 유지 → "Cache: partial hit; falling back to cold rebuild for correctness" 로그 남김
+- G6 partial-cache routing: cold fallback 유지 → "Cache: partial hit; falling back to cold rebuild for correctness" 로그 남김 (v3 구현 시 routing 복원)
+- E2-FU: `go.work` 회귀 테스트 — workspace 멤버가 srcRoot 외부 case 미지원 (현재 `TestGoFiles_GoWorkspace`로 documented만 됨)
+- Wave 1 DoD: `web/viewer-next/src/lib/edges.ts`의 dead key (`reads/writes/modifies/decorates/emits`) 정리 — backend emit 시작 OR client 제거 결정 미완
 
 ---
 
@@ -324,29 +342,58 @@ git status --short
 
 ## 8. 다음 세션 시작 시퀀스
 
-1. 새 Claude Code 세션 (cwd: working dir)
+1. 새 Claude Code 세션 (cwd: repo root)
 2. 첫 user message:
    > "docs/HANDOFF.md 읽고 현재 상태 파악해. 그 다음 [작업 지시]."
 3. 모델이 본 문서 read → 컨텍스트 회복 → 지시 받은 작업 dispatch
-4. WORK-PLAN.md G3-G9 follow-up 잔여 항목, Group F (viewer 운영성), Group B/C/D는 모두 본 문서 § 4에 우선순위와 함께 기록됨
+4. WORK-PLAN.md G3-G9 follow-up 잔여 항목, Group B/C/D는 모두 본 문서 § 4에 우선순위와 함께 기록됨. Group F는 ✅ 완료.
 
-### 권장 다음 작업 순서
+### 권장 다음 작업 순서 (2026-05-04 갱신)
 
 | 순위 | 작업 | 이유 |
 |---|---|---|
-| 1 | F1+F2+F3 (viewer 운영성, Group F) | 모두 S (~15-30분), 독립적, 즉시 가시 가치 |
-| 2 | G6 design 문서 작성 (implement 전) | 두 번의 실패 분석을 토대로 다음 시도 spec 정리. 작성 자체로 가치 (다음 implement 안 해도 architecture 인사이트 보존) |
-| 3 | B2 (`ckg export-postgres`) | A4 (Storage interface) 위에서 자연스러움, M effort, v0.2.1 첫 단계 |
-| 4 | C1 + G6 v3 (paired) | reverse-reference index가 G6 v3의 핵심 빌딩블록 |
+| 1 | **G6 v3 implementation** | design 합의 완료 (`docs/G6-INCREMENTAL-REDESIGN.md`). § 4 architecture 그대로 구현, § 7 validation gate 위에서만 commit. 코퍼스 있는 머신에서 진행 권장. |
+| 2 | B2 (`ckg export-postgres --dsn ... --source ...`) | A4 (Storage interface) 위에서 자연스러움, M effort, v0.2.1 첫 단계. G6 v3가 환경 의존이라 이쪽으로 시작 가능. |
+| 3 | C1 (reverse-reference index) | G6 v3 § 7 green 후 layered (D3 결정). pending_refs 테이블이 source. |
+| 4 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 바로 처리 가능 |
 | 5 | E3/E4/G8 follow-up minors | 발견된 한계 정리 (httprouter, RPC client.Call 변종, line-level blame) |
 | 6 | D1 / D2 | XL, 별도 spec 필요 |
 
+### G6 v3 진입 시 prompt 템플릿
+
+```
+docs/HANDOFF.md 읽고 현재 상태 파악. 그 다음 docs/G6-INCREMENTAL-REDESIGN.md
+§ 4 (architecture) + § 7 (validation gate) 따라서 v3 구현 진입.
+
+순서: § 4.2 pending_refs schema → § 4.3 graph.Build dedup → § 4.4 unified
+emitDerivedPasses helper → pipeline.go Run() routing 복원.
+
+Commit은 § 7 validation gate (parity + edge bucket diff + 3s budget +
+audit zero-diff) 통과한 뒤에만. § 7.3 미달 시 § 8 D4 escape hatch (drop)
+이전에 § 3 Q5 fix (reverse-suffix index 등) 시도.
+
+코퍼스: <stablenet path on this machine>. 없으면 medium fixture 만든
+뒤 진행.
+```
+
 ---
 
-## 9. 이번 세션 ~32 commit 요약 (시간 역순)
+## 9. Commit 요약 (시간 역순)
+
+### 본 세션 (2026-05-03 ~ 2026-05-04, Wave 7 + G6 design)
 
 | Commit | 분류 | 내용 |
 |---|---|---|
+| `e285d57` | docs | G6 § 8 4 결정 resolve (D1 v3 채택 / D2 풀 v3 먼저 / D3 C1 layered / D4 § 7.3 미달 시 drop) |
+| `100591b` | docs | G6 v3 design spec (`docs/G6-INCREMENTAL-REDESIGN.md`, 465 lines) |
+| `412e622` | docs | F3 — README production-split + dev hot-reload 패턴 |
+| `1d42787` | feat | F1+F2 — `CKG_DEV_VIEWER_DIR` env + `--no-viewer` flag (server.Options + tests) |
+
+### 이전 세션 (~32 commits, Wave 5 + Group G)
+
+| Commit | 분류 | 내용 |
+|---|---|---|
+| `1aab892` | docs | HANDOFF snapshot 작성 |
 | `8d5521c` | docs | G6 v2 fail 분석 |
 | `f215b72` | fix | G9 — Mutex node ID collision (Mutex 8→170, 21×) |
 | `31a17f0` | docs | G6 v1 fail 분석 |
