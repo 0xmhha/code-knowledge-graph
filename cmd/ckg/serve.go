@@ -21,6 +21,7 @@ func newServeCmd() *cobra.Command {
 	var graph string
 	var port int
 	var open bool
+	var noViewer bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve the embedded 3D viewer over HTTP",
@@ -33,7 +34,16 @@ func newServeCmd() *cobra.Command {
 			defer store.Close()
 
 			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-			srv := server.New(store, log)
+			// CKG_DEV_VIEWER_DIR points to a `make viewer` output dir
+			// (typically `internal/server/web_assets/`) so viewer changes are
+			// picked up by browser reload without rebuilding ckg. Useful when
+			// iterating on the viewer with the binary running against a real
+			// graph.
+			opts := server.Options{
+				DevViewerDir: os.Getenv("CKG_DEV_VIEWER_DIR"),
+				NoViewer:     noViewer,
+			}
+			srv := server.NewWithOptions(store, log, opts)
 
 			// signal.NotifyContext gives us graceful Ctrl-C / SIGTERM handling;
 			// the server's ListenAndServe path uses ctx.Done to trigger Shutdown.
@@ -46,8 +56,13 @@ func newServeCmd() *cobra.Command {
 			// reverse proxy.
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
 			fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", db, addr)
+			if noViewer {
+				fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
+			} else if opts.DevViewerDir != "" {
+				fmt.Fprintf(os.Stderr, "ckg: viewer served from %s (CKG_DEV_VIEWER_DIR)\n", opts.DevViewerDir)
+			}
 
-			if open {
+			if open && !noViewer {
 				go openBrowser("http://" + addr)
 			}
 			return srv.ListenAndServe(ctx, addr)
@@ -56,6 +71,8 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&graph, "graph", "", "graph directory (required)")
 	cmd.Flags().IntVar(&port, "port", 8787, "HTTP port")
 	cmd.Flags().BoolVar(&open, "open", false, "open browser on start")
+	cmd.Flags().BoolVar(&noViewer, "no-viewer", false,
+		"disable embedded viewer; serve /api/* only (for reverse-proxy setups)")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
 }
