@@ -29,6 +29,37 @@ export ANTHROPIC_API_KEY=...
 cat eval/results/report.md
 ```
 
+## Deployment
+
+`ckg serve` ships an embedded viewer for single-developer local use. For
+shared or production deployments, prefer the **production-split** pattern:
+host the viewer as a static site and run the API separately so each can
+scale, cache, and be auth-fronted independently.
+
+```bash
+# 1. Build once. Static bundle = viewer assets + chunked JSON of the graph.
+./bin/ckg export-static --graph=/tmp/ckg-real --out=/srv/ckg/static
+#    Drop /srv/ckg/static behind any HTTP server (nginx, S3, Cloudflare Pages…).
+
+# 2. Run the API alongside, without the embedded viewer mount.
+./bin/ckg serve --graph=/tmp/ckg-real --port=8787 --no-viewer
+#    Front it with your reverse proxy. /api/* is the only surface.
+```
+
+The static viewer reads `/api/*` from whatever origin it's served from, so a
+reverse proxy that maps `/api/* → localhost:8787` and `/* → /srv/ckg/static`
+gives a single hostname.
+
+For viewer development (editing `web/viewer-next/` against a live graph):
+
+```bash
+make viewer
+CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
+  ./bin/ckg serve --graph=/tmp/ckg-real --open
+# Re-run `make viewer` after edits — browser reload picks them up; ckg
+# binary stays running.
+```
+
 ## Documentation
 
 - `docs/spec-ckg-v0-prototype.md` — full design spec
