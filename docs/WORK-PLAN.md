@@ -28,9 +28,7 @@ go build -o bin/ckg ./cmd/ckg
 
 핵심 문서:
 - **본 문서** — 작업 리스트 + 운영 패턴
-- `docs/spec-ckg-v0-prototype.md` (1,442 lines) — V0 결정 근거
 - `docs/spec-ckg-v0.2.md` (497 lines) — v0.2 foundation spec (smacker 마이그레이션 + 동시성 + PG + incremental)
-- `docs/plan-ckg-v0-prototype.md` (8,983 lines) — V0 구현 plan (T1-T38 verbatim)
 - `docs/SCHEMA.md`, `docs/ARCHITECTURE.md`, `docs/EVAL.md` — 사용자용 reference
 - `docs/STUDY-GUIDE.md` — 외부 개념 (Leiden / MCP / tree-sitter)
 
@@ -394,9 +392,7 @@ E4 측정 결과 (go-stablenet-latest, 2026-04-29):
 
 ### Spec / Plan / Study
 
-- `docs/spec-ckg-v0-prototype.md` — V0 design (1,442 lines)
 - `docs/spec-ckg-v0.2.md` — v0.2 foundation spec (497 lines)
-- `docs/plan-ckg-v0-prototype.md` — V0 implementation plan (8,983 lines)
 - `docs/STUDY-GUIDE.md` — Leiden / MCP / tree-sitter / 3D layout
 - 외부 참조: CKS deep-dive
   `/Users/wm-it-22-00661/Work/github/stable-net/study/projects/stablenet-ai-agent/claudedocs/04-cks-deep-dive.md`

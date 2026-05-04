@@ -6,7 +6,7 @@
 | Date | 2026-04-23 |
 | Status | Living document (확장 가능) |
 | Audience | CKG 사용자/개발자 (특히 graph clustering / MCP / build cache 무효화 관련 사전 지식이 부족한 경우) |
-| Companion | `docs/spec-ckg-v0-prototype.md` (V0 spec 본문) |
+
 
 본 문서는 CKG spec 본문에 반복할 필요는 없지만, 구현·운영·확장 시 알아두면 도움이 되는 외부 개념을 정리한다. 매번 spec 옆에서 참조할 필요는 없고, 호기심이나 V1+ 진화 결정 시 펼쳐 보는 용도.
 

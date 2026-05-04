@@ -40,7 +40,6 @@ make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 핵심 reference 문서:
 - `docs/WORK-PLAN.md` — 작업 tracker (Group A-G, Wave 1-7, follow-up status)
 - `docs/spec-ckg-v0.2.md` — v0.2 foundation spec (parser migration / 동시성 / PG / incremental)
-- `docs/spec-ckg-v0-prototype.md` — V0 결정 근거
 - `docs/INCREMENTAL.md` — A3 캐시 동작 (operator-facing)
 - `docs/SCHEMA.md` — 33 nodes / 30 edges (v0.2.x post-Wave 5)
 - 외부: `/Users/wm-it-22-00661/Work/github/stable-net/study/projects/stablenet-ai-agent/claudedocs/04-cks-deep-dive.md` — CKS 6 graph 정의 원전

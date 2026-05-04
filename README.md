@@ -62,7 +62,6 @@ CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 
 ## Documentation
 
-- `docs/spec-ckg-v0-prototype.md` — full design spec
 - `docs/STUDY-GUIDE.md` — background on Leiden / MCP / staleness / tree-sitter / 3D layout
 - `docs/SCHEMA.md` — node and edge enumeration
 - `docs/ARCHITECTURE.md` — subcommand + pipeline overview

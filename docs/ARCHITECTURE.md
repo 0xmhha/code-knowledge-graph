@@ -13,4 +13,4 @@ detect → parse → link → graph → cluster → score → persist
 - **MCP**: stdio, six tools, in-process Store reads
 - **Eval**: 4 baselines × N tasks → CSV + report.md
 
-See `spec-ckg-v0-prototype.md` §3 for the full diagram and §4 for the build pipeline.
+

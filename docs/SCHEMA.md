@@ -85,4 +85,3 @@ default in the viewer; toggle via filter UI.
 
 `EXTRACTED` (direct from AST) | `INFERRED` (heuristic / dispatch) | `AMBIGUOUS` (unresolved).
 
-See `spec-ckg-v0-prototype.md` §5.1–5.3 for full attribute and lang-coverage tables.

@@ -3,7 +3,7 @@
 작성일: 2026-04-27
 대상: `web/viewer-next/` (마이그레이션 완료) — 이전 `web/viewer/` 는 `make viewer-old` 로 폴백 가능, 검증 후 제거 예정
 상태: **Phase 0~3 shipped + Next.js migration shipped (2026-04-27)** — 아래 Status 섹션 참조
-참조: `docs/VIEWER-ROADMAP.md`(L1~L4), `docs/ARCHITECTURE.md`,
+참조: `docs/ARCHITECTURE.md`,
 `internal/cluster/leiden.go`, `internal/persist/sqlite.go`(topic_tree)
 
 ---
@@ -388,8 +388,7 @@ go-stablenet 그래프 (212K nodes / 314K edges) 에서 측정.
 
 - **force-graph 라이브러리 교체** (vis-network / pixi / regl). 측정 없는
   교체는 비용만 큼. Phase 0 + 1 + 2 후에도 부족할 때 재논의.
-- **Static 모드 검색 활성화 (MiniSearch)**. 별도 작업, `VIEWER-ROADMAP.md`
-  L? 로 분리.
+- **Static 모드 검색 활성화 (MiniSearch)**. 별도 작업 (분리).
 - **노드 테이블 community_id 컬럼 추가 마이그레이션**. Phase 1 의 A 안
   (서버 응답 합류)이 충분하면 불필요.
 - **3D 모드 mesh pool 재사용**. 현재 mesh 가 noeq pull 되는 문제는 별
@@ -521,7 +520,7 @@ Phase 0~3 와 Next.js 마이그레이션이 모두 머지된 시점에서 *그 �
 | `_RefHack` 같은 dead export 잔재 sweep | 일반 cleanup | 30분 |
 | `web_assets/` allowlist 패턴 정착 (favicon 등 추가 파일 대비) | Final review B5 | 1시간 |
 | ESLint 설정 (Next.js 권장) | M1 잔여 | 30분 |
-| Static 모드 검색 (MiniSearch) | `VIEWER-ROADMAP.md` L? | 4~8시간 |
+| Static 모드 검색 (MiniSearch) | 별도 작업 | 4~8시간 |
 
 #### H. 보안 후속 — `next` major bump (별도 작업)
 

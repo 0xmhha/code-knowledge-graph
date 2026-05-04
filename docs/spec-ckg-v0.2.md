@@ -2,7 +2,7 @@
 
 > 적용 범위: smacker → upstream tree-sitter 마이그레이션, Go 동시성 분석,
 > PostgreSQL 스토리지 백엔드, 파일 단위 incremental 캐시.
-> v0 prototype(`spec-ckg-v0-prototype.md`) 다음 단계의 기반 작업 4종을 묶는다.
+> v0 prototype 다음 단계의 기반 작업 4종을 묶는다.
 
 ## 0. Overview
 
@@ -483,7 +483,6 @@ docs/INCREMENTAL.md                       (신규: 캐시 동작 설명)
 ---
 
 ## References
-- `docs/spec-ckg-v0-prototype.md` — v0 본 스펙
 - `docs/ARCHITECTURE.md` — 아키텍처 개요
 - `docs/SCHEMA.md` — 노드/엣지 스키마 (v0.2.0에서 1.1로 bump 예정)
 - `pkg/types/node.go`, `pkg/types/edge.go` — 타입 정의
