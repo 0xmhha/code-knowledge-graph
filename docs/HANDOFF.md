@@ -6,8 +6,8 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-05-04 (refresh 3 — D4 escape hatch EXECUTED, root cause confirmed) |
-| HEAD | `3a6d9f6` (`refactor(buildpipe): remove unused count params from runCold`) |
+| Snapshot date | 2026-05-04 (refresh 4 — docs cleanup) |
+| HEAD | `f5f6c73` (`docs: remove obsolete v0 planning and superseded docs`) |
 | Working tree | **clean** |
 | Branch | `main` |
 | Test gate | `go vet ./...` clean, `go test ./...` 17 packages PASS, `make build` clean |
