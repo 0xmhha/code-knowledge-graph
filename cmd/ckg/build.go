@@ -10,7 +10,7 @@ import (
 )
 
 func newBuildCmd() *cobra.Command {
-	var src, out string
+	var src, out, dbDsn string
 	var langs []string
 	var noCache, rebuildMetrics bool
 	cmd := &cobra.Command{
@@ -31,6 +31,7 @@ func newBuildCmd() *cobra.Command {
 				CKGVersion:     ckgVersion,
 				NoCache:        noCache,
 				RebuildMetrics: rebuildMetrics,
+				DBDSN:          dbDsn,
 			})
 			if err != nil {
 				return err
@@ -47,6 +48,8 @@ func newBuildCmd() *cobra.Command {
 		"bypass A3 incremental cache; full rebuild from scratch")
 	cmd.Flags().BoolVar(&rebuildMetrics, "rebuild-metrics", false,
 		"force PageRank/Leiden recompute even when cache would otherwise reuse them")
+	cmd.Flags().StringVar(&dbDsn, "db", "",
+		"PostgreSQL DSN (e.g. postgres://user:pass@host/dbname); if set, store graph in PG instead of local SQLite")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

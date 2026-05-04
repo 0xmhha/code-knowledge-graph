@@ -1,6 +1,7 @@
 // Package buildpipe orchestrates the full Pass 1..4 build (spec §4.7):
 // detect → parse → resolve → graph build/validate → cluster → score → persist.
-// V0 supports a full rebuild only — incremental updates are not wired here.
+// Three routing paths: cold rebuild, short-circuit (all-cached), and incremental
+// (partial-hit — reuse cached files, re-parse dirty). See Run for routing logic.
 package buildpipe
 
 import (
@@ -75,6 +76,11 @@ type Options struct {
 	// is dirty (see Run below) — this flag is the explicit operator escape
 	// for the "all-cached but I want fresh metrics" case.
 	RebuildMetrics bool
+	// DBDSN is an optional PostgreSQL DSN (e.g. "postgres://user:pass@host/db").
+	// When set, the build persists to PostgreSQL instead of a local SQLite file.
+	// OutDir is still used for manifest.json; --no-cache and incremental work the
+	// same way (NodesByFilePath reads from PG with ORDER BY start_line).
+	DBDSN string
 }
 
 // Run executes the full pipeline. Side effects: writes OutDir/graph.db
@@ -106,18 +112,16 @@ func Run(opt Options) (persist.Manifest, error) {
 	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
 	log.Debug("discovery.end", "total", goCount+tsCount+solCount)
 
-	// (2) cache routing — three paths (G6 v3, schema 1.5):
+	// (2) cache routing — three paths (G6 v4, schema 1.5):
 	//
 	//   - runShortCircuit: 100% cache hit, no removals (manifest timestamp
 	//     refresh only). Load-bearing for CI re-runs on unchanged source.
-	//   - runIncremental: DEAD CODE (D4 escape hatch executed 2026-05-04).
-	//     Partial-hit cases fall back to cold rebuild for correctness. See
-	//     comment below. Preserved for future v4 attempt (B3 tree-sitter
-	//     Tree.Edit or C1 reverse-reference index as prerequisite).
-	//   - runCold: --no-cache, missing manifest, schema/version mismatch,
-	//     OR partial hit (post-D4 fallback).
+	//   - runIncremental: partial-hit — parse only dirty files, reload cached
+	//     nodes in declaration order (NodesByFilePath ORDER BY start_line —
+	//     G6 v4 fix for H3 root cause), merge + rerun Pass 2.
+	//   - runCold: --no-cache, missing manifest, schema/version mismatch.
 	dbPath := filepath.Join(opt.OutDir, "graph.db")
-	old := readOldManifestFromDB(dbPath)
+	old := readOldManifestFromDB(dbPath, opt.DBDSN)
 	if !opt.NoCache && ManifestUsable(old, opt.CKGVersion) {
 		decisions, derr := DiffManifest(opt.SrcRoot, discovery, old, opt.CKGVersion)
 		if derr != nil {
@@ -126,15 +130,7 @@ func Run(opt Options) (persist.Manifest, error) {
 		if decisions.IsAllCached() {
 			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount)
 		}
-		// partial hit → cold fallback for correctness (D4 escape hatch executed
-		// 2026-05-04). Root cause: NodesByFilePath returns nodes in DB rowid
-		// order, not AST declaration order; ambiguous qname resolution produces
-		// different Dst nodes between cold and partial paths (+2675 edge
-		// over-emit on go-stablenet, § 7.1 FAIL). runIncremental and
-		// pending_refs infra are preserved as dead code for future v4 attempt.
-		// Fix direction: sort NodesByFilePath by start_line ASC.
-		log.Info("Cache: partial hit; falling back to cold rebuild for correctness")
-		return runCold(opt, log, discovery)
+		return runIncremental(opt, log, decisions, goCount, tsCount, solCount)
 	}
 	if opt.NoCache {
 		log.Info("Cache: bypassed (--no-cache); full rebuild")
@@ -224,7 +220,7 @@ func runCold(opt Options, log *slog.Logger,
 	// (7) persist — cold rebuild wipes graph.db so we don't accumulate stale
 	// rows. Incremental path lives in incremental.go and reuses prior rows.
 	log.Debug("persist.start", "nodes", len(g.Nodes), "edges", len(g.Edges))
-	store, err := openColdStore(opt.OutDir)
+	store, err := openColdStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
@@ -264,9 +260,13 @@ func runCold(opt Options, log *slog.Logger,
 	return m, nil
 }
 
-// openColdStore wipes graph.db and re-opens it. Cold path only — incremental
-// builds reuse the existing DB.
-func openColdStore(outDir string) (persist.Store, error) {
+// openColdStore wipes the backing store and re-opens it for a cold rebuild.
+// When dbDsn is set, the store is a PostgreSQL database (wipe via TRUNCATE);
+// otherwise it is a local SQLite file (wipe via os.Remove).
+func openColdStore(outDir, dbDsn string) (persist.Store, error) {
+	if dbDsn != "" {
+		return persist.OpenPostgresCold(dbDsn)
+	}
 	dbPath := filepath.Join(outDir, "graph.db")
 	_ = os.Remove(dbPath)
 	store, err := persist.Open(dbPath)
@@ -278,6 +278,15 @@ func openColdStore(outDir string) (persist.Store, error) {
 		return nil, err
 	}
 	return store, nil
+}
+
+// openStore opens the backing store for read/write (incremental / short-circuit
+// paths). When dbDsn is set, routes to PostgreSQL; otherwise SQLite.
+func openStore(outDir, dbDsn string) (persist.Store, error) {
+	if dbDsn != "" {
+		return persist.OpenPostgres(dbDsn)
+	}
+	return persist.Open(filepath.Join(outDir, "graph.db"))
 }
 
 // persistColdArtifacts performs the bulk-insert phase of a cold rebuild.

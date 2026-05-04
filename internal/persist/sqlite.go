@@ -793,7 +793,7 @@ func (s *sqliteStore) NodesByFilePath(path string) ([]types.Node, error) {
 	if path == "" {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes WHERE file_path = ?`, path)
+	rows, err := s.db.Query(`SELECT `+nodeColumns+` FROM nodes WHERE file_path = ? ORDER BY start_line`, path)
 	if err != nil {
 		return nil, fmt.Errorf("nodes by file_path %q: %w", path, err)
 	}

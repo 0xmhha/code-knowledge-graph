@@ -61,11 +61,24 @@ func discoveryAll(srcRoot string, languages []string) ([]DiscoveredFile, persist
 	return out, lc, len(goFiles), len(files.TS), len(files.Sol), nil
 }
 
-// readOldManifestFromDB returns nil if graph.db is missing or unreadable —
-// that's a cold-start signal, not an error. A truncated manifest yields
-// (nil, error) so the caller can decide between propagation and silent
-// fallback to full rebuild.
-func readOldManifestFromDB(dbPath string) *persist.Manifest {
+// readOldManifestFromDB returns nil if the backing store is missing or
+// unreadable — that's a cold-start signal, not an error.
+// When dbDsn is set, reads from PostgreSQL; otherwise reads from SQLite at
+// dbPath. Returns nil (not an error) on any failure so callers fall back to a
+// full cold rebuild.
+func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
+	if dbDsn != "" {
+		store, err := persist.OpenPostgresReadOnly(dbDsn)
+		if err != nil {
+			return nil
+		}
+		defer store.Close()
+		m, err := store.GetManifest()
+		if err != nil {
+			return nil
+		}
+		return &m
+	}
 	if _, err := os.Stat(dbPath); err != nil {
 		return nil
 	}
@@ -107,8 +120,7 @@ func runIncremental(opt Options, log *slog.Logger,
 	decisions CacheDecisions,
 	goCount, tsCount, solCount int) (persist.Manifest, error) {
 	log.Info(decisions.FormatLogLine())
-	dbPath := filepath.Join(opt.OutDir, "graph.db")
-	store, err := persist.Open(dbPath)
+	store, err := openStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
@@ -375,8 +387,7 @@ type TopicTreeForPersist = persist.TopicTreeInput
 func runShortCircuit(opt Options, log *slog.Logger, decisions CacheDecisions,
 	old *persist.Manifest, goCount, tsCount, solCount int) (persist.Manifest, error) {
 	log.Info(decisions.FormatLogLine() + " (no source changes; manifest timestamp refreshed)")
-	dbPath := filepath.Join(opt.OutDir, "graph.db")
-	store, err := persist.Open(dbPath)
+	store, err := openStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
 		return persist.Manifest{}, err
 	}

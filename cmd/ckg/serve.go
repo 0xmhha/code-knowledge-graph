@@ -17,7 +17,7 @@ import (
 )
 
 func newServeCmd() *cobra.Command {
-	var graph string
+	var graph, dbDsn string
 	var port int
 	var open bool
 	var noViewer bool
@@ -31,10 +31,26 @@ func newServeCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			db := filepath.Join(graph, "graph.db")
-			store, err := persist.OpenReadOnly(db)
-			if err != nil {
-				return fmt.Errorf("open graph: %w", err)
+			// Require exactly one of --graph or --db.
+			if graph == "" && dbDsn == "" {
+				return fmt.Errorf("one of --graph or --db must be provided")
+			}
+
+			var store persist.StoreReader
+			var sourceLabel string
+			if dbDsn != "" {
+				store, err = persist.OpenPostgresReadOnly(dbDsn)
+				if err != nil {
+					return fmt.Errorf("open postgres: %w", err)
+				}
+				sourceLabel = "postgres"
+			} else {
+				db := filepath.Join(graph, "graph.db")
+				store, err = persist.OpenReadOnly(db)
+				if err != nil {
+					return fmt.Errorf("open graph: %w", err)
+				}
+				sourceLabel = db
 			}
 			defer store.Close()
 
@@ -59,7 +75,7 @@ func newServeCmd() *cobra.Command {
 			// service. Operators who need remote access should front it with a
 			// reverse proxy.
 			addr := fmt.Sprintf("127.0.0.1:%d", port)
-			fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", db, addr)
+			fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", sourceLabel, addr)
 			if noViewer {
 				fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
 			} else if opts.DevViewerDir != "" {
@@ -72,12 +88,14 @@ func newServeCmd() *cobra.Command {
 			return srv.ListenAndServe(ctx, addr)
 		},
 	}
-	cmd.Flags().StringVar(&graph, "graph", "", "graph directory (required)")
+	cmd.Flags().StringVar(&graph, "graph", "", "graph directory containing graph.db")
+	cmd.Flags().StringVar(&dbDsn, "db", "",
+		"PostgreSQL DSN (e.g. postgres://user:pass@host/dbname); if set, read graph from PG (--graph not required)")
 	cmd.Flags().IntVar(&port, "port", 8787, "HTTP port")
 	cmd.Flags().BoolVar(&open, "open", false, "open browser on start")
 	cmd.Flags().BoolVar(&noViewer, "no-viewer", false,
 		"disable embedded viewer; serve /api/* only (for reverse-proxy setups)")
-	_ = cmd.MarkFlagRequired("graph")
+	// --graph is no longer required when --db is provided; enforce manually in RunE.
 	return cmd
 }
 
