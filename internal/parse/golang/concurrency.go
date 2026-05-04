@@ -436,8 +436,7 @@ func (v *declVisitor) findEmbeddedMutexInType(t gotypes.Type) string {
 	if !ok {
 		return ""
 	}
-	for i := 0; i < st.NumFields(); i++ {
-		f := st.Field(i)
+	for f := range st.Fields() {
 		if !f.Embedded() {
 			continue
 		}
@@ -507,6 +506,50 @@ func (v *declVisitor) emitChannelFromMake(parentID string, call *ast.CallExpr) s
 		Confidence: types.ConfExtracted,
 	})
 	return nodeID
+}
+
+// emitGoroutineChannelEdges walks the goroutine body call expression and
+// emits sends_to/recvs_from edges from the Goroutine node to Channel nodes
+// for any channel sends/recvs whose channel variable is in chanVarIDs.
+// Only handles inline `go func() { ... }()` literals; named-function goroutines
+// require cross-file resolution and are silently skipped.
+func (v *declVisitor) emitGoroutineChannelEdges(goroutineID string, call *ast.CallExpr) {
+	if call == nil {
+		return
+	}
+	fn, ok := call.Fun.(*ast.FuncLit)
+	if !ok {
+		return // named-function goroutines: cross-file resolution needed
+	}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch s := n.(type) {
+		case *ast.GoStmt:
+			return false // nested goroutines not recursively tracked here
+		case *ast.SendStmt:
+			if chanName := channelVarName(s.Chan); chanName != "" {
+				if chanID, ok := v.chanVarIDs[chanName]; ok {
+					v.edges = append(v.edges, types.Edge{
+						Src: goroutineID, Dst: chanID,
+						Type: types.EdgeSendsTo, Count: 1,
+						Confidence: types.ConfInferred,
+					})
+				}
+			}
+		case *ast.UnaryExpr:
+			if s.Op == token.ARROW {
+				if chanName := channelVarName(s.X); chanName != "" {
+					if chanID, ok := v.chanVarIDs[chanName]; ok {
+						v.edges = append(v.edges, types.Edge{
+							Src: goroutineID, Dst: chanID,
+							Type: types.EdgeRecvsFrom, Count: 1,
+							Confidence: types.ConfInferred,
+						})
+					}
+				}
+			}
+		}
+		return true
+	})
 }
 
 // channelDirection maps ast.ChanDir to the spec's string tag.

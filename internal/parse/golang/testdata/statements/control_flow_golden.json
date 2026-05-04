@@ -4,7 +4,7 @@
     "LoopStmt": 2,
     "SwitchStmt": 1,
     "ReturnStmt": 2,
-    "CallSite": 4
+    "CallSite": 1
   },
   "goroutine_count": 1
 }
