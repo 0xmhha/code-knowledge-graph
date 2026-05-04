@@ -186,6 +186,97 @@ func TestConcurrency_NoRegression_Goroutine(t *testing.T) {
 	}
 }
 
+// TestChannelFlow_MakeAssign_SendsToChannelNode verifies that a sends_to edge
+// emitted for a channel created via `ch := make(chan T, n)` points to the
+// Channel node rather than an anonymous CallSite node.
+func TestChannelFlow_MakeAssign_SendsToChannelNode(t *testing.T) {
+	root := "testdata/concurrency"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	channels := nodesByType(g.Nodes, types.NodeChannel)
+	if len(channels) == 0 {
+		t.Fatal("no Channel nodes found")
+	}
+	chanIDs := make(map[string]bool, len(channels))
+	for _, n := range channels {
+		chanIDs[n.ID] = true
+	}
+	sendsTo := edgesByType(g.Edges, types.EdgeSendsTo)
+	var foundChannelDst bool
+	for _, e := range sendsTo {
+		if chanIDs[e.Dst] {
+			foundChannelDst = true
+			break
+		}
+	}
+	if !foundChannelDst {
+		t.Error("expected at least one sends_to edge with Channel node as Dst; all point to CallSite")
+	}
+}
+
+// TestChannelFlow_MakeAssign_RecvsFromChannelNode verifies that a recvs_from
+// edge for a make()-created channel points to the Channel node, not a CallSite.
+func TestChannelFlow_MakeAssign_RecvsFromChannelNode(t *testing.T) {
+	root := "testdata/concurrency"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	channels := nodesByType(g.Nodes, types.NodeChannel)
+	chanIDs := make(map[string]bool, len(channels))
+	for _, n := range channels {
+		chanIDs[n.ID] = true
+	}
+	recvsFrom := edgesByType(g.Edges, types.EdgeRecvsFrom)
+	var foundChannelDst bool
+	for _, e := range recvsFrom {
+		if chanIDs[e.Dst] {
+			foundChannelDst = true
+			break
+		}
+	}
+	if !foundChannelDst {
+		t.Error("expected at least one recvs_from edge with Channel node as Dst; all point to CallSite")
+	}
+}
+
+// TestChannelFlow_Goroutine_SendsToChannelNode verifies the Goroutine node →
+// Channel node sends_to edge is emitted for `go func() { ch <- 1 }()` where
+// ch was created with make() in the enclosing function.
+func TestChannelFlow_Goroutine_SendsToChannelNode(t *testing.T) {
+	root := "testdata/concurrency"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	goroutines := nodesByType(g.Nodes, types.NodeGoroutine)
+	if len(goroutines) == 0 {
+		t.Fatal("no Goroutine nodes found")
+	}
+	goroutineIDs := make(map[string]bool, len(goroutines))
+	for _, n := range goroutines {
+		goroutineIDs[n.ID] = true
+	}
+	channels := nodesByType(g.Nodes, types.NodeChannel)
+	chanIDs := make(map[string]bool, len(channels))
+	for _, n := range channels {
+		chanIDs[n.ID] = true
+	}
+	sendsTo := edgesByType(g.Edges, types.EdgeSendsTo)
+	var found bool
+	for _, e := range sendsTo {
+		if goroutineIDs[e.Src] && chanIDs[e.Dst] {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected Goroutine -sends_to-> Channel edge; none found")
+	}
+}
+
 // helpers
 
 func nodesByType(nodes []types.Node, t types.NodeType) []types.Node {

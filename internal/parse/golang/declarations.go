@@ -47,6 +47,12 @@ type declVisitor struct {
 	// "rpc:Service.Method") to its node ID, deduping handles_message and
 	// rpc_calls targets that resolve to the same logical message. E3.
 	messageNodeIDs map[string]string
+	// chanVarIDs maps a channel variable name (within the current function scope)
+	// to the Channel node ID emitted by emitChannelFromMake. Used to wire
+	// sends_to/recvs_from edges to the actual Channel node instead of an
+	// anonymous CallSite. Key = variable name string (AST-level, not qualified).
+	// Re-initialized per function scope in emitFunctionBodyPos.
+	chanVarIDs map[string]string
 }
 
 func newDeclVisitor(fset *token.FileSet, relPath, pkgName string) *declVisitor {

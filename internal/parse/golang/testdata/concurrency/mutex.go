@@ -80,5 +80,6 @@ func (f *FakeMutex) Unlock() {}
 func UseFake() {
 	var f FakeMutex
 	f.Lock()
+	_ = 0 // intentionally empty critical section — fixture tests false-positive guard
 	f.Unlock()
 }
