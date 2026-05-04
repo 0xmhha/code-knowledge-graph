@@ -22,11 +22,11 @@
 |---|---|---|---|---|
 | 1 | Code path → knowledge graph | ✅ IMPLEMENTED | — | — |
 | 2 | 6 graph structures (G1~G6) | ✅ IMPLEMENTED | — | — |
-| 3 | tree-sitter보다 향상된 이해도 + 속도 | ✅ QUALIFIED | tree-sitter + go/packages 부분 분석: call flow는 direct만 지원 (IPA 미지원), data flow는 field-level (whole-program 미지원) | P2 |
-| 4a | **Call flow query** (find_callers/callees/get_subgraph) | 🟡 PARTIAL | Direct calls only (calls/invokes edges). Indirect (callback/interface/reflection) 미지원. | P1 |
-| 4b | **Data flow query** (reads_field/writes_field, reads_mapping/writes_mapping) | 🟡 PARTIAL | Per-function scope (cross-file, across module 경계 미지원). | P2 |
+| 3 | tree-sitter보다 향상된 이해도 + 속도 | 🟡 PARTIAL | **(1)** call flow: direct만 지원, interface dispatch / IPA 미지원. **(2)** data flow: field-level, whole-program 미지원. **(3)** channel async data flow: `sends_to`/`recvs_from` edge는 있으나 channel을 통한 메시지·데이터 타입 연결 (producer goroutine → channel → consumer goroutine) 미추적. | P1 |
+| 4a | **Call flow query** (find_callers/callees/get_subgraph) | 🟡 PARTIAL | Direct calls only (calls/invokes edges). Indirect (interface dispatch/callback/reflection) 미지원. | P1 |
+| 4b | **Data flow query** (reads_field/writes_field, reads_mapping/writes_mapping) | 🟡 PARTIAL | Per-function scope (cross-file, across module 경계 미지원). **Channel 경유 데이터 흐름 별도 gap** (4d 참조). | P2 |
 | 4c | **History query** (changed_in/blame edges) | 🟡 PARTIAL | File-level 구현 (line-level, submodule 미지원). 344946 edges 검증 ✅. | P3 |
-| 4d | **Concurrency flow query** (acquires_lock/releases_lock/accessed_under_lock) | 🟡 PARTIAL | Intra-function heuristic (SSA/D1 deferred). 1259 go-stablenet: 781 acquires_lock, 834 releases_lock, 2916 accessed_under_lock. | P1 |
+| 4d | **Concurrency flow query** (acquires_lock/releases_lock/accessed_under_lock + channel) | 🟡 PARTIAL | **(a)** Lock: intra-function heuristic only (cross-fn SSA/D1 deferred). go-stablenet: 781 acquires_lock, 834 releases_lock, 2916 accessed_under_lock. **(b)** Channel flow: `sends_to`/`recvs_from` edge 있으나 **channel 경유 메시지 타입 + producer→consumer 연결** 미추적 → goroutine 간 async data flow 불투명. | P1 |
 | 4e | **Version gap detection** (ckg audit) | 🟡 PARTIAL | File-level parity (semantic drift 미지원). go-stablenet 1259/1259 PARITY ✅. | P2 |
 | 5 | **Logging + debug mode** | 🔴 MISSING | slog 기본 지원하나 debug/prod level 분기 없음. —verbose 같은 CLI flag 미구현. | P2 |
 
