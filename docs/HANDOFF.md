@@ -6,16 +6,16 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-05-04 (refresh 2 — v3 attempt + § 7 measurement) |
-| HEAD | `b9c15f0` (`docs: refresh handoff for next session`) |
-| Working tree | **dirty** — 11 modified files (583 ins / 176 del), uncommitted G6 v3 implementation |
+| Snapshot date | 2026-05-04 (refresh 3 — D4 escape hatch EXECUTED, root cause confirmed) |
+| HEAD | `3a6d9f6` (`refactor(buildpipe): remove unused count params from runCold`) |
+| Working tree | **clean** |
 | Branch | `main` |
-| Test gate | `go vet ./...` clean, `go test ./...` 17 packages PASS (신규 dedup + pending_refs 테스트 포함), `make build` clean |
-| Schema version | **1.5** (G6 v3 pending_refs table — code on disk; 1.4 prior to v3 attempt) |
-| 사용자 4 완성도 조건 | **모두 충족** (#1-#4 ✅) — partial-cache 자체와 무관, short-circuit 살아있음 |
+| Test gate | `go vet ./...` clean, `go test ./...` 17 packages PASS, `make build` clean |
+| Schema version | **1.5** (pending_refs table — dead code infra preserved for v4) |
+| 사용자 4 완성도 조건 | **모두 충족** (#1-#4 ✅) |
 | Wave 7 (Group F) | **완료** — F1 + F2 + F3 ship됨 (1d42787, 412e622) |
-| G6 v3 attempt #1 | **§ 7 gate FAIL** — 코드는 거의 완성, 실측에서 parity (§ 7.1+7.2) + budget (§ 7.3) 위반. **§ 7.4 audit PASS**, 단위 테스트 PASS, synthetic smoke PASS (corpus-only failure). 상세는 `docs/G6-V3-VALIDATION-FINDINGS.md` |
-| Open critical | G6 v3 옵션 A/B/C 중 선택 — `docs/G6-V3-VALIDATION-FINDINGS.md` § 5 |
+| G6 v3 D4 escape hatch | **EXECUTED 2026-05-04** — routing reverted to cold-fallback. Root cause confirmed: H3 (NodesByFilePath returns nodes in ID-sorted order ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges). Fix direction: sort `NodesByFilePath by start_line ASC` (future v4). 상세: `docs/G6-V3-VALIDATION-FINDINGS.md` § 0 |
+| Open critical | **없음** — G6 v3 closed (D4). 다음 우선순위: B2 (`ckg export-postgres`) |
 | Working machine | `wm-it-22-00661` (`/Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph`). go-stablenet corpus 직접 사용 가능 (`/Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest`, commit `0bf2f4d1b`) |
 
 ---
@@ -144,34 +144,18 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 ## 4. 남은 작업 우선순위 (다음 세션용)
 
-### 4.1 G6 v3 — attempt #1 측정 완료, **§ 7 gate FAIL**, 다음 세션 분기 결정
+### 4.1 G6 v3 — **D4 escape hatch EXECUTED (2026-05-04)** ✅ CLOSED
 
-**진입점**: `docs/G6-V3-VALIDATION-FINDINGS.md` (raw measurements + 4 가설 + 다음 분기 A/B/C). 본 HANDOFF의 § 4.1는 요약만 둠. 보조: `docs/G6-INCREMENTAL-REDESIGN.md` (design spec).
+**상태**: Option B (D4) 실행 완료. Root cause 확인 후 routing cold-fallback 복귀, dead code 보존.
 
-**현재 상태**: v3 코드는 working tree에 거의 완성된 상태로 떠있음 (uncommitted, 11 modified files). 단위 테스트 + synthetic smoke 모두 PASS. **go-stablenet corpus 측정에서만 parity 위반**:
+**Root cause (confirmed)**:
+- **H3 (primary)**: `NodesByFilePath`가 DB rowid 순(ID sorted) 반환 ≠ AST 선언 순서. 동일 simple name 복수 후보(예: `trie/node.go`의 `String` 4개) 중 qIndex winner가 cold/partial에서 달라짐. 826 pending_refs → cold는 valueNode.String, partial은 fullNode.String으로 resolve → dedup key `(Type,Src,Dst,Line)`에서 Dst가 달라 양쪽 edge 모두 생존 → +2675 over-emit
+- **H4 (secondary)**: `reloadCachedEdges`가 `cached_src→dirty_dst` edge 미로드 → −5 imports (design limitation)
+- **Fix direction (future v4)**: `NodesByFilePath` 결과를 `start_line ASC` 정렬 → 선언 순서와 일치
 
-| § 7 gate | 결과 | 측정값 |
-|---|---|---|
-| 7.1 parity | ❌ | partial 664287 vs cold 661612 = +2675 edges over-emit |
-| 7.2 bucket diff | ❌ | calls +1902, has_modifier +524, emits_event +224, writes_mapping +30, imports −5 |
-| 7.3 budget (≤ 3 s) | ❌ | 115 s (38× 초과). v2의 30 min보다는 16× 빠름. |
-| 7.4 audit zero-diff | ✅ | 1259/1259 PARITY |
-
-**v3 구현 들어간 변경** (working tree, 11 files, 583+/176-):
-- schema 1.5 + `pending_refs` table (FK CASCADE)
-- `InsertPendingRefs` / `PendingRefsByFilePath` (chunked `QueryEdgesForNodes` Q5 fix 포함)
-- `graph.Build` edge dedup `(Type, Src, Dst, Line)` keep-first (spec의 Count-summation에서 의도적 deviation; `builder.go:34-35` 주석)
-- `emitDerivedPasses` 통합 helper
-- `pipeline.go:127` partial-hit → `runIncremental` 라우팅 복원
-- 신규 단위 테스트 5건 (PASS)
-
-**4 가설 (수렴 안 됨)**:
-1. **H1** qIndex 구성이 cold per-Pass와 partial merged Pass에서 다름
-2. **H2** pending_refs reload text round-trip drift (collation/encoding)
-3. **H3** dedup 키 `(Type,Src,Dst,Line)`가 file_path를 안 봄 + fresh side가 stamp 안 거침 (가장 유력 — over-emit edge에 file_path 빈값 관찰)
-4. **H4** `reloadCachedEdges`가 cross-file (cached_src→dirty_dst) edges 누락 가능성
-
-각 가설 검증 방법은 `docs/G6-V3-VALIDATION-FINDINGS.md` § 4.
+**Committed 변경** (schema 1.5 + dead code + docs):
+- `c15cdcb` — D4 escape hatch (routing revert + G6-INCREMENTAL-REDESIGN.md § 8 D4 stamp + INCREMENTAL.md + FINDINGS.md § 0 진단 결과)
+- `3a6d9f6` — runCold unused param cleanup
 
 **v1+v2+v3 실패 history**:
 
@@ -179,14 +163,9 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 |---|---|---|
 | v1 (`31a17f0`) | pending refs를 manifest에 persist | go-stablenet: −92201 calls (100% loss) |
 | v2 (`8d5521c`) | cached files Nodes+Pending reload, temporal/xlang split | go-stablenet: −347986 edges (52%), changed_in 0건 DB, **30분 runtime** |
-| v3 (uncommitted) | pending_refs SQLite + edge dedup + emitDerivedPasses unified | go-stablenet: **+2675 edges over-emit**, 115 s runtime, audit PARITY |
+| v3 (`c15cdcb`) | pending_refs SQLite + edge dedup + emitDerivedPasses unified | go-stablenet: +2675 edges over-emit, 115 s runtime. Root cause: H3 (NodesByFilePath order ≠ declaration order) |
 
-**다음 세션 첫 액션 — 옵션 선택**:
-- **A** parity 고치기 (가설 H1-H4 검증, 반나절+, 그래도 § 7.3 budget 통과는 별개)
-- **B** § 8 D4 escape hatch 발동 (partial-cache drop, 1-2시간, 코드는 dead code 보존)
-- **C** WIP를 `wip/g6v3-attempt-1` branch로 commit, main에는 본 문서들만 commit
-
-상세 비교는 `docs/G6-V3-VALIDATION-FINDINGS.md` § 5.
+참조: `docs/G6-V3-VALIDATION-FINDINGS.md` (§ 0 진단 결과 + § 4 가설 검증 방법), `docs/G6-INCREMENTAL-REDESIGN.md` § 8 D4.
 
 ### 4.2 v0.2.1 Wave (Group B)
 
@@ -368,45 +347,30 @@ git status --short
 3. 모델이 본 문서 read → 컨텍스트 회복 → 지시 받은 작업 dispatch
 4. WORK-PLAN.md G3-G9 follow-up 잔여 항목, Group B/C/D는 모두 본 문서 § 4에 우선순위와 함께 기록됨. Group F는 ✅ 완료.
 
-### 권장 다음 작업 순서 (2026-05-04 refresh 2)
+### 권장 다음 작업 순서 (2026-05-04 refresh 3)
 
 | 순위 | 작업 | 이유 |
 |---|---|---|
-| 1 | **G6 v3 옵션 결정 (A/B/C)** | 본 세션이 v3 attempt #1을 시도했으나 § 7 gate FAIL. working tree dirty. 다음 세션 첫 의사결정. `docs/G6-V3-VALIDATION-FINDINGS.md` § 5 참고. |
-| 2 | B2 (`ckg export-postgres --dsn ... --source ...`) | A4 (Storage interface) 위에서 자연스러움, M effort, v0.2.1 첫 단계. G6 v3 옵션 B(drop) 또는 C(stash) 선택 시 즉시 진입 가능. |
-| 3 | C1 (reverse-reference index) | G6 v3 § 7 green 후 layered (D3 결정). pending_refs 테이블이 source — 옵션 A 진행 시 § 7.3 통과 후, 옵션 B 시 별도 prerequisite로 격상. |
-| 4 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 바로 처리 가능 |
-| 5 | E3/E4/G8 follow-up minors | 발견된 한계 정리 (httprouter, RPC client.Call 변종, line-level blame) |
+| 1 | **B2** (`ckg export-postgres --dsn ... --source ...`) | A4 (Storage interface) 위에서 자연스러움, M effort, v0.2.1 첫 단계. G6 v3 D4 완료로 즉시 진입 가능. |
+| 2 | C1 (reverse-reference index) | pending_refs 테이블(schema 1.5)이 source. B3 또는 C1 완료 후 v4 attempt 가능. |
+| 3 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 바로 처리 가능 |
+| 4 | E3/E4/G8 follow-up minors | 발견된 한계 정리 (httprouter, RPC client.Call 변종, line-level blame) |
+| 5 | G6 v4 attempt | Fix direction: `NodesByFilePath` sort by `start_line ASC`. prerequisite: B3 (tree-sitter Tree.Edit) or C1 (reverse-reference index). 상세: `docs/G6-V3-VALIDATION-FINDINGS.md` § 0 + § 4 |
 | 6 | D1 / D2 | XL, 별도 spec 필요 |
-
-### G6 v3 옵션 결정 prompt 템플릿 (다음 세션 entry)
-
-```
-docs/HANDOFF.md + docs/G6-V3-VALIDATION-FINDINGS.md 읽고 현재 상태 파악.
-working tree에 11 modified files (G6 v3 attempt #1, § 7 gate FAIL)이 떠 있음.
-
-옵션 A/B/C (FINDINGS.md § 5) 중 [선택] 으로 진행:
-- A = 가설 H1-H4 (FINDINGS.md § 4) 중 [N] 부터 검증 → parity fix → § 7.3 budget 재측정
-- B = § 8 D4 escape hatch — pipeline.go:127 라우팅 cold-fallback로 되돌림 +
-      runIncremental + pending_refs 데이터 구조는 dead code로 보존 +
-      INCREMENTAL.md / G6-INCREMENTAL-REDESIGN.md § 8 D4 stamp + commit
-- C = WIP commit on wip/g6v3-attempt-1 branch + main을 b9c15f0로 유지
-
-코퍼스: /Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest
-재현 명령: docs/G6-V3-VALIDATION-FINDINGS.md § 6
-```
 
 ---
 
 ## 9. Commit 요약 (시간 역순)
 
-### 본 refresh (2026-05-04, G6 v3 attempt #1 measurement)
+### 본 refresh (2026-05-04, D4 escape hatch EXECUTED + root cause confirmed)
 
-| Item | 분류 | 내용 |
+| Commit | 분류 | 내용 |
 |---|---|---|
-| (uncommitted, 11 files) | feat (failed) | G6 v3 — schema 1.5 + pending_refs + edge dedup + emitDerivedPasses + 라우팅 복원. 단위 테스트 PASS, synthetic PASS, **§ 7 gate FAIL on go-stablenet** |
-| `docs/G6-V3-VALIDATION-FINDINGS.md` | docs | 본 refresh 산출 — § 7 raw measurements + 가설 4개 + 옵션 A/B/C |
-| (this file refresh) | docs | HANDOFF § 4.1 + § 8 다음 세션 entry prompt 갱신 |
+| `c15cdcb` | fix | D4 escape hatch — routing cold-fallback 복귀, schema 1.5 dead code 보존, G6-INCREMENTAL-REDESIGN.md § 8 stamp, INCREMENTAL.md + FINDINGS.md § 0 추가 |
+| `3a6d9f6` | refactor | runCold 미사용 파라미터(goCount/tsCount/solCount) 제거 |
+| (this file) | docs | HANDOFF refresh 3 — D4 closed, 다음 우선순위 B2로 갱신 |
+
+**Root cause confirmed (H3)**: NodesByFilePath rowid-sorted ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges. Fix: `NodesByFilePath sort by start_line ASC` (v4).
 
 ### 이전 세션 (2026-05-03 ~ 2026-05-04, Wave 7 + G6 design)
 
