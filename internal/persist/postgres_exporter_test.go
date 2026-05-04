@@ -77,7 +77,8 @@ func (m *mockStoreReader) BlobsByFilePath(_ string) (map[string][]byte, error) {
 func (m *mockStoreReader) PendingRefsByFilePath(_ string) ([]PendingRefRow, error) {
 	return nil, nil
 }
-func (m *mockStoreReader) ExportChunked(_ string, _, _ int) error { return nil }
+func (m *mockStoreReader) ReverseDepsForFiles(_ []string) ([]string, error) { return nil, nil }
+func (m *mockStoreReader) ExportChunked(_ string, _, _ int) error           { return nil }
 
 // Compile-time check: mockStoreReader must satisfy StoreReader.
 var _ StoreReader = (*mockStoreReader)(nil)

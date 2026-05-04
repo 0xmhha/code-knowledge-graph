@@ -64,6 +64,14 @@ type StoreReader interface {
 	// input. Schema 1.5.
 	PendingRefsByFilePath(path string) ([]PendingRefRow, error)
 
+	// ReverseDepsForFiles returns every cached file path that has pending_refs
+	// targeting a qualified_name defined in any of dirtyPaths. Used by C1
+	// (reverse-reference invalidation) to find which cached files need their
+	// pending_refs re-resolved when dirty files change their exported symbols.
+	// MUST be called BEFORE deleting dirty nodes — the lookup joins
+	// pending_refs to nodes still in DB. Returns nil when dirtyPaths is empty.
+	ReverseDepsForFiles(dirtyPaths []string) ([]string, error)
+
 	// Static export (chunked JSON, spec §6.6). On StoreReader rather than
 	// StoreWriter because ExportChunked only reads from the store and writes
 	// JSON to disk — its sole caller (cmd/ckg/export_static.go) opens via

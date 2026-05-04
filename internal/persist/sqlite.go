@@ -953,6 +953,49 @@ func (s *sqliteStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error
 	return out, nil
 }
 
+// ReverseDepsForFiles returns every cached file whose pending_refs target a
+// qualified_name defined in any of dirtyPaths. Must be called BEFORE dirty
+// nodes are deleted — the query joins pending_refs to nodes still in DB.
+// Returns nil when dirtyPaths is empty.
+func (s *sqliteStore) ReverseDepsForFiles(dirtyPaths []string) ([]string, error) {
+	if len(dirtyPaths) == 0 {
+		return nil, nil
+	}
+	ph := placeholders(len(dirtyPaths))
+	// Double the args: one set for the IN(dirty file_path on nodes), one for
+	// the NOT IN(dirty file_path on pending_refs — exclude dirty files themselves).
+	dirtyArgs := anys(dirtyPaths)
+	allArgs := make([]any, 0, len(dirtyArgs)*2)
+	allArgs = append(allArgs, dirtyArgs...)
+	allArgs = append(allArgs, dirtyArgs...)
+	// pending_refs.target_qname stores the unresolved AST name (e.g. "Helper"),
+	// while nodes.qualified_name is fully-qualified (e.g. "edgepin.Helper").
+	// The LIKE arm matches the suffix after the last dot — mirrors simpleName()
+	// in resolve.go so C1 finds the same candidates as Pass 2 Resolve does.
+	q := `SELECT DISTINCT pr.file_path
+	      FROM pending_refs pr
+	      INNER JOIN nodes n ON (
+	          n.qualified_name = pr.target_qname
+	          OR n.qualified_name LIKE ('%.' || pr.target_qname)
+	      )
+	      WHERE n.file_path IN (` + ph + `)
+	        AND pr.file_path NOT IN (` + ph + `)`
+	rows, err := s.db.Query(q, allArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("reverse deps for %d paths: %w", len(dirtyPaths), err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, fmt.Errorf("scan reverse dep path: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // InsertEdges bulk-inserts edges (transactional).
 func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()

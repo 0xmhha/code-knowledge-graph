@@ -94,18 +94,23 @@ func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
 	return &m
 }
 
-// runIncremental implements the partial-cache build path (G6 v3). Caller
+// runIncremental implements the partial-cache build path (G6 v4). Caller
 // must have already determined the cache base is usable (ManifestUsable) and
 // at least one file is cached (so we have something to reuse).
 //
-// Flow (post-v3):
+// Flow (G6 v4 + C1 reverse-reference invalidation):
 //  1. DROP temporal + xlang edges from DB — they are always rebuilt and
 //     would otherwise duplicate or stale.
+//  1.5. C1: query reverse-dirty cached files BEFORE deleting dirty nodes.
+//     Cached files whose pending_refs target qnames in dirty/removed files
+//     need their pending_refs re-resolved (their edges to dirty nodes were
+//     cascade-deleted). Non-reverse-dirty files skip PendingRefsByFilePath
+//     and rely on reloadCachedEdges — a significant perf win on large repos.
 //  2. DELETE dirty + removed files' nodes — FK CASCADE wipes their edges,
 //     blobs, AND pending_refs in the same statement.
-//  3. Per-language Pass 1 (dirty only) + reload cached nodes + cached
-//     pending_refs from DB → synthesise ParseResults so Pass 2 sees the
-//     cold-equivalent input set.
+//  3. Per-language Pass 1 (dirty only) + reload cached nodes. Pending_refs
+//     are only loaded for dirty + reverse-dirty cached files; others
+//     contribute nodes only (for qIndex) — their edges are intact in DB.
 //  4. graph.Build merges + dedups by (Type, Src, Dst, Line) keep-first.
 //     Reloaded edges come FIRST in parts ordering so dedup picks the row
 //     that already exists in DB (ID != 0) — fresh duplicates (ID == 0)
@@ -139,18 +144,34 @@ func runIncremental(opt Options, log *slog.Logger,
 		}
 	}
 
+	// (1.5) C1: reverse-reference invalidation — find cached files that have
+	// pending_refs pointing to qnames exported by dirty/removed files. These
+	// "reverse-dirty" files need their pending_refs re-resolved even though
+	// their own source is unchanged. Query BEFORE step (2) deletes dirty nodes.
+	allDirtyPaths := append(decisions.DirtyPaths(), decisions.RemovedPaths()...)
+	reverseDirtyPaths, err := store.ReverseDepsForFiles(allDirtyPaths)
+	if err != nil {
+		return persist.Manifest{}, fmt.Errorf("reverse deps: %w", err)
+	}
+	reverseDirtySet := make(map[string]bool, len(reverseDirtyPaths))
+	for _, p := range reverseDirtyPaths {
+		reverseDirtySet[p] = true
+	}
+	log.Debug("c1.reverse_dirty", "count", len(reverseDirtySet))
+
 	// (2) Drop nodes/edges/blobs/pending_refs for dirty + removed files via
 	// CASCADE. Pending refs are removed because their src_id FK references
 	// a dropped node.
-	for _, p := range append(decisions.DirtyPaths(), decisions.RemovedPaths()...) {
+	for _, p := range allDirtyPaths {
 		if err := store.DeleteNodesByFilePath(p); err != nil {
 			return persist.Manifest{}, fmt.Errorf("delete %s: %w", p, err)
 		}
 	}
 
-	// (3) Per-language Pass 1 + reload cached nodes & pending_refs.
+	// (3) Per-language Pass 1 + reload cached nodes. pending_refs are only
+	// loaded for dirty + reverse-dirty files (C1 optimization).
 	resolved, dirtyPending, parseErrs, _, solParser, err := runLanguagePipelines(
-		opt.SrcRoot, dirtyByLang, cachedByLang, store, log)
+		opt.SrcRoot, dirtyByLang, cachedByLang, reverseDirtySet, store, log)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
@@ -231,8 +252,11 @@ func partitionByLang(decisions CacheDecisions) (dirty, cached map[string][]strin
 // persists them after node insert) + accumulated parse error count + a flag
 // for whether any TS/Sol file changed (drives xlang rebuild decision) + the
 // Sol parser instance for ABI extraction.
+//
+// reverseDirty (C1): set of cached file paths whose pending_refs need
+// re-resolving because a dirty/removed file changed their target qnames.
 func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
-	store persist.Store, log *slog.Logger) ([]*parse.ResolvedGraph, []persist.PendingRefRow, int, bool, *solp.Parser, error) {
+	reverseDirty map[string]bool, store persist.Store, log *slog.Logger) ([]*parse.ResolvedGraph, []persist.PendingRefRow, int, bool, *solp.Parser, error) {
 	resolved := []*parse.ResolvedGraph{}
 	dirtyPending := []persist.PendingRefRow{}
 	parseErrs := 0
@@ -240,7 +264,7 @@ func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
 	var solParser *solp.Parser
 
 	if files := dirty["go"]; len(files) > 0 || hasCached(cached, "go") {
-		rg, pending, n, err := runGoPipelineIncremental(srcRoot, files, cached["go"], store, log)
+		rg, pending, n, err := runGoPipelineIncremental(srcRoot, files, cached["go"], reverseDirty, store, log)
 		if err != nil {
 			return nil, nil, 0, false, nil, fmt.Errorf("go incremental: %w", err)
 		}
@@ -252,7 +276,7 @@ func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
 		if len(files) > 0 {
 			tsOrSolDirty = true
 		}
-		rg, pending, n, err := runTSPipelineIncremental(srcRoot, files, cached["ts"], store, log)
+		rg, pending, n, err := runTSPipelineIncremental(srcRoot, files, cached["ts"], reverseDirty, store, log)
 		if err != nil {
 			return nil, nil, 0, false, nil, fmt.Errorf("ts incremental: %w", err)
 		}
@@ -264,7 +288,7 @@ func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
 		if len(files) > 0 {
 			tsOrSolDirty = true
 		}
-		rg, pending, n, p, err := runSolPipelineIncremental(srcRoot, files, cached["sol"], store, log)
+		rg, pending, n, p, err := runSolPipelineIncremental(srcRoot, files, cached["sol"], reverseDirty, store, log)
 		if err != nil {
 			return nil, nil, 0, false, nil, fmt.Errorf("sol incremental: %w", err)
 		}
@@ -413,17 +437,17 @@ func hasCached(m map[string][]string, lang string) bool {
 }
 
 // runGoPipelineIncremental parses dirtyFiles, then loads cached files' nodes
-// AND pending refs from DB and synthesises ParseResults so Pass 2's qIndex
-// AND its pending-ref consumer see the full set. Returns ResolvedGraph plus
-// the dirty pending refs (caller persists those — cached refs survive in DB
-// via FK; only fresh refs from re-parse need INSERT).
+// AND (C1) conditionally their pending refs from DB and synthesises ParseResults
+// so Pass 2's qIndex AND its pending-ref consumer see the full set. Returns
+// ResolvedGraph plus the dirty pending refs (caller persists those — cached
+// refs survive in DB via FK; only fresh refs from re-parse need INSERT).
 //
-// G6 v3 (schema 1.5): the "load pending refs back" step is the v1/v2 fix.
-// Previously cached files contributed nodes only, so cached-side cross-file
-// pending refs were silently dropped — manifesting as the -92 K calls
-// regression on go-stablenet.
+// C1 optimization: only files in reverseDirty need PendingRefsByFilePath —
+// their edges to dirty-file qnames were cascade-deleted and must be re-resolved.
+// Non-reverse-dirty cached files contribute nodes only; their edges are intact
+// in DB and will be reloaded by reloadCachedEdges, skipping a DB round-trip.
 func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
+	reverseDirty map[string]bool, store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := gop.New(srcRoot)
 	if pkgs, err := detect.GoPackages(srcRoot); err == nil {
 		p.SetPackages(pkgs)
@@ -455,12 +479,16 @@ func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		if err != nil {
 			return nil, nil, errs, fmt.Errorf("reload go nodes for %s: %w", rel, err)
 		}
-		refs, err := store.PendingRefsByFilePath(rel)
-		if err != nil {
-			return nil, nil, errs, fmt.Errorf("reload go pending_refs for %s: %w", rel, err)
+		var pending []parse.PendingRef
+		if reverseDirty[rel] {
+			refs, err := store.PendingRefsByFilePath(rel)
+			if err != nil {
+				return nil, nil, errs, fmt.Errorf("reload go pending_refs for %s: %w", rel, err)
+			}
+			pending = pendingRefsFromRows(refs)
 		}
 		results = append(results, &parse.ParseResult{
-			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+			Path: rel, Nodes: nodes, Pending: pending,
 		})
 	}
 	rg, err := p.Resolve(results)
@@ -489,8 +517,9 @@ func pendingRefsFromRows(rows []persist.PendingRefRow) []parse.PendingRef {
 }
 
 // runTSPipelineIncremental mirrors runGoPipelineIncremental for TypeScript.
+// See C1 optimization note on runGoPipelineIncremental.
 func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
+	reverseDirty map[string]bool, store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := tsp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -517,12 +546,16 @@ func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		if err != nil {
 			return nil, nil, errs, fmt.Errorf("reload ts nodes for %s: %w", rel, err)
 		}
-		refs, err := store.PendingRefsByFilePath(rel)
-		if err != nil {
-			return nil, nil, errs, fmt.Errorf("reload ts pending_refs for %s: %w", rel, err)
+		var pending []parse.PendingRef
+		if reverseDirty[rel] {
+			refs, err := store.PendingRefsByFilePath(rel)
+			if err != nil {
+				return nil, nil, errs, fmt.Errorf("reload ts pending_refs for %s: %w", rel, err)
+			}
+			pending = pendingRefsFromRows(refs)
 		}
 		results = append(results, &parse.ParseResult{
-			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+			Path: rel, Nodes: nodes, Pending: pending,
 		})
 	}
 	rg, err := p.Resolve(results)
@@ -531,8 +564,9 @@ func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 
 // runSolPipelineIncremental mirrors runGoPipelineIncremental for Solidity.
 // Returns the parser instance for caller use (xlang ABI source).
+// See C1 optimization note on runGoPipelineIncremental.
 func runSolPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, *solp.Parser, error) {
+	reverseDirty map[string]bool, store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, *solp.Parser, error) {
 	p := solp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -559,12 +593,16 @@ func runSolPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		if err != nil {
 			return nil, nil, errs, p, fmt.Errorf("reload sol nodes for %s: %w", rel, err)
 		}
-		refs, err := store.PendingRefsByFilePath(rel)
-		if err != nil {
-			return nil, nil, errs, p, fmt.Errorf("reload sol pending_refs for %s: %w", rel, err)
+		var pending []parse.PendingRef
+		if reverseDirty[rel] {
+			refs, err := store.PendingRefsByFilePath(rel)
+			if err != nil {
+				return nil, nil, errs, p, fmt.Errorf("reload sol pending_refs for %s: %w", rel, err)
+			}
+			pending = pendingRefsFromRows(refs)
 		}
 		results = append(results, &parse.ParseResult{
-			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+			Path: rel, Nodes: nodes, Pending: pending,
 		})
 	}
 	rg, err := p.Resolve(results)

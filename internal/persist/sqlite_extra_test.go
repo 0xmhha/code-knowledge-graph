@@ -917,6 +917,76 @@ func TestIncremental_FKCascadeOnDelete(t *testing.T) {
 	}
 }
 
+// TestReverseDepsForFiles verifies the C1 reverse-reference query:
+// cached files whose pending_refs target qnames defined in dirty files are
+// returned, matching via both exact and suffix (simpleName) join.
+func TestReverseDepsForFiles(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "revdeps.db")
+	s, err := persist.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	// Two files: dirty.go defines Helper; cached.go calls Helper (pending ref).
+	nodes := []types.Node{
+		{
+			ID: "dirty0000000000a", Type: types.NodeFunction,
+			Name: "Helper", QualifiedName: "mypkg.Helper",
+			FilePath: "dirty.go", Language: "go",
+			StartLine: 1, EndLine: 5, StartByte: 0, EndByte: 50,
+			Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "cache0000000000b", Type: types.NodeFunction,
+			Name: "Use", QualifiedName: "mypkg.Use",
+			FilePath: "cached.go", Language: "go",
+			StartLine: 1, EndLine: 5, StartByte: 0, EndByte: 50,
+			Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "unrel0000000000c", Type: types.NodeFunction,
+			Name: "Unrelated", QualifiedName: "other.Unrelated",
+			FilePath: "other.go", Language: "go",
+			StartLine: 1, EndLine: 5, StartByte: 0, EndByte: 50,
+			Confidence: types.ConfExtracted,
+		},
+	}
+	if err := s.InsertNodes(nodes); err != nil {
+		t.Fatalf("InsertNodes: %v", err)
+	}
+
+	// pending_refs: cached.go has a ref targeting "Helper" (simple name, as
+	// the parser emits before resolution) — mirrors exprName() in Go parser.
+	// other.go has a ref targeting "Unrelated" (not in dirty.go).
+	refs := []persist.PendingRefRow{
+		{FilePath: "cached.go", SrcID: "cache0000000000b", EdgeType: "calls", TargetQName: "Helper"},
+		{FilePath: "other.go", SrcID: "unrel0000000000c", EdgeType: "calls", TargetQName: "Unrelated"},
+	}
+	if err := s.InsertPendingRefs(refs); err != nil {
+		t.Fatalf("InsertPendingRefs: %v", err)
+	}
+
+	// Empty dirtyPaths → nil result, no error.
+	got, err := s.ReverseDepsForFiles(nil)
+	if err != nil || got != nil {
+		t.Errorf("empty dirtyPaths: got %v, %v; want nil, nil", got, err)
+	}
+
+	// dirty.go is dirty → cached.go should be returned (suffix match: "Helper" in "mypkg.Helper").
+	// other.go should NOT be returned ("Unrelated" is not defined in dirty.go).
+	got, err = s.ReverseDepsForFiles([]string{"dirty.go"})
+	if err != nil {
+		t.Fatalf("ReverseDepsForFiles: %v", err)
+	}
+	if len(got) != 1 || got[0] != "cached.go" {
+		t.Errorf("ReverseDepsForFiles([dirty.go]) = %v; want [cached.go]", got)
+	}
+}
+
 // mapKeysForTest is a sortable-key helper used by the BlobsByFilePath
 // assertion to keep the diagnostic message readable.
 func mapKeysForTest(m map[string][]byte) []string {
