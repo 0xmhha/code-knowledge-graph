@@ -132,18 +132,18 @@ func Run(opt Options) (persist.Manifest, error) {
 		// pending_refs infra are preserved as dead code for future v4 attempt.
 		// Fix direction: sort NodesByFilePath by start_line ASC.
 		log.Info("Cache: partial hit; falling back to cold rebuild for correctness")
-		return runCold(opt, log, discovery, goCount, tsCount, solCount)
+		return runCold(opt, log, discovery)
 	}
 	if opt.NoCache {
 		log.Info("Cache: bypassed (--no-cache); full rebuild")
 	}
-	return runCold(opt, log, discovery, goCount, tsCount, solCount)
+	return runCold(opt, log, discovery)
 }
 
 // runCold is the V0-equivalent full-rebuild path: wipe DB, parse every file,
 // rebuild every artifact. Always emits a fresh manifest (with Files block).
 func runCold(opt Options, log *slog.Logger,
-	discovery []DiscoveredFile, goCount, tsCount, solCount int) (persist.Manifest, error) {
+	discovery []DiscoveredFile) (persist.Manifest, error) {
 	files, err := detect.Walk(opt.SrcRoot)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect: %w", err)
