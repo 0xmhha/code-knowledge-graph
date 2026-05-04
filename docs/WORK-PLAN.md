@@ -5,10 +5,11 @@
 
 | Field | Value |
 |---|---|
-| Last update | 2026-04-28 |
+| Last update | 2026-05-04 (refresh 7 — G6 v4 + C1 + C2 + real-corpus parity ✅) |
 | V0 status | **38/38 완료** (CP-1~CP-7 도달, T38 DoD 검증 포함) |
+| HEAD | `3514a7a` (`docs: refresh handoff — G6 v4 + C1 + C2 completed`) |
 | Working dir | `/Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph` |
-| Working tree expectation | clean (untracked: `.playwright-mcp/`, `ckg-*.png` — gitignored) |
+| Working tree expectation | clean |
 | Subagent workflow | `/superpowers:subagent-driven-development` (impl → review → fix loop) |
 
 ---
@@ -18,13 +19,15 @@
 ```bash
 cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
 git log --oneline -5
-go test ./...                                                  # 17 패키지 PASS
+go test ./...                                                   # 18 패키지 PASS
 go build -o bin/ckg ./cmd/ckg
-./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth  # smoke
-./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open      # viewer
+./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth   # cold build
+./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth   # partial (short-circuit)
+./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth # exit 0 = parity
+./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open       # viewer
 ```
 
-이어서: 본 문서 §3 Wave 1 부터 순차 진행.
+이어서: 본 문서 §4 Wave 9 진입 포인트 참조.
 
 핵심 문서:
 - **본 문서** — 작업 리스트 + 운영 패턴
@@ -38,16 +41,20 @@ go build -o bin/ckg ./cmd/ckg
 
 ### 누적 결과물
 
-- 단일 Go 바이너리 `ckg` (멀티 OS, modernc/sqlite + tree-sitter via CGO)
-- 5 subcommand: `build` / `serve` / `mcp` / `export-static` / `eval`
-- 29 node types × 22 edge types (`pkg/types/enums.go`)
-- 파서 3종: Go (`go/packages`) / TS-JS (smacker tree-sitter) / Solidity (vendored tree-sitter v1.2.11)
+- 단일 Go 바이너리 `ckg` (멀티 OS, modernc/sqlite CGO-free + pgx/v5)
+- 7 subcommand: `build` / `serve` / `mcp` / `export-static` / `export-postgres` / `eval` / `audit`
+- 33 node types × 30 edge types (`pkg/types/enums.go`)
+- 파서 3종: Go (`go/packages`) / TS-JS (tree-sitter/go-tree-sitter v0.25) / Solidity (vendored v1.2.11)
 - xlang: Sol↔TS `binds_to` (name+ABI heuristic, INFERRED)
-- Next.js 3D viewer (`web/viewer-next/`, react-force-graph-3d, embedded via `go:embed`)
+- Next.js 3D viewer (`web/viewer-next/`, react-force-graph-3d, 6-graph filter UI, embedded via `go:embed`)
 - 6 MCP tools (find_symbol/callers/callees/get_subgraph/search_text/get_context_for_task)
 - Eval framework: 4 baselines (α raw / β graph-dump / γ granular / δ smart 1-shot) × YAML tasks
 - CI: `[ubuntu, macos, windows] × [amd64, arm64]` matrix + Playwright smoke
-- Docs: SCHEMA / ARCHITECTURE / EVAL / README quick start
+- Docs: SCHEMA / ARCHITECTURE / EVAL / README quick start / INCREMENTAL
+- **Storage backends**: SQLite (default) / PostgreSQL (`--db postgres://...`)
+- **Incremental cache**: cold + short-circuit + partial (G6 v4 correctness fix ✅, C1 reverse-ref invalidation ✅)
+- **Logging**: `--verbose` / `--log-file` / `CKG_LOG_LEVEL=debug`
+- go-stablenet parity: cold vs partial diff = **0** (214,343 nodes / 652,892 edges)
 
 ### 검증 가능 동작
 
@@ -55,10 +62,16 @@ go build -o bin/ckg ./cmd/ckg
 make build
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
 ./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open
+./bin/ckg serve --graph=/tmp/ckg-synth --no-viewer --port=8788   # API-only
 ./bin/ckg mcp --graph=/tmp/ckg-synth
 ./bin/ckg export-static --graph=/tmp/ckg-synth --out=/tmp/ckg-static
+./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity
 ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
   --graph=/tmp/ckg-synth --baselines=alpha,beta,gamma,delta --out=eval/results
+
+# PostgreSQL backend (선택)
+./bin/ckg build --src=testdata/synthetic --db=postgres://user:pass@localhost/ckg
+./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8787
 ```
 
 ---
@@ -83,12 +96,12 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | B2 | Item 3 Phase 1: `ckg export-postgres --dsn ... --source ...` 명령 | A4 | M ✅ (jackc/pgx/v5 COPY 프로토콜, 전 필드 export, DSNHost URL+kv 양식, 테스트 4개, 13317f7) |
 | B3 | Item 1 Phase 1c: incremental parsing 인프라 (Tree.Edit() API) | A1, A3 | M |
 
-### Group C — v0.2.2 Incremental Pass 2 + PG primary
+### Group C — v0.2.2 Incremental Pass 2 + PG primary ✅ 완료
 
 | ID | 작업 | 의존 | 추정 |
 |---|---|---|---|
-| C1 | Item 4 Phase 2: reverse-reference invalidation | A3 | L |
-| C2 | Item 3 Phase 2: `ckg build --db postgres://...` direct PG 빌드 | B2 | L |
+| C1 | Item 4 Phase 2: reverse-reference invalidation | A3 ✅ | L ✅ **95dc3c2** — `ReverseDepsForFiles` StoreReader (SQLite+PG), incremental step 1.5, LIKE suffix match. real-corpus diff=0 확인. |
+| C2 | Item 3 Phase 2: `ckg build --db postgres://...` direct PG 빌드 | B2 ✅ | L ✅ **6d01112** — pgxpool full Store implementation (~1160 lines), `--db` flag on build+serve. |
 
 ### Group D — v0.3.0 (별도 spec 필요)
 
@@ -131,7 +144,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 | G3 | NEXT-SESSION.md 정리 → 본 문서로 대체 | ✅ `df70804` |
 | G4 | `pipeline.go` 596줄 → language_runners.go + staleness.go 분리 (pipeline.go 359줄, 모두 400줄 미만) | ✅ `c0ecd81` |
 | G5 | `go.work` 회귀 smoke test (workspace root at srcRoot, 2 member modules) | ✅ TestGoFiles_GoWorkspace ([G5 commit]) — outside-srcRoot members 미지원 documented |
-| G6 | A3 incremental 경로 재활성화 — **두 번 시도 모두 실 corpus에서 fail**. v3 design은 `docs/G6-INCREMENTAL-REDESIGN.md` 참조 (5 spec-level 질문 답 + 검증 gate 명시). § 8 4개 결정 resolved 2026-05-04: D1 v3 채택 / D2 풀 v3 먼저 / D3 C1 layered / D4 § 7.3 미달 시 drop. v1 (option D — pending refs only persist): 작은 fixture PASS, go-stablenet에서 changed_in dangling + 92201 calls 전부 손실. v2 (corrected: cached files도 Nodes+Pending 둘 다 reload, temporal/xlang을 always-recompute로 분리): 작은 fixture PASS, go-stablenet에서 (a) calls -576, (b) edges -347986 (52% 손실), (c) changed_in 0건 (emit 로그는 344946인데 DB는 비어있음 — 새로 emit 후 어디선가 silent delete), (d) **30분 runtime** (cold 1:15의 24×). 두 시도 모두 commit 안 됨. 결론: 현재 architecture의 incremental partial-cache 적합성이 spec-level 결함 — Pass 2 Resolve의 qIndex namespace, graph.Build dedup-by-ID, always-recompute pass의 incremental 처리, ID 안정성 보장, 이 4가지가 incremental 경로에서 미세하게 어긋남. 다음 시도 전에 spec § 4.2 Phase 2/3 재검토 + reverse-reference index (C1) 또는 function body_hash 같은 더 정교한 설계가 선행되어야. 현재는 partial-cache → cold fallback 유지 (`a684239`). | ⛔ v1+v2 모두 fail; spec-level 재설계 + design 문서 작성 후 v3 시도 |
+| G6 | A3 incremental 경로 재활성화. v1+v2 fail → v3 D4(cold fallback) → **v4 완료** (`6d01112`). Root cause H3: `NodesByFilePath` rowid 순 반환 ≠ AST 선언 순서 → `ORDER BY start_line ASC` 추가. `runIncremental` D4 dead code 활성화. C1(reverse-ref invalidation) 구현 후 real-corpus cold vs partial diff = 0 확인. | ✅ **6d01112 + 95dc3c2** — go-stablenet 214,343 nodes / 652,892 edges 완전 일치 |
 | G7 | TS/Sol parser 패키지에 committed golden test 추가 (fixture parse → 안정 marshalling → checked-in golden 비교). 미래 tree-sitter 버전 bump 시 silent miss-extraction을 CI에서 즉시 감지. | ✅ TestGolden_TypeScript / TestGolden_Solidity (G7 commit) — `-update` flag로 golden 갱신 |
 | G8 | B1 Phase 4: `accessed_under_lock` edges (Lock~Unlock 사이 변수 접근 추적). | ✅ go-stable-code 0 → 2916 edges; intra-function lexical heuristic (cross-function propagation은 D1 SSA territory) |
 | G9 | B1 Mutex detection root cause: emitMutexNode와 emitFields가 **동일 qname + 동일 startByte** 사용 → MakeID 해시 충돌 → graph.Build의 last-writer-wins로 emitFields의 Field 노드가 emitMutexNode의 Mutex 노드를 silent overwrite. mutexNodeIDs map은 (이제 의미 없는) 그 ID 보유, Lock detection은 그 ID로 edge emit. Fix: emitMutexNode qname에 `#mutex` suffix 추가하여 disambiguate. go-stable-code 측정: Mutex nodes 8 → 170 (21× 증가), Field-targeting acquires_lock 157 → 1 (99.4% 감소, 남은 1건은 함수 local 엣지 케이스). | ✅ |
@@ -143,29 +156,42 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 ## 4. 진행 순서 (Wave)
 
 ```
-Wave 1 (즉시): G1 + G2 + G3 + E6                    [housekeeping + edge desync]
-Wave 2 (1-2일): E1 + E2                             [사용자 조건 #1, #2]
-Wave 3 (3-5일): A4 + A5 + A3                        [v0.2.0 Storage + Schema + Cache]
-Wave 4 (3-5일): A1 + A2                             [smacker 제거]
-Wave 5 (1주+): B1 + E3 + E4 + E5                    [Concurrency + 6 graph 완전성]
-Wave 6 (별도): B2/B3/C1/C2/D1/D2                    [PG / SSA / pgvector]
-Wave 7 (병렬): F1 + F2 + F3                         [viewer 운영성]
+Wave 1 (즉시): G1 + G2 + G3 + E6                    ✅ 완료 [housekeeping + edge desync]
+Wave 2 (1-2일): E1 + E2                             ✅ 완료 [사용자 조건 #1, #2]
+Wave 3 (3-5일): A4 + A5 + A3                        ✅ 완료 [v0.2.0 Storage + Schema + Cache]
+Wave 4 (3-5일): A1 + A2                             ✅ 완료 [smacker 제거]
+Wave 5 (1주+): B1 + E3 + E4 + E5                    ✅ 완료 [Concurrency + 6 graph 완전성]
+Wave 6: B2 + Logging + Channel flow                 ✅ 완료 [export-postgres + 구조화 로그 + sends_to/recvs_from]
+Wave 7 (병렬): F1 + F2 + F3                         ✅ 완료 [viewer 운영성]
+Wave 8: G6 v4 + C1 + C2                             ✅ 완료 [incremental correctness + PG primary + real-corpus diff=0]
+Wave 9 (next): B3 + minor follow-ups                ← 진입 가능
 ```
 
 각 wave 종료 후 §6 검증 명령 모두 그린이어야 다음 wave 시작.
 
-### Wave간 의존성 그래프
+### Wave간 의존성 그래프 (현재 상태)
 
 ```
-A1 ──► A2 (병렬 가능)
-A1 ──► B3 (incremental parsing)
-A3 ──► C1 (Pass 2 invalidation)
-A4 ──► B2 ──► C2 ──► D2
-A5 ──► B1 ──► D1
-E1 ──► E2 (audit으로 누락 측정 후 측정 기반 수정)
-E3, E4 ──► E5 (graph 데이터 있어야 viewer filter 의미)
-F1, F2, F3 — 모두 독립
+A1 ──► A2 (병렬 가능)                               ✅
+A1 ──► B3 (incremental parsing)                    ← next
+A3 ──► C1 (Pass 2 invalidation)                    ✅
+A4 ──► B2 ──► C2 ──► D2                            ✅ (C2까지), D2 미착수
+A5 ──► B1 ──► D1                                   ✅ (B1까지), D1 미착수
+E1 ──► E2                                          ✅
+E3, E4 ──► E5                                      ✅
+F1, F2, F3                                         ✅
+G6 v4 ──► C1 ──► B3                                ✅ (B3 진입 가능)
 ```
+
+### Wave 9 진입 포인트
+
+| 작업 | 추정 | 우선순위 |
+|---|---|---|
+| **B3** Tree.Edit() incremental parsing (재파싱 비용 절감) | M | 1 |
+| E2-FU `go.work` 회귀 테스트 | S | 2 |
+| Wave1 DoD viewer dead-key 정리 (`reads/writes/…`) | S | 2 |
+| E3-FU httprouter 패턴 + Ethereum RPC client.Call | S | 3 |
+| E4-FU line-level blame | M | 3 |
 
 ---
 
@@ -237,23 +263,27 @@ cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
 
 # 1. Go side
 go vet ./...
-go test ./...
-go test -tags e2e ./...
+go test ./...         # 18 패키지 PASS
 
-# 2. Web side (viewer 변경 있을 때)
-make viewer
-
-# 3. Binary smoke
-make build
+# 2. Binary smoke
+go build -o bin/ckg ./cmd/ckg
 ./bin/ckg --help
 
-# 4. End-to-end smoke
+# 3. End-to-end smoke (synthetic)
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
-ls /tmp/ckg-synth/        # graph.db + manifest.json
+./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth   # warm (short-circuit)
+./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth # exit 0
 ./bin/ckg export-static --graph=/tmp/ckg-synth --out=/tmp/ckg-static
-ls /tmp/ckg-static/
 
-# 5. Eval (Wave 5 이후 새 graph 추출 항목 추가 시)
+# 4. Real-corpus parity (큰 변경 후 필수)
+STABLENET=/Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest
+./bin/ckg build --src=$STABLENET --out=/tmp/ckg-stable --no-cache
+sqlite3 /tmp/ckg-stable/graph.db "SELECT COUNT(*) FROM edges"  # baseline: 652892
+# 파일 1개 수정 → partial build
+./bin/ckg build --src=$STABLENET --out=/tmp/ckg-stable
+sqlite3 /tmp/ckg-stable/graph.db "SELECT COUNT(*) FROM edges"  # target: same
+
+# 5. Eval
 ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
   --graph=/tmp/ckg-synth --baselines=alpha,beta,gamma,delta --out=eval/results
 
@@ -274,11 +304,12 @@ go 1.25.5
 require (
     github.com/0xmhha/cli-wrapper v0.2.1
     github.com/anthropics/anthropic-sdk-go v1.38.0
+    github.com/jackc/pgx/v5 v5.9.2                          // B2 + C2 (PG export + PG store)
     github.com/mark3labs/mcp-go v0.49.0
     github.com/spf13/cobra v1.10.2
-    github.com/tree-sitter/go-tree-sitter v0.25.0          // A1+A2 (smacker 대체)
-    github.com/tree-sitter/tree-sitter-javascript v0.25.0  // A1+A2
-    github.com/tree-sitter/tree-sitter-typescript v0.23.2  // A1+A2
+    github.com/tree-sitter/go-tree-sitter v0.25.0           // A1+A2 (smacker 대체)
+    github.com/tree-sitter/tree-sitter-javascript v0.25.0   // A1+A2
+    github.com/tree-sitter/tree-sitter-typescript v0.23.2   // A1+A2
     golang.org/x/tools v0.44.0
     gopkg.in/yaml.v3 v3.0.1
     modernc.org/sqlite v1.49.1

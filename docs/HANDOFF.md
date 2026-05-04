@@ -6,7 +6,7 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-05-04 (refresh 6 — G6 v4 + C1 + C2) |
+| Snapshot date | 2026-05-04 (refresh 7 — G6 v4 + C1 + C2 + real-corpus parity ✅) |
 | HEAD | `95dc3c2` (`feat(buildpipe): C1 reverse-reference invalidation`) |
 | Working tree | **clean** |
 | Branch | `main` |
@@ -20,7 +20,7 @@
 | B2 | **완료** — `ckg export-postgres --dsn ... --source ...` (13317f7). jackc/pgx/v5 COPY 프로토콜, 전 필드 export, DSNHost URL+kv 양식, 테스트 4개. |
 | Logging | **완료** — `--verbose`, `--log-file <path>`, `CKG_LOG_LEVEL=debug`. JSON 파일 + text stderr 동시 출력, buildpipe 스테이지 Debug 마커 (4fc69ff). |
 | Channel flow | **완료** — `sends_to`/`recvs_from` 엣지가 Channel 노드 직접 가리킴 (make(chan T) 변수 추적). 인라인 goroutine body 별도 추적 (eb5e9bb, 8784ac9). |
-| Open critical | **없음** — real-corpus C1 검증 (go-stablenet cold vs partial edge count diff) 권장. |
+| Open critical | **없음** — go-stablenet cold vs partial edge diff = **0** ✅ (214,343 nodes / 652,892 edges 완전 일치) |
 | Working machine | `wm-it-22-00661` (`/Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph`). go-stablenet corpus 직접 사용 가능 (`/Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest`, commit `0bf2f4d1b`) |
 
 ---
@@ -220,17 +220,16 @@ F1 + F2 + F3 모두 ship됨 (1d42787, 412e622). 본 HANDOFF § 2 "serve options 
 
 `6d01112`에서 `ORDER BY start_line ASC` + `runIncremental` 활성화 완료. 상세는 § 4.1 참조.
 
-**미완료 검증**: go-stablenet real-corpus cold vs partial edge count diff. 권장 명령:
-```bash
-# cold build
-./bin/ckg build --src=$STABLENET --out=/tmp/ckg-cold --no-cache
-sqlite3 /tmp/ckg-cold/graph.db "SELECT COUNT(*) FROM edges"   # baseline
+**검증 완료 (2026-05-04)**:
 
-# 파일 1개 touch → partial build
-touch $STABLENET/some_file.go
-./bin/ckg build --src=$STABLENET --out=/tmp/ckg-cold
-sqlite3 /tmp/ckg-cold/graph.db "SELECT COUNT(*) FROM edges"   # target: same or ±5
 ```
+Cold build  : 214,343 nodes / 652,892 edges
+Partial (1 file dirty — accounts/abi/abi.go):
+              214,343 nodes / 652,892 edges
+Diff        : 0 nodes / 0 edges  ✅
+```
+
+모든 edge 타입 (changed_in 340,631 / contains 162,907 / calls 88,763 / defines 44,189 / …) 전부 cold와 동일. H3 phantom-edge +2675 재현 없음.
 
 ### 4.7 알려진 minor issues
 
@@ -388,15 +387,14 @@ git status --short
 3. 모델이 본 문서 read → 컨텍스트 회복 → 지시 받은 작업 dispatch
 4. WORK-PLAN.md G3-G9 follow-up 잔여 항목, Group B/C/D는 모두 본 문서 § 4에 우선순위와 함께 기록됨. Group F는 ✅ 완료.
 
-### 권장 다음 작업 순서 (2026-05-04 refresh 6)
+### 권장 다음 작업 순서 (2026-05-04 refresh 7)
 
 | 순위 | 작업 | 이유 |
 |---|---|---|
-| 1 | **go-stablenet real-corpus 검증** (§ 4.6) | G6 v4 + C1 unit tests 통과. real-corpus cold vs partial edge diff = 0 이 최종 parity gate. |
-| 2 | **B3** (Tree.Edit() incremental parsing) | 성능 — partial-cache 재파싱 비용 추가 절감. C1 완료로 now unblocked. |
-| 3 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 직접 처리 가능 |
-| 4 | E3/E4 follow-up minors | httprouter, RPC client.Call 변종, line-level blame |
-| 5 | D1 / D2 | XL, 별도 spec 필요 |
+| 1 | **B3** (Tree.Edit() incremental parsing) | partial-cache 재파싱 비용 추가 절감. C1 ✅으로 now unblocked. |
+| 2 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 직접 처리 가능 |
+| 3 | E3/E4 follow-up minors | httprouter, RPC client.Call 변종, line-level blame |
+| 4 | D1 / D2 | XL, 별도 spec 필요 |
 
 ---
 
