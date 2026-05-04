@@ -79,8 +79,8 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 | ID | 작업 | 의존 | 추정 |
 |---|---|---|---|
-| B1 | Item 2 Stage 1: Go AST 휴리스틱 (Goroutine/Channel/Mutex, types.Info) | A5 | L ✅ (Mutex/Channel emission, acquires_lock/releases_lock 781/834 on go-stable-code; accessed_under_lock Phase 4 deferred → B1-FOLLOWUP) |
-| B2 | Item 3 Phase 1: `ckg export-postgres --dsn ... --source ...` 명령 | A4 | M |
+| B1 | Item 2 Stage 1: Go AST 휴리스틱 (Goroutine/Channel/Mutex, types.Info) | A5 | L ✅ (Mutex/Channel emission, acquires_lock/releases_lock 781/834 on go-stable-code; accessed_under_lock Phase 4 deferred → B1-FOLLOWUP. **Channel flow 강화 2026-05-04**: sends_to/recvs_from → Channel 노드 직접 연결, goroutine body 추적, eb5e9bb+8784ac9) |
+| B2 | Item 3 Phase 1: `ckg export-postgres --dsn ... --source ...` 명령 | A4 | M ✅ (jackc/pgx/v5 COPY 프로토콜, 전 필드 export, DSNHost URL+kv 양식, 테스트 4개, 13317f7) |
 | B3 | Item 1 Phase 1c: incremental parsing 인프라 (Tree.Edit() API) | A1, A3 | M |
 
 ### Group C — v0.2.2 Incremental Pass 2 + PG primary

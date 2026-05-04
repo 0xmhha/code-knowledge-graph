@@ -6,16 +6,19 @@
 
 | Field | Value |
 |---|---|
-| Snapshot date | 2026-05-04 (refresh 4 — docs cleanup) |
-| HEAD | `f5f6c73` (`docs: remove obsolete v0 planning and superseded docs`) |
+| Snapshot date | 2026-05-04 (refresh 5 — B2 + Logging + Channel flow) |
+| HEAD | `eb5e9bb` (`feat(parse/golang): track channel data flow`) |
 | Working tree | **clean** |
 | Branch | `main` |
-| Test gate | `go vet ./...` clean, `go test ./...` 17 packages PASS, `make build` clean |
+| Test gate | `go vet ./...` clean, `go test ./...` 18 packages PASS, `make build` clean |
 | Schema version | **1.5** (pending_refs table — dead code infra preserved for v4) |
 | 사용자 4 완성도 조건 | **모두 충족** (#1-#4 ✅) |
 | Wave 7 (Group F) | **완료** — F1 + F2 + F3 ship됨 (1d42787, 412e622) |
-| G6 v3 D4 escape hatch | **EXECUTED 2026-05-04** — routing reverted to cold-fallback. Root cause confirmed: H3 (NodesByFilePath returns nodes in ID-sorted order ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges). Fix direction: sort `NodesByFilePath by start_line ASC` (future v4). 상세: `docs/G6-V3-VALIDATION-FINDINGS.md` § 0 |
-| Open critical | **없음** — G6 v3 closed (D4). 다음 우선순위: B2 (`ckg export-postgres`) |
+| G6 v3 D4 escape hatch | **EXECUTED 2026-05-04** — routing reverted to cold-fallback. Root cause confirmed: H3 (NodesByFilePath returns nodes in ID-sorted order ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges). Fix direction: sort `NodesByFilePath by start_line ASC` (v4). 상세: `docs/G6-V3-VALIDATION-FINDINGS.md` § 0 |
+| B2 | **완료** — `ckg export-postgres --dsn ... --source ...` (13317f7). jackc/pgx/v5 COPY 프로토콜, 전 필드 export, DSNHost URL+kv 양식, 테스트 4개. |
+| Logging | **완료** — `--verbose`, `--log-file <path>`, `CKG_LOG_LEVEL=debug`. JSON 파일 + text stderr 동시 출력, buildpipe 스테이지 Debug 마커 (4fc69ff). |
+| Channel flow | **완료** — `sends_to`/`recvs_from` 엣지가 Channel 노드 직접 가리킴 (make(chan T) 변수 추적). 인라인 goroutine body 별도 추적 (eb5e9bb, 8784ac9). |
+| Open critical | **없음** — G6 v4 (ORDER BY fix)이 다음 자연스러운 진입점. |
 | Working machine | `wm-it-22-00661` (`/Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph`). go-stablenet corpus 직접 사용 가능 (`/Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest`, commit `0bf2f4d1b`) |
 
 ---
@@ -50,13 +53,18 @@ make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 
 ### 단일 Go 바이너리 `ckg`
 
-5 subcommand:
+7 subcommand:
 - `build` — graph build (cold + short-circuit; partial-cache는 cold fallback)
 - `serve` — embedded Next.js viewer + REST API (127.0.0.1:8787 default)
 - `mcp` — stdio MCP server, 6 tools (find_symbol/callers/callees/get_subgraph/search_text/get_context_for_task)
 - `export-static` — chunked JSON + viewer를 정적 호스팅용으로 export
+- `export-postgres` — SQLite → PostgreSQL one-shot push (B2 — 4fc69ff~13317f7)
 - `eval` — 4 baseline (α/β/γ/δ) × YAML tasks → CSV + report.md
 - `audit` — `go/packages.Load` set vs DB set 비교 (exit 0=parity, 1=drift, 2=error)
+
+**글로벌 CLI 플래그** (persistent, 모든 subcommand 상속):
+- `--verbose` — slog.LevelDebug 활성화 (또는 `CKG_LOG_LEVEL=debug`)
+- `--log-file <path>` — JSON 구조화 로그를 파일에 추가 기록 (stderr는 text 유지)
 
 ### 파서 3종 (smacker 완전 제거 — A1+A2 atomic)
 
@@ -170,8 +178,16 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 | ID | 작업 | 의존 | 추정 |
 |---|---|---|---|
-| B2 | `ckg export-postgres --dsn ... --source ...` 명령 | A4 (✅) | M (1-2시간) |
+| B2 | `ckg export-postgres --dsn ... --source ...` 명령 | A4 (✅) | M ✅ **완료 13317f7** — pgx COPY, 전 필드, 테스트 4개. |
 | B3 | Item 1 Phase 1c — incremental parsing 인프라 (Tree.Edit() API) | A1 (✅) + A3 (✅) | M |
+
+**이번 refresh 완료:**
+
+| 작업 | 커밋 | 내용 |
+|---|---|---|
+| Logging | `4fc69ff` | `--verbose`, `--log-file`, `CKG_LOG_LEVEL=debug`. multiHandler(JSON파일+text stderr). 6 subcommand 적용. buildpipe 스테이지 Debug 마커. |
+| B2 export-postgres | `13317f7` | `ckg export-postgres`. pgxpool + COPY 프로토콜. nodes/edges/blobs 전 필드. DSNHost URL+kv 양식. 테스트 4개. |
+| Channel flow | `8784ac9`+`eb5e9bb` | `sends_to`/`recvs_from` → Channel 노드 직접 (make 변수 추적). goroutine body 별도 walk. double-emit/orphan CallSite 수정. 테스트 3개. |
 
 ### 4.3 v0.2.2 Wave (Group C)
 
@@ -191,13 +207,32 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 F1 + F2 + F3 모두 ship됨 (1d42787, 412e622). 본 HANDOFF § 2 "serve options (Wave 7)" 참조.
 
-### 4.6 알려진 minor issues
+### 4.6 G6 v4 — 검토 결과 (2026-05-04)
+
+**결론: B3/C1 없이도 correctness fix 가능. 즉시 진입 권장.**
+
+| 항목 | 내용 |
+|---|---|
+| Root cause | H3: `NodesByFilePath`가 rowid(ID) 순 반환 ≠ AST 선언 순서. 동일 simple name 복수 후보에서 qIndex winner가 cold/partial 간 달라짐. |
+| Fix | `internal/persist/sqlite.go:796` — `SELECT ... WHERE file_path = ?` 에 `ORDER BY start_line ASC` 추가. |
+| Dead code 활성화 | `internal/buildpipe/pipeline.go` — D4 comment 제거 + `runIncremental` 라우팅 복귀 (cold-fallback log 제거). |
+| B3/C1 관계 | B3/C1은 *성능* prereq (partial-cache 대상 파일 범위 축소), *정확도* prereq 아님. ORDER BY 하나로 H3 해결 가능. H4 (-5 imports) 는 known limitation으로 유지. |
+| 검증 절차 | `go-stablenet` cold vs partial edge count diff = 0 (또는 -5 허용). `sqlite3 graph.db "SELECT COUNT(*) FROM edges"` pre/post 비교. |
+| 리스크 | Low — 변경 2곳, 기존 테스트 모두 통과 예상. 실패 시 D4 재실행(routing cold-fallback 복귀)으로 즉시 롤백. |
+
+**실행 순서 (v4)**:
+1. `sqlite.go:796` — `ORDER BY start_line ASC` 추가
+2. `pipeline.go` — `runIncremental` dead code 복귀, routing switch 활성화
+3. go-stablenet cold build → partial build (1 file dirty) → edge count diff
+4. diff = 0 (또는 -5 허용) → commit. diff ≠ 0 → H4 분석 후 D4 재실행.
+
+### 4.7 알려진 minor issues
 
 - G3-1 (E3 follow-up): go-stablenet은 `julienschmidt/httprouter` 사용 → stdlib HandleFunc 패턴 detector가 적게 fire. Custom router 패턴 추가 시 listens_on 수 증가 가능.
 - G4-1 (E3 follow-up): Ethereum-style RPC `client.Call(&result, "method", ...)` 시그니처 추가 (현재 net/rpc 시그니처만 detect)
 - G6-temporal (E4 follow-up): line-level blame (G6 Phase 2 — `git blame --line-porcelain`); submodule traversal; correlated_with/observed_in/mentioned_in (D-tier)
 - B1-1 (G9 follow-up): 1건 남은 Field-targeting acquires_lock — 함수 local mutex literal (`var mu = sync.Mutex{}`) edge case
-- G6 partial-cache routing: cold fallback 유지 → "Cache: partial hit; falling back to cold rebuild for correctness" 로그 남김 (v3 구현 시 routing 복원)
+- Channel flow limitation: channel 함수 파라미터(`out chan<- T`)는 chanVarIDs에 없어 CallSite fallback. make(chan T) 변수만 Channel 노드 직접 연결.
 - E2-FU: `go.work` 회귀 테스트 — workspace 멤버가 srcRoot 외부 case 미지원 (현재 `TestGoFiles_GoWorkspace`로 documented만 됨)
 - Wave 1 DoD: `web/viewer-next/src/lib/edges.ts`의 dead key (`reads/writes/modifies/decorates/emits`) 정리 — backend emit 시작 OR client 제거 결정 미완
 
@@ -270,6 +305,7 @@ go 1.25.5
 require (
     github.com/0xmhha/cli-wrapper v0.2.1
     github.com/anthropics/anthropic-sdk-go v1.38.0
+    github.com/jackc/pgx/v5 v5.9.2                          // B2 export-postgres
     github.com/mark3labs/mcp-go v0.49.0
     github.com/spf13/cobra v1.10.2
     github.com/tree-sitter/go-tree-sitter v0.25.0           // post A1+A2
@@ -346,30 +382,39 @@ git status --short
 3. 모델이 본 문서 read → 컨텍스트 회복 → 지시 받은 작업 dispatch
 4. WORK-PLAN.md G3-G9 follow-up 잔여 항목, Group B/C/D는 모두 본 문서 § 4에 우선순위와 함께 기록됨. Group F는 ✅ 완료.
 
-### 권장 다음 작업 순서 (2026-05-04 refresh 3)
+### 권장 다음 작업 순서 (2026-05-04 refresh 5)
 
 | 순위 | 작업 | 이유 |
 |---|---|---|
-| 1 | **B2** (`ckg export-postgres --dsn ... --source ...`) | A4 (Storage interface) 위에서 자연스러움, M effort, v0.2.1 첫 단계. G6 v3 D4 완료로 즉시 진입 가능. |
-| 2 | C1 (reverse-reference index) | pending_refs 테이블(schema 1.5)이 source. B3 또는 C1 완료 후 v4 attempt 가능. |
-| 3 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 바로 처리 가능 |
-| 4 | E3/E4/G8 follow-up minors | 발견된 한계 정리 (httprouter, RPC client.Call 변종, line-level blame) |
-| 5 | G6 v4 attempt | Fix direction: `NodesByFilePath` sort by `start_line ASC`. prerequisite: B3 (tree-sitter Tree.Edit) or C1 (reverse-reference index). 상세: `docs/G6-V3-VALIDATION-FINDINGS.md` § 0 + § 4 |
+| 1 | **G6 v4** (`NodesByFilePath ORDER BY start_line ASC`) | Root cause H3 fix는 단 한 줄 SQL 변경. correctness prereq은 B3/C1이 아님 — 성능 prereq만. ORDER BY 후 `runIncremental` 라우팅 복귀 + real-corpus 검증. 상세: 이 문서 § 4.6 G6 v4 검토. |
+| 2 | C1 (reverse-reference index) | partial-cache *성능*을 위한 prereq. G6 v4 정확도 확인 후 진입. |
+| 3 | C2 (direct PG build) | B2 ✅ 위에서 자연스럽게 진행 가능. |
+| 4 | E2-FU + Wave1 DoD (viewer dead-key 정리) | 작은 정리 — main session에서 직접 처리 가능 |
+| 5 | E3/E4 follow-up minors | httprouter, RPC client.Call 변종, line-level blame |
 | 6 | D1 / D2 | XL, 별도 spec 필요 |
 
 ---
 
 ## 9. Commit 요약 (시간 역순)
 
-### 본 refresh (2026-05-04, D4 escape hatch EXECUTED + root cause confirmed)
+### 이번 refresh (2026-05-04, B2 + Logging + Channel flow)
+
+| Commit | 분류 | 내용 |
+|---|---|---|
+| `eb5e9bb` | feat | Channel flow: chanVarIDs, AssignStmt→Channel 매핑, goroutine body 추적 (TestChannelFlow 3개) |
+| `8784ac9` | fix | channel double-emit + orphaned CallSite 제거. GoStmt return false, SendStmt break-or-fallback |
+| `13317f7` | fix | export-postgres 7개 critical bug 수정 (node load, edge PK, DDL trx, DSNHost, 전 필드) |
+| `4fc69ff` | feat | Logging: --verbose/--log-file/CKG_LOG_LEVEL=debug. multiHandler(JSON+text). 6 subcommand 적용 |
+| `966d3c6` | docs | STATUS-REPORT channel async data flow gap 추가 (4d) |
+
+### 이전 refresh (2026-05-04, D4 escape hatch EXECUTED + root cause confirmed)
 
 | Commit | 분류 | 내용 |
 |---|---|---|
 | `c15cdcb` | fix | D4 escape hatch — routing cold-fallback 복귀, schema 1.5 dead code 보존, G6-INCREMENTAL-REDESIGN.md § 8 stamp, INCREMENTAL.md + FINDINGS.md § 0 추가 |
 | `3a6d9f6` | refactor | runCold 미사용 파라미터(goCount/tsCount/solCount) 제거 |
-| (this file) | docs | HANDOFF refresh 3 — D4 closed, 다음 우선순위 B2로 갱신 |
 
-**Root cause confirmed (H3)**: NodesByFilePath rowid-sorted ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges. Fix: `NodesByFilePath sort by start_line ASC` (v4).
+**Root cause confirmed (H3)**: NodesByFilePath rowid-sorted ≠ AST declaration order → ambiguous qname winner differs → +2675 phantom edges. Fix: `NodesByFilePath ORDER BY start_line ASC` (v4).
 
 ### 이전 세션 (2026-05-03 ~ 2026-05-04, Wave 7 + G6 design)
 

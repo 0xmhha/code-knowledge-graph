@@ -22,13 +22,13 @@
 |---|---|---|---|---|
 | 1 | Code path → knowledge graph | ✅ IMPLEMENTED | — | — |
 | 2 | 6 graph structures (G1~G6) | ✅ IMPLEMENTED | — | — |
-| 3 | tree-sitter보다 향상된 이해도 + 속도 | 🟡 PARTIAL | **(1)** call flow: direct만 지원, interface dispatch / IPA 미지원. **(2)** data flow: field-level, whole-program 미지원. **(3)** channel async data flow: `sends_to`/`recvs_from` edge는 있으나 channel을 통한 메시지·데이터 타입 연결 (producer goroutine → channel → consumer goroutine) 미추적. | P1 |
+| 3 | tree-sitter보다 향상된 이해도 + 속도 | 🟡 PARTIAL | **(1)** call flow: direct만 지원, interface dispatch / IPA 미지원. **(2)** data flow: field-level, whole-program 미지원. **(3)** channel async data flow: `sends_to`/`recvs_from`이 Channel 노드 직접 가리킴 (make(chan T) 변수 추적, 2026-05-04 ✅). channel 파라미터는 CallSite fallback (known limitation). | P1 |
 | 4a | **Call flow query** (find_callers/callees/get_subgraph) | 🟡 PARTIAL | Direct calls only (calls/invokes edges). Indirect (interface dispatch/callback/reflection) 미지원. | P1 |
 | 4b | **Data flow query** (reads_field/writes_field, reads_mapping/writes_mapping) | 🟡 PARTIAL | Per-function scope (cross-file, across module 경계 미지원). **Channel 경유 데이터 흐름 별도 gap** (4d 참조). | P2 |
 | 4c | **History query** (changed_in/blame edges) | 🟡 PARTIAL | File-level 구현 (line-level, submodule 미지원). 344946 edges 검증 ✅. | P3 |
-| 4d | **Concurrency flow query** (acquires_lock/releases_lock/accessed_under_lock + channel) | 🟡 PARTIAL | **(a)** Lock: intra-function heuristic only (cross-fn SSA/D1 deferred). go-stablenet: 781 acquires_lock, 834 releases_lock, 2916 accessed_under_lock. **(b)** Channel flow: `sends_to`/`recvs_from` edge 있으나 **channel 경유 메시지 타입 + producer→consumer 연결** 미추적 → goroutine 간 async data flow 불투명. | P1 |
+| 4d | **Concurrency flow query** (acquires_lock/releases_lock/accessed_under_lock + channel) | 🟡 PARTIAL | **(a)** Lock: intra-function heuristic only (cross-fn SSA/D1 deferred). go-stablenet: 781 acquires_lock, 834 releases_lock, 2916 accessed_under_lock. **(b)** Channel flow: `sends_to`/`recvs_from`가 Channel 노드 직접 가리킴 (2026-05-04 ✅). 채널 파라미터 변수는 CallSite fallback. producer→consumer 연결은 Channel 노드 경유로 그래프 traversal 가능. | P1 |
 | 4e | **Version gap detection** (ckg audit) | 🟡 PARTIAL | File-level parity (semantic drift 미지원). go-stablenet 1259/1259 PARITY ✅. | P2 |
-| 5 | **Logging + debug mode** | 🔴 MISSING | slog 기본 지원하나 debug/prod level 분기 없음. —verbose 같은 CLI flag 미구현. | P2 |
+| 5 | **Logging + debug mode** | ✅ IMPLEMENTED | `--verbose` (slog.LevelDebug), `--log-file <path>` (JSON 파일 + text stderr tee), `CKG_LOG_LEVEL=debug` env. 6 subcommand 적용. buildpipe 스테이지 Debug 마커 추가. (2026-05-04, 4fc69ff) | — |
 
 ---
 
@@ -71,55 +71,45 @@
 
 | Group | ID | 작업 | 추정 | 의존 | 상태 | 다음 액션 |
 |---|---|---|---|---|---|---|
-| B | B2 | `ckg export-postgres --dsn ... --source ...` | M (1-2h) | A4 ✅ | READY | **우선순위 #1** |
-| B | B3 | Tree.Edit() incremental parsing 인프라 | M | A1✅+A3✅ | READY | B2 후 또는 병렬 |
-| C | C1 | reverse-reference invalidation | L | A3✅ | READY | B3 or 병렬, G6 v4 prereq |
-| C | C2 | direct PG build (ckg build --db postgres://) | L | B2 | BLOCKED on B2 | B2 완료 후 진입 |
+| B | B2 | `ckg export-postgres --dsn ... --source ...` | M | A4 ✅ | ✅ **완료 13317f7** | — |
+| B | Logging | `--verbose` / `--log-file` / `CKG_LOG_LEVEL` | S | — | ✅ **완료 4fc69ff** | — |
+| B | Channel | `sends_to`/`recvs_from` → Channel 노드 직접 연결 | M | B1✅ | ✅ **완료 eb5e9bb** | — |
+| B | B3 | Tree.Edit() incremental parsing 인프라 | M | A1✅+A3✅ | READY | G6 v4 후 또는 병렬 |
+| G6 v4 | — | `NodesByFilePath ORDER BY start_line ASC` + routing 복귀 | S | — | **READY** | **우선순위 #1** — ORDER BY 한 줄, real-corpus 검증 |
+| C | C1 | reverse-reference invalidation | L | A3✅ | READY | G6 v4 후, partial-cache 성능 prereq |
+| C | C2 | direct PG build (ckg build --db postgres://) | L | B2✅ | READY | B2 ✅ 완료로 진입 가능 |
 | D | D1 | SSA concurrency (--deep opt-in) | XL | B1✅ | SPEC NEEDED | D1 spec 작성 필요 |
 | D | D2 | pgvector + Apache AGE | XL | C2 | SPEC NEEDED | D1 후 |
 | minor | E2-FU | go.work workspace outside srcRoot | S | — | DOCUMENTED | 선택적 follow-up |
 | minor | E3 follow-ups | httprouter + Ethereum RPC patterns | S+M | E3✅ | READY | Minor dispatch |
-| minor | G3-1, G4-1 | E3 pattern extension | M | E3✅ | READY | Minor dispatch 또는 user-driven |
 | minor | Wave1-DoD | viewer dead-key clarification | S | E5✅ | READY | 설계 결정 후 1줄 fix 또는 제거 |
 
 ---
 
 ## 5. 권장 다음 작업 순서 (의존도 + 우선순위 기반)
 
-### Tier 1: 즉시 진입 가능 (GROUP B — v0.2.1)
+### Tier 1: 즉시 진입 가능
 
-**B2: `ckg export-postgres --dsn ... --source ...`** (M effort, 1-2h)
-- **이유**: A4 Storage interface 위에서 자연스러움. v0.2.1 첫 단계. PostgreSQL 기반 평가/운영 준비.
-- **의존**: A4 ✅ (StoreWriter interface 완성)
-- **확장성**: B2 → C2 (PG 직접 build) → D2 (pgvector) 로드맵의 첫 발판
-- **액션**: B2 spec detail + test 플랜 정리 후 subagent dispatch
+**G6 v4: `NodesByFilePath ORDER BY start_line ASC`** (S effort, ~30분)
+- **이유**: Root cause H3 fix는 단 한 줄 SQL. B3/C1은 성능 prereq이지 정확도 prereq 아님.
+- **실행**: `sqlite.go:796` ORDER BY 추가 → `runIncremental` 라우팅 복귀 → real-corpus diff 검증.
+- **성공 기준**: cold vs partial edge count diff = 0 (또는 H4의 -5 허용)
+- **실패 시**: D4 재실행 (routing cold-fallback 복귀) — 이미 검증된 롤백 경로
 
-**병렬 가능: E2-FU + Wave1-DoD** (총 S+S, ~30분)
-- `go.work` workspace 복합 case 한 가지 더 add (현재 TestGoFiles_GoWorkspace documented)
-- viewer dead-key (reads/writes/modifies/decorates/emits) 정책 결정 + 1줄 implement or delete
-- **액션**: main session에서 직접 처리
-
-### Tier 2: B2 완료 후 (GROUP C — v0.2.2)
+### Tier 2: G6 v4 이후 (GROUP C — v0.2.2)
 
 **C1: reverse-reference invalidation** (L effort, 반나절+)
-- **이유**: pending_refs 테이블(schema 1.5) source 확보. B3 또는 C1 중 하나 완료 후 G6 v4 가능.
-- **선택**: B3 (parsing) vs C1 (resolving) 중 어느 경로로 partial-cache 복귀 할지 spec 재설계 필요.
-- **액션**: G6-V3-VALIDATION-FINDINGS.md § 4 + INCREMENTAL-REDESIGN.md § 8 읽고 v4 접근법 결정
+- **이유**: G6 v4 정확도 확인 후 partial-cache 성능 개선. pending_refs(schema 1.5) source 활용.
+- **의존**: G6 v4 ✅ 먼저
 
-**C2: direct PG build** (L, B2 완료 후)
-- **이유**: PostgreSQL 네이티브 그래프 빌드. B2 export-postgres 경험 후 자연스럽게.
-- **의존**: B2 ✅
+**C2: direct PG build** (L, B2✅ 완료로 즉시 진입 가능)
+- **이유**: PostgreSQL 네이티브 그래프 빌드. B2 경험 위에서.
 
 ### Tier 3: 선택적 Minor cleanups (병렬 가능)
 
 **E3/E4 follow-ups** (S+M, router patterns + RPC variants)
-- **이유**: go-stablenet corpus 측정 데이터 (listens_on 부족, rpc_calls variant 미지원) 기반 점진적 개선
-- **액션**: 필요시 user-driven dispatch 또는 batch minor task
 
-**G6 v4 attempt** (XL, B3 or C1 prereq)
-- **이유**: Root cause confirmed (H3: NodesByFilePath sort by start_line ASC). dead code (pending_refs) 활용 가능.
-- **선행 조건**: B3 (tree-sitter Tree.Edit) or C1 (reverse-ref index) 중 하나 완료 + G6-V3-VALIDATION-FINDINGS.md § 4 가설 검증
-- **액션**: Tier 2 완료 후 v4 spec 정리 + dispatch
+**Wave1-DoD + E2-FU** (S+S, viewer dead-key + go.work edge case)
 
 ---
 
@@ -207,5 +197,5 @@
 
 **작성**: Claude Code (status agent)  
 **검토 대상**: 사용자 (다음 작업 방향 결정)  
-**Refresh date**: 2026-05-04  
-**상태**: G6 v3 D4 closed, 다음 우선순위 B2로 진입 준비 완료
+**Refresh date**: 2026-05-04 (refresh 2 — B2/Logging/Channel flow 완료)  
+**상태**: B2 ✅ Logging ✅ Channel flow ✅. 다음 우선순위: G6 v4 (ORDER BY start_line ASC — S effort, 즉시 진입 가능)
