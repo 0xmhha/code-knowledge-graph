@@ -28,6 +28,6 @@ func newRootCmd() *cobra.Command {
 		"write structured JSON log to <path> in addition to stderr text")
 
 	root.AddCommand(newBuildCmd(), newServeCmd(), newMCPCmd(),
-		newExportStaticCmd(), newEvalCmd(), newAuditCmd())
+		newExportStaticCmd(), newExportPostgresCmd(), newEvalCmd(), newAuditCmd())
 	return root
 }
