@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -18,7 +17,12 @@ func newBuildCmd() *cobra.Command {
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			log, cleanup, err := newLogger(rootVerbose, rootLogFile)
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer cleanup()
+
 			m, err := buildpipe.Run(buildpipe.Options{
 				SrcRoot:        src,
 				OutDir:         out,

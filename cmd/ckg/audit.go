@@ -29,6 +29,13 @@ func newAuditCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			_, cleanup, err := newLogger(rootVerbose, rootLogFile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "ckg: audit: init logger: %v\n", err)
+				return auditExitCode(2)
+			}
+			defer cleanup()
+
 			if language != "go" {
 				fmt.Fprintf(os.Stderr, "ckg: audit: only --language=go is supported in V0\n")
 				return auditExitCode(2)

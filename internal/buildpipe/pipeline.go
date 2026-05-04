@@ -98,11 +98,13 @@ func Run(opt Options) (persist.Manifest, error) {
 	// TS/Sol use extension-based discovery (detect.Walk); Go uses
 	// go/packages.Load (detect.GoFiles) to honor build constraints. See
 	// pipeline_test.go for the 41-file drift this eliminates.
+	log.Debug("discovery.start", "src", opt.SrcRoot)
 	discovery, _, goCount, tsCount, solCount, err := discoveryAll(opt.SrcRoot, opt.Languages)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
 	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
+	log.Debug("discovery.end", "total", goCount+tsCount+solCount)
 
 	// (2) cache routing — three paths (G6 v3, schema 1.5):
 	//
@@ -158,6 +160,7 @@ func runCold(opt Options, log *slog.Logger,
 	allPending := []persist.PendingRefRow{}
 	parseErrs := 0
 	if shouldRun("go", opt.Languages) && len(goFiles) > 0 {
+		log.Debug("pass1.start", "language", "go", "files", len(goFiles))
 		rg, pending, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("go pipeline: %w", err)
@@ -165,12 +168,14 @@ func runCold(opt Options, log *slog.Logger,
 		parseErrs += n
 		resolved = append(resolved, rg)
 		allPending = append(allPending, pending...)
+		log.Debug("pass1.end", "language", "go", "nodes", len(rg.Nodes), "errs", n)
 	}
 	// solParser is retained across the language passes so that the
 	// cross-language linker (T20) can read Solidity ABI sigs after graph.Build.
 	// nil signals "no Sol pipeline ran" — xlang stage is skipped in that case.
 	var solParser *solp.Parser
 	if shouldRun("ts", opt.Languages) && len(files.TS) > 0 {
+		log.Debug("pass1.start", "language", "ts", "files", len(files.TS))
 		rg, pending, n, err := runTSPipeline(opt.SrcRoot, files.TS, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("ts pipeline: %w", err)
@@ -178,8 +183,10 @@ func runCold(opt Options, log *slog.Logger,
 		parseErrs += n
 		resolved = append(resolved, rg)
 		allPending = append(allPending, pending...)
+		log.Debug("pass1.end", "language", "ts", "nodes", len(rg.Nodes), "errs", n)
 	}
 	if shouldRun("sol", opt.Languages) && len(files.Sol) > 0 {
+		log.Debug("pass1.start", "language", "sol", "files", len(files.Sol))
 		rg, pending, n, p, err := runSolPipeline(opt.SrcRoot, files.Sol, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("sol pipeline: %w", err)
@@ -188,9 +195,11 @@ func runCold(opt Options, log *slog.Logger,
 		solParser = p
 		resolved = append(resolved, rg)
 		allPending = append(allPending, pending...)
+		log.Debug("pass1.end", "language", "sol", "nodes", len(rg.Nodes), "errs", n)
 	}
 
 	// (4) graph build + validate
+	log.Debug("pass2.resolve.start", "pending_refs", len(allPending))
 	g, err := graph.Build(resolved)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Build: %w", err)
@@ -198,19 +207,23 @@ func runCold(opt Options, log *slog.Logger,
 	if err := graph.Validate(g); err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
 	}
+	log.Debug("pass2.resolve.end", "nodes", len(g.Nodes), "edges", len(g.Edges))
 
 	// (4b/4c/5/6) derived passes — xlang, temporal, cluster, score. Shared
 	// helper so the partial-cache rebuild path runs identical in-memory
 	// transformations (G6 v3 § 4.4). v2's "emitted-vs-DB 0" bug was caused
 	// by temporal living only in cold; the helper makes that recurrence
 	// structurally impossible.
+	log.Debug("metrics.start")
 	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
+	log.Debug("metrics.end")
 
 	// (7) persist — cold rebuild wipes graph.db so we don't accumulate stale
 	// rows. Incremental path lives in incremental.go and reuses prior rows.
+	log.Debug("persist.start", "nodes", len(g.Nodes), "edges", len(g.Edges))
 	store, err := openColdStore(opt.OutDir)
 	if err != nil {
 		return persist.Manifest{}, err
@@ -228,6 +241,7 @@ func runCold(opt Options, log *slog.Logger,
 	if err := store.InsertPendingRefs(allPending); err != nil {
 		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
+	log.Debug("persist.end")
 
 	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol),
 		g, pkgTree, parseErrs)

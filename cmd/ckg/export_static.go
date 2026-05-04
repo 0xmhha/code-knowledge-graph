@@ -17,6 +17,12 @@ func newExportStaticCmd() *cobra.Command {
 		Use:   "export-static",
 		Short: "Export graph as chunked JSON for static hosting",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			_, cleanup, err := newLogger(rootVerbose, rootLogFile)
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer cleanup()
+
 			db := filepath.Join(graph, "graph.db")
 			store, err := persist.OpenReadOnly(db)
 			if err != nil {

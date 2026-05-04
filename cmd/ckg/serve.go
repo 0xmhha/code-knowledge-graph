@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -26,6 +25,12 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Serve the embedded 3D viewer over HTTP",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			log, cleanup, err := newLogger(rootVerbose, rootLogFile)
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer cleanup()
+
 			db := filepath.Join(graph, "graph.db")
 			store, err := persist.OpenReadOnly(db)
 			if err != nil {
@@ -33,7 +38,6 @@ func newServeCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 			// CKG_DEV_VIEWER_DIR points to a `make viewer` output dir
 			// (typically `internal/server/web_assets/`) so viewer changes are
 			// picked up by browser reload without rebuilding ckg. Useful when

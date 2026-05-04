@@ -18,6 +18,12 @@ func newEvalCmd() *cobra.Command {
 		Use:   "eval",
 		Short: "Run four-baseline evaluation against a graph",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			_, cleanup, err := newLogger(rootVerbose, rootLogFile)
+			if err != nil {
+				return fmt.Errorf("init logger: %w", err)
+			}
+			defer cleanup()
+
 			tasks, err := eval.LoadTasks(tasksGlob)
 			if err != nil {
 				return err
