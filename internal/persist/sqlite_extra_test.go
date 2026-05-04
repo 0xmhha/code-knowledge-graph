@@ -136,6 +136,92 @@ func containsID(ids []string, id string) bool {
 }
 
 // ---------------------------------------------------------------------------
+// TestPendingRefs (G6 v3, schema 1.5)
+// ---------------------------------------------------------------------------
+
+// TestPendingRefs_InsertAndReload covers the cold→partial round-trip: insert
+// per-file unresolved refs from cold path's Pass 2 stage, reload them by
+// file_path on the next partial-cache rebuild.
+func TestPendingRefs_InsertAndReload(t *testing.T) {
+	s := newFixtureStore(t)
+	rows := []persist.PendingRefRow{
+		{FilePath: "mypkg/a.go", SrcID: "funcA00000000000",
+			TargetQName: "pkg2.FuncC", EdgeType: "calls", Line: 12, HintFile: "pkg2/c.go"},
+		{FilePath: "mypkg/a.go", SrcID: "funcA00000000000",
+			TargetQName: "pkg2.OtherFn", EdgeType: "calls", Line: 18},
+		{FilePath: "mypkg/b.go", SrcID: "funcB00000000000",
+			TargetQName: "pkg2.FuncC", EdgeType: "calls", Line: 35},
+	}
+	if err := s.InsertPendingRefs(rows); err != nil {
+		t.Fatalf("InsertPendingRefs: %v", err)
+	}
+	got, err := s.PendingRefsByFilePath("mypkg/a.go")
+	if err != nil {
+		t.Fatalf("PendingRefsByFilePath: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d refs for a.go, want 2 (have %v)", len(got), got)
+	}
+	for _, r := range got {
+		if r.SrcID != "funcA00000000000" {
+			t.Errorf("unexpected SrcID %q", r.SrcID)
+		}
+	}
+	// b.go should yield exactly one
+	gotB, err := s.PendingRefsByFilePath("mypkg/b.go")
+	if err != nil || len(gotB) != 1 {
+		t.Errorf("b.go: got %v, want 1 ref (err=%v)", gotB, err)
+	}
+}
+
+// TestPendingRefs_CascadeOnNodeDelete verifies that DeleteNodesByFilePath
+// removes pending_refs whose src_id is in the deleted file's nodes, via
+// FK ON DELETE CASCADE. Critical for partial-cache: when a dirty file is
+// re-parsed, its old pending refs must vanish before fresh ones are inserted.
+func TestPendingRefs_CascadeOnNodeDelete(t *testing.T) {
+	s := newFixtureStore(t)
+	rows := []persist.PendingRefRow{
+		{FilePath: "mypkg/a.go", SrcID: "funcA00000000000",
+			TargetQName: "pkg2.X", EdgeType: "calls", Line: 5},
+		{FilePath: "mypkg/b.go", SrcID: "funcB00000000000",
+			TargetQName: "pkg2.Y", EdgeType: "calls", Line: 9},
+	}
+	if err := s.InsertPendingRefs(rows); err != nil {
+		t.Fatalf("InsertPendingRefs: %v", err)
+	}
+	// Drop the a.go file's nodes — funcA's pending refs must cascade out.
+	if err := s.DeleteNodesByFilePath("mypkg/a.go"); err != nil {
+		t.Fatalf("DeleteNodesByFilePath: %v", err)
+	}
+	gotA, _ := s.PendingRefsByFilePath("mypkg/a.go")
+	if len(gotA) != 0 {
+		t.Errorf("CASCADE failed: a.go still has %d pending refs", len(gotA))
+	}
+	gotB, _ := s.PendingRefsByFilePath("mypkg/b.go")
+	if len(gotB) != 1 {
+		t.Errorf("collateral damage: b.go pending refs = %d, want 1", len(gotB))
+	}
+}
+
+// TestPendingRefs_PrimaryKeyDeduplicates — INSERT OR IGNORE drops duplicate
+// (file_path, src_id, target_qname, edge_type, line) rows so the cold path's
+// natural insertion of the same logical ref twice doesn't error out.
+func TestPendingRefs_PrimaryKeyDeduplicates(t *testing.T) {
+	s := newFixtureStore(t)
+	row := persist.PendingRefRow{
+		FilePath: "mypkg/a.go", SrcID: "funcA00000000000",
+		TargetQName: "pkg2.X", EdgeType: "calls", Line: 7,
+	}
+	if err := s.InsertPendingRefs([]persist.PendingRefRow{row, row}); err != nil {
+		t.Fatalf("InsertPendingRefs (dup): %v", err)
+	}
+	got, _ := s.PendingRefsByFilePath("mypkg/a.go")
+	if len(got) != 1 {
+		t.Errorf("PK dedup failed: got %d, want 1", len(got))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestDistinctFilePaths
 // ---------------------------------------------------------------------------
 

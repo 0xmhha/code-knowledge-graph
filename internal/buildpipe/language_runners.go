@@ -16,7 +16,33 @@ import (
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
+	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
+
+// collectPendingRefs flattens per-file ParseResults into PendingRefRow records
+// (G6 v3, schema 1.5) with file_path stamped from each ParseResult.Path.
+// Called by every language pipeline AFTER stampFilePath but BEFORE Resolve so
+// the row data carries the rel-path Resolve will consume into edges.
+func collectPendingRefs(results []*parse.ParseResult) []persist.PendingRefRow {
+	var out []persist.PendingRefRow
+	for _, r := range results {
+		rel := filepath.ToSlash(r.Path)
+		if rel == "" {
+			continue
+		}
+		for _, pr := range r.Pending {
+			out = append(out, persist.PendingRefRow{
+				FilePath:    rel,
+				SrcID:       pr.SrcID,
+				TargetQName: pr.TargetQName,
+				EdgeType:    string(pr.EdgeType),
+				Line:        pr.Line,
+				HintFile:    pr.HintFile,
+			})
+		}
+	}
+	return out
+}
 
 // runGoPipeline drives Pass 1 (per-file ParseFile) + Pass 2 (Resolve) for Go.
 // Returns the resolved graph, count of files that failed to read or parse,
@@ -32,7 +58,7 @@ import (
 // Failure of the typed load is a soft fallback — the parser will still work
 // in AST-only mode (concurrency edges become INFERRED). Logs the warning so
 // operators can investigate without breaking the build.
-func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
+func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := gop.New(srcRoot)
 	if pkgs, err := detect.GoPackages(srcRoot); err != nil {
 		log.Warn("Go packages typed-load failed; concurrency pass falls back to AST-only", "err", err)
@@ -58,8 +84,9 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
-	return rg, errs, err
+	return rg, pending, errs, err
 }
 
 // stampFilePath populates Edge.FilePath for every per-file edge that lacks
@@ -87,7 +114,7 @@ func stampFilePath(r *parse.ParseResult) {
 // runTSPipeline drives Pass 1 + Pass 2 for TypeScript / JavaScript.
 // Returns the resolved graph, count of files that failed to read or parse,
 // and any fatal Resolve error. Mirrors runGoPipeline.
-func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
+func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := tsp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -108,13 +135,14 @@ func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
-	return rg, errs, err
+	return rg, pending, errs, err
 }
 
 // runSolPipeline drives Pass 1 + Pass 2 for Solidity. Returns the parser
 // instance so callers can read the accumulated ABI for cross-language linking.
-func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, int, *solp.Parser, error) {
+func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, *solp.Parser, error) {
 	p := solp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -135,8 +163,9 @@ func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Re
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
-	return rg, errs, p, err
+	return rg, pending, errs, p, err
 }
 
 // convertABI bridges solidity.ABISig (parser output) and link.ABISig (linker

@@ -22,13 +22,11 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
-	"github.com/0xmhha/code-knowledge-graph/internal/link"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
-	"github.com/0xmhha/code-knowledge-graph/internal/score"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -83,22 +81,30 @@ func readOldManifestFromDB(dbPath string) *persist.Manifest {
 	return &m
 }
 
-// runIncremental implements the incremental build path. Caller must have
-// already determined the cache base is usable (ManifestUsable) and that at
-// least one file is cached (so we have something to reuse).
+// runIncremental implements the partial-cache build path (G6 v3). Caller
+// must have already determined the cache base is usable (ManifestUsable) and
+// at least one file is cached (so we have something to reuse).
 //
-// CURRENTLY UNROUTED — the routing in pipeline.go Run() falls back to
-// runCold on any non-full-hit case until the cross-file edge handling is
-// fixed (cached_src→dirty_dst edges are silently dropped because cached
-// files' pending refs are not re-emitted; see the Run() doc-comment).
-// This function and its helpers (partitionByLang, runLanguagePipelines,
-// reloadCachedEdges, relinkXLang, persistIncrementalArtifacts) are kept
-// as dead code for the eventual re-enable path (WORK-PLAN.md C1 / Phase
-// 2 reverse-reference index OR a "persisted pending refs" approach).
-// The compile-time reference at the bottom of the file keeps gopls's
-// unusedfunc analyzer quiet without lying about callers.
+// Flow (post-v3):
+//  1. DROP temporal + xlang edges from DB — they are always rebuilt and
+//     would otherwise duplicate or stale.
+//  2. DELETE dirty + removed files' nodes — FK CASCADE wipes their edges,
+//     blobs, AND pending_refs in the same statement.
+//  3. Per-language Pass 1 (dirty only) + reload cached nodes + cached
+//     pending_refs from DB → synthesise ParseResults so Pass 2 sees the
+//     cold-equivalent input set.
+//  4. graph.Build merges + dedups by (Type, Src, Dst, Line) keep-first.
+//     Reloaded edges come FIRST in parts ordering so dedup picks the row
+//     that already exists in DB (ID != 0) — fresh duplicates (ID == 0)
+//     would otherwise be re-INSERTed and double the row count.
+//  5. emitDerivedPasses runs the same xlang/temporal/cluster/score pipeline
+//     cold uses — v2's "emitted-vs-DB 0" bug for changed_in is structurally
+//     impossible because both paths share this helper now.
+//  6. persistIncrementalArtifacts inserts new nodes + new edges (ID==0
+//     filter) + cluster + topic + per-dirty-file blobs. Dirty pending refs
+//     are inserted last (cached refs survived FK CASCADE — no re-insert).
 func runIncremental(opt Options, log *slog.Logger,
-	discovery []DiscoveredFile, decisions CacheDecisions,
+	decisions CacheDecisions,
 	goCount, tsCount, solCount int) (persist.Manifest, error) {
 	log.Info(decisions.FormatLogLine())
 	dbPath := filepath.Join(opt.OutDir, "graph.db")
@@ -112,14 +118,26 @@ func runIncremental(opt Options, log *slog.Logger,
 	}
 	dirtyByLang, cachedByLang := partitionByLang(decisions)
 
-	// Drop nodes/edges/blobs for dirty + removed files. CASCADE handles edges/blobs.
+	// (1) Drop always-rebuilt edges from DB so the in-memory re-emit + ID==0
+	// filter at persist time produces exactly one DB row per logical edge.
+	// changed_in/blame come from the temporal pass; binds_to from xlang.
+	for _, t := range []string{"changed_in", "blame", "binds_to"} {
+		if err := store.DeleteEdgesByType(t); err != nil {
+			return persist.Manifest{}, fmt.Errorf("clear %s: %w", t, err)
+		}
+	}
+
+	// (2) Drop nodes/edges/blobs/pending_refs for dirty + removed files via
+	// CASCADE. Pending refs are removed because their src_id FK references
+	// a dropped node.
 	for _, p := range append(decisions.DirtyPaths(), decisions.RemovedPaths()...) {
 		if err := store.DeleteNodesByFilePath(p); err != nil {
 			return persist.Manifest{}, fmt.Errorf("delete %s: %w", p, err)
 		}
 	}
 
-	resolved, parseErrs, tsOrSolDirty, solParser, err := runLanguagePipelines(
+	// (3) Per-language Pass 1 + reload cached nodes & pending_refs.
+	resolved, dirtyPending, parseErrs, _, solParser, err := runLanguagePipelines(
 		opt.SrcRoot, dirtyByLang, cachedByLang, store, log)
 	if err != nil {
 		return persist.Manifest{}, err
@@ -129,9 +147,16 @@ func runIncremental(opt Options, log *slog.Logger,
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	resolved = append(resolved, &parse.ResolvedGraph{Edges: reloadedFromDB})
 
-	g, err := graph.Build(resolved)
+	// (4) graph.Build: prepend the reloaded-edges ResolvedGraph so dedup
+	// keep-first prefers DB-resident edges (ID != 0) over freshly emitted
+	// duplicates (ID == 0). Without this ordering, fresh dups slip past the
+	// ID==0 filter at persist time and get re-INSERTed, doubling rows.
+	parts := make([]*parse.ResolvedGraph, 0, len(resolved)+1)
+	parts = append(parts, &parse.ResolvedGraph{Edges: reloadedFromDB})
+	parts = append(parts, resolved...)
+
+	g, err := graph.Build(parts)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Build: %w", err)
 	}
@@ -139,19 +164,21 @@ func runIncremental(opt Options, log *slog.Logger,
 		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
 	}
 
-	if err := relinkXLang(g, store, solParser, tsOrSolDirty || decisions.Removed > 0, log); err != nil {
+	// (5) Derived passes — xlang, temporal, cluster, score. Same helper as
+	// cold path; DB drops in step (1) ensure the in-memory re-emission
+	// translates cleanly to the persist step.
+	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log)
+	if err != nil {
 		return persist.Manifest{}, err
 	}
 
-	// Cluster + score: full recompute (Phase 1 simplification — spec § 4
-	// "<1% change ratio reuse" deferred to C1).
-	pkgTree := cluster.BuildPkgTree(g)
-	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
-	score.Compute(g)
-
+	// (6) Persist + new pending_refs for dirty files only.
 	if err := persistIncrementalArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree,
 		decisions.DirtyPaths(), cachedNodeIDs); err != nil {
 		return persist.Manifest{}, err
+	}
+	if err := store.InsertPendingRefs(dirtyPending); err != nil {
+		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
 
 	m := buildManifestSkeleton(opt, goCount, tsCount, solCount, g, pkgTree, parseErrs)
@@ -188,48 +215,53 @@ func partitionByLang(decisions CacheDecisions) (dirty, cached map[string][]strin
 }
 
 // runLanguagePipelines fans out the per-language Pass 1 + Pass 2 work,
-// returning the merged resolved-graph slice + accumulated parse error count
-// + a flag for whether any TS/Sol file changed (drives xlang rebuild
-// decision) + the Sol parser instance for ABI extraction.
+// returning the merged resolved-graph slice + dirty pending refs (caller
+// persists them after node insert) + accumulated parse error count + a flag
+// for whether any TS/Sol file changed (drives xlang rebuild decision) + the
+// Sol parser instance for ABI extraction.
 func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
-	store persist.Store, log *slog.Logger) ([]*parse.ResolvedGraph, int, bool, *solp.Parser, error) {
+	store persist.Store, log *slog.Logger) ([]*parse.ResolvedGraph, []persist.PendingRefRow, int, bool, *solp.Parser, error) {
 	resolved := []*parse.ResolvedGraph{}
+	dirtyPending := []persist.PendingRefRow{}
 	parseErrs := 0
 	tsOrSolDirty := false
 	var solParser *solp.Parser
 
 	if files := dirty["go"]; len(files) > 0 || hasCached(cached, "go") {
-		rg, n, err := runGoPipelineIncremental(srcRoot, files, cached["go"], store, log)
+		rg, pending, n, err := runGoPipelineIncremental(srcRoot, files, cached["go"], store, log)
 		if err != nil {
-			return nil, 0, false, nil, fmt.Errorf("go incremental: %w", err)
+			return nil, nil, 0, false, nil, fmt.Errorf("go incremental: %w", err)
 		}
 		parseErrs += n
 		resolved = append(resolved, rg)
+		dirtyPending = append(dirtyPending, pending...)
 	}
 	if files := dirty["ts"]; len(files) > 0 || hasCached(cached, "ts") {
 		if len(files) > 0 {
 			tsOrSolDirty = true
 		}
-		rg, n, err := runTSPipelineIncremental(srcRoot, files, cached["ts"], store, log)
+		rg, pending, n, err := runTSPipelineIncremental(srcRoot, files, cached["ts"], store, log)
 		if err != nil {
-			return nil, 0, false, nil, fmt.Errorf("ts incremental: %w", err)
+			return nil, nil, 0, false, nil, fmt.Errorf("ts incremental: %w", err)
 		}
 		parseErrs += n
 		resolved = append(resolved, rg)
+		dirtyPending = append(dirtyPending, pending...)
 	}
 	if files := dirty["sol"]; len(files) > 0 || hasCached(cached, "sol") {
 		if len(files) > 0 {
 			tsOrSolDirty = true
 		}
-		rg, n, p, err := runSolPipelineIncremental(srcRoot, files, cached["sol"], store, log)
+		rg, pending, n, p, err := runSolPipelineIncremental(srcRoot, files, cached["sol"], store, log)
 		if err != nil {
-			return nil, 0, false, nil, fmt.Errorf("sol incremental: %w", err)
+			return nil, nil, 0, false, nil, fmt.Errorf("sol incremental: %w", err)
 		}
 		parseErrs += n
 		solParser = p
 		resolved = append(resolved, rg)
+		dirtyPending = append(dirtyPending, pending...)
 	}
-	return resolved, parseErrs, tsOrSolDirty, solParser, nil
+	return resolved, dirtyPending, parseErrs, tsOrSolDirty, solParser, nil
 }
 
 // reloadCachedEdges pulls every edge persisted under a cached file's
@@ -288,31 +320,6 @@ func reloadCachedEdges(store persist.Store, cachedByLang map[string][]string) ([
 		seenID[e.ID] = true
 	}
 	return reloaded, cachedNodeIDs, nil
-}
-
-// relinkXLang manages the cross-language `binds_to` edge set. When any
-// TS or Sol file is dirty or removed, drops + recomputes; otherwise
-// reloads the existing set into g for cluster/score visibility.
-func relinkXLang(g *graph.Graph, store persist.Store, solParser *solp.Parser, needsRebuild bool, log *slog.Logger) error {
-	if needsRebuild && solParser != nil {
-		if err := store.DeleteEdgesByType("binds_to"); err != nil {
-			return fmt.Errorf("clear binds_to: %w", err)
-		}
-		abi := convertABI(solParser.ABI())
-		xlEdges := link.SolToTS(g.Nodes, abi)
-		g.Edges = append(g.Edges, xlEdges...)
-		if err := graph.Validate(g); err != nil {
-			return fmt.Errorf("validate after xlang: %w", err)
-		}
-		log.Info("xlang linked (incremental)", "binds_to", len(xlEdges))
-		return nil
-	}
-	existing, err := store.QueryEdgesByType("binds_to")
-	if err != nil {
-		return fmt.Errorf("reload binds_to: %w", err)
-	}
-	g.Edges = append(g.Edges, existing...)
-	return nil
 }
 
 // persistIncrementalArtifacts handles the incremental-path inserts: nodes
@@ -395,17 +402,18 @@ func hasCached(m map[string][]string, lang string) bool {
 }
 
 // runGoPipelineIncremental parses dirtyFiles, then loads cached files' nodes
-// from DB and synthesises ParseResults so Pass 2's qIndex sees the full set.
-// Returns ResolvedGraph that includes ALL nodes (dirty + cached) plus edges
-// derived from dirty parsing only (cached edges are loaded separately).
+// AND pending refs from DB and synthesises ParseResults so Pass 2's qIndex
+// AND its pending-ref consumer see the full set. Returns ResolvedGraph plus
+// the dirty pending refs (caller persists those — cached refs survive in DB
+// via FK; only fresh refs from re-parse need INSERT).
+//
+// G6 v3 (schema 1.5): the "load pending refs back" step is the v1/v2 fix.
+// Previously cached files contributed nodes only, so cached-side cross-file
+// pending refs were silently dropped — manifesting as the -92 K calls
+// regression on go-stablenet.
 func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
+	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := gop.New(srcRoot)
-	// B1: type-aware concurrency pass needs detect.GoPackages registered
-	// here too. Currently unreachable (incremental path is dead code per
-	// pipeline.go comment) — keeping the call so when G6 re-enables this
-	// path the concurrency edges stay EXTRACTED instead of silently dropping
-	// to AST-only INFERRED.
 	if pkgs, err := detect.GoPackages(srcRoot); err == nil {
 		p.SetPackages(pkgs)
 	} else {
@@ -430,20 +438,48 @@ func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	dirtyPending := collectPendingRefs(results)
 	for _, rel := range cachedFiles {
 		nodes, err := store.NodesByFilePath(rel)
 		if err != nil {
-			return nil, errs, fmt.Errorf("reload go nodes for %s: %w", rel, err)
+			return nil, nil, errs, fmt.Errorf("reload go nodes for %s: %w", rel, err)
 		}
-		results = append(results, &parse.ParseResult{Path: rel, Nodes: nodes})
+		refs, err := store.PendingRefsByFilePath(rel)
+		if err != nil {
+			return nil, nil, errs, fmt.Errorf("reload go pending_refs for %s: %w", rel, err)
+		}
+		results = append(results, &parse.ParseResult{
+			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+		})
 	}
 	rg, err := p.Resolve(results)
-	return rg, errs, err
+	return rg, dirtyPending, errs, err
+}
+
+// pendingRefsFromRows converts persist.PendingRefRow back into parse.PendingRef
+// so synthesised ParseResults match the shape Pass 2 Resolve consumes natively.
+// FilePath isn't a parse.PendingRef field — Resolve doesn't need it (the row's
+// SrcID identifies the source node directly).
+func pendingRefsFromRows(rows []persist.PendingRefRow) []parse.PendingRef {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]parse.PendingRef, len(rows))
+	for i, r := range rows {
+		out[i] = parse.PendingRef{
+			SrcID:       r.SrcID,
+			EdgeType:    types.EdgeType(r.EdgeType),
+			TargetQName: r.TargetQName,
+			HintFile:    r.HintFile,
+			Line:        r.Line,
+		}
+	}
+	return out
 }
 
 // runTSPipelineIncremental mirrors runGoPipelineIncremental for TypeScript.
 func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, int, error) {
+	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := tsp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -464,21 +500,28 @@ func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	dirtyPending := collectPendingRefs(results)
 	for _, rel := range cachedFiles {
 		nodes, err := store.NodesByFilePath(rel)
 		if err != nil {
-			return nil, errs, fmt.Errorf("reload ts nodes for %s: %w", rel, err)
+			return nil, nil, errs, fmt.Errorf("reload ts nodes for %s: %w", rel, err)
 		}
-		results = append(results, &parse.ParseResult{Path: rel, Nodes: nodes})
+		refs, err := store.PendingRefsByFilePath(rel)
+		if err != nil {
+			return nil, nil, errs, fmt.Errorf("reload ts pending_refs for %s: %w", rel, err)
+		}
+		results = append(results, &parse.ParseResult{
+			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+		})
 	}
 	rg, err := p.Resolve(results)
-	return rg, errs, err
+	return rg, dirtyPending, errs, err
 }
 
 // runSolPipelineIncremental mirrors runGoPipelineIncremental for Solidity.
 // Returns the parser instance for caller use (xlang ABI source).
 func runSolPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
-	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, int, *solp.Parser, error) {
+	store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, *solp.Parser, error) {
 	p := solp.New(srcRoot)
 	results := []*parse.ParseResult{}
 	errs := 0
@@ -499,15 +542,22 @@ func runSolPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		stampFilePath(r)
 		results = append(results, r)
 	}
+	dirtyPending := collectPendingRefs(results)
 	for _, rel := range cachedFiles {
 		nodes, err := store.NodesByFilePath(rel)
 		if err != nil {
-			return nil, errs, p, fmt.Errorf("reload sol nodes for %s: %w", rel, err)
+			return nil, nil, errs, p, fmt.Errorf("reload sol nodes for %s: %w", rel, err)
 		}
-		results = append(results, &parse.ParseResult{Path: rel, Nodes: nodes})
+		refs, err := store.PendingRefsByFilePath(rel)
+		if err != nil {
+			return nil, nil, errs, p, fmt.Errorf("reload sol pending_refs for %s: %w", rel, err)
+		}
+		results = append(results, &parse.ParseResult{
+			Path: rel, Nodes: nodes, Pending: pendingRefsFromRows(refs),
+		})
 	}
 	rg, err := p.Resolve(results)
-	return rg, errs, p, err
+	return rg, dirtyPending, errs, p, err
 }
 
 // extractBlobsForFiles is a filtered version of extractBlobs: only emits blobs
@@ -589,8 +639,3 @@ func buildFileEntries(decisions CacheDecisions, nodes []types.Node, edges []type
 	return out
 }
 
-// _runIncrementalRef keeps runIncremental and its transitive helpers
-// reachable from gopls's unusedfunc perspective while the routing in
-// pipeline.go Run() is suppressed (see runIncremental's doc-comment).
-// Once the routing is restored this can go.
-var _runIncrementalRef = runIncremental

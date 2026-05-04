@@ -108,6 +108,18 @@ reload as `files: nil` and force the next build through the cold path.
 
 ## Phase 1 limitations (intentional)
 
+- **Partial-cache deferred (D4, 2026-05-04).** Three v1/v2/v3 attempts to
+  implement partial-cache (parse dirty only, reload cached nodes + pending
+  refs, reuse cached edge sets) all failed the § 7 validation gate on the
+  real corpus (go-stablenet, 2142 files). v3 root cause (H3): `NodesByFilePath`
+  returns nodes in DB rowid/ID-sorted order, not AST declaration order.
+  For ambiguous simple names with multiple candidates, the qIndex winner
+  differs between cold and partial paths — both edges survive dedup because
+  Dst differs, producing +2675 phantom edges. Fix direction for a future
+  v4 attempt: sort `NodesByFilePath` by `start_line ASC`. Partial-cache
+  requires B3 (tree-sitter `Tree.Edit()`) or C1 (reverse-reference index)
+  as a prerequisite to be economical. The `runIncremental` function and
+  `pending_refs` table (schema 1.5) are preserved as dead code.
 - **Pass 2 always re-runs** when any file is dirty. Cross-file edges from
   cached files are reloaded from DB (not re-derived), and pending refs
   from dirty files are re-resolved against the merged node set. Phase 2

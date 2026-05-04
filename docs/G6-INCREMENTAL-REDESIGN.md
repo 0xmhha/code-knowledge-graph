@@ -469,6 +469,11 @@ optimisation logic. Sequential keeps the next failure (if any) diagnosable.
 
 ### D4 — Escape hatch if § 7.3 fails: drop partial-cache from roadmap
 
+> **EXECUTED 2026-05-04** — § 7 gate FAIL confirmed (§ 7.1 +2675 edges, § 7.3 115 s).
+> Root cause: H3 (qIndex winner non-determinism, NodesByFilePath order ≠ declaration order).
+> Fix direction: NodesByFilePath sort by start_line ASC. Routing reverted to cold-fallback.
+> Pending_refs infra (schema 1.5, InsertPendingRefs, PendingRefsByFilePath) preserved as dead code.
+
 **Decision.** If after Q5 optimisation the 3-second budget on go-stablenet
 still cannot be met, drop partial-cache from the roadmap. Document as a
 v0.x architectural limit that would require C1 (Phase 2 reverse-reference

@@ -238,8 +238,9 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	out := t.TempDir()
 
 	first := runBuild(t, src, out)
-	if first.SchemaVersion != "1.4" {
-		t.Fatalf("first build SchemaVersion = %q, want 1.4", first.SchemaVersion)
+	if first.SchemaVersion != buildpipe.SchemaVersion {
+		t.Fatalf("first build SchemaVersion = %q, want %q",
+			first.SchemaVersion, buildpipe.SchemaVersion)
 	}
 
 	// Manually rewrite the manifest's schema_version to "1.0" (legacy).
@@ -255,8 +256,9 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	store.Close()
 
 	second := runBuild(t, src, out)
-	if second.SchemaVersion != "1.4" {
-		t.Errorf("post-rebuild SchemaVersion = %q, want 1.4", second.SchemaVersion)
+	if second.SchemaVersion != buildpipe.SchemaVersion {
+		t.Errorf("post-rebuild SchemaVersion = %q, want %q",
+			second.SchemaVersion, buildpipe.SchemaVersion)
 	}
 	// Files block is fresh (different timestamp guarantees fresh build).
 	if len(second.Files) != len(first.Files) {

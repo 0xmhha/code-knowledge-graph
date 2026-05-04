@@ -59,6 +59,10 @@ type StoreReader interface {
 	NodesByFilePath(path string) ([]types.Node, error)
 	EdgesByFilePath(path string) ([]types.Edge, error)
 	BlobsByFilePath(path string) (map[string][]byte, error)
+	// PendingRefsByFilePath: G6 v3 partial-cache rebuild reads cached files'
+	// unresolved cross-file refs back so Pass 2 Resolve sees the cold-equivalent
+	// input. Schema 1.5.
+	PendingRefsByFilePath(path string) ([]PendingRefRow, error)
 
 	// Static export (chunked JSON, spec §6.6). On StoreReader rather than
 	// StoreWriter because ExportChunked only reads from the store and writes
@@ -80,6 +84,10 @@ type StoreWriter interface {
 	InsertBlobs(blobs map[string][]byte) error
 	InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) error
 	InsertTopicTree(t TopicTreeInput) error
+	// InsertPendingRefs: G6 v3 — cold path persists every Pass 1 unresolved
+	// cross-file ref so the next partial build can replay Pass 2 over a
+	// merged dirty + cached input. Schema 1.5.
+	InsertPendingRefs(refs []PendingRefRow) error
 
 	// Per-file delete (A3 incremental cache). Drops every node whose
 	// file_path matches; FK ON DELETE CASCADE wipes the dependent edges

@@ -350,28 +350,63 @@ func (s *sqliteStore) QueryNodes(parent string, limit int) ([]types.Node, error)
 	return scanNodes(rows)
 }
 
+// queryEdgesChunk is the per-chunk size for QueryEdgesForNodes. SQLite's
+// SQLITE_MAX_VARIABLE_NUMBER caps single-statement parameters; default is 999
+// on older builds, 32766 on modernc.org/sqlite — but go-stablenet's 217 K
+// nodes would breach either limit when each chunk emits 2N params (src + dst).
+// 400 ids per chunk = 800 params, comfortably below the conservative 999
+// ceiling and well under the modern 32 K. Per § 3 Q5 in the G6 v3 redesign:
+// "chunked QueryEdgesForNodes" is the named fix for this exact bottleneck.
+const queryEdgesChunk = 400
+
 // QueryEdgesForNodes returns every edge that has src OR dst in ids. Used by
-// the viewer to expand a neighbourhood by node selection.
+// the viewer to expand a neighbourhood by node selection AND by the partial-
+// cache rebuild path to reload cross-file edges between cached files.
+//
+// Chunked by queryEdgesChunk because a single IN(?,?,...) expression with
+// > 999 placeholders exceeds SQLITE_MAX_VARIABLE_NUMBER on older SQLite
+// builds. Edges that match BOTH a src chunk and a dst chunk would be
+// returned twice — deduped by the seen-by-id map below.
 func (s *sqliteStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	ph := placeholders(len(ids))
-	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
-	      FROM edges WHERE src IN (` + ph + `) OR dst IN (` + ph + `)`
-	args := make([]any, 0, 2*len(ids))
-	for _, id := range ids {
-		args = append(args, id)
+	seen := map[int64]bool{}
+	var out []types.Edge
+	for start := 0; start < len(ids); start += queryEdgesChunk {
+		end := start + queryEdgesChunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		ph := placeholders(len(chunk))
+		q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		      FROM edges WHERE src IN (` + ph + `) OR dst IN (` + ph + `)`
+		args := make([]any, 0, 2*len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		for _, id := range chunk {
+			args = append(args, id)
+		}
+		rows, err := s.db.Query(q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("query edges chunk [%d:%d] of %d: %w", start, end, len(ids), err)
+		}
+		es, err := scanEdges(rows)
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range es {
+			if seen[e.ID] {
+				continue
+			}
+			seen[e.ID] = true
+			out = append(out, e)
+		}
 	}
-	for _, id := range ids {
-		args = append(args, id)
-	}
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("query edges for %d nodes: %w", len(ids), err)
-	}
-	defer rows.Close()
-	return scanEdges(rows)
+	return out, nil
 }
 
 // GetBlob returns the raw source slice persisted for node id. Returns
@@ -836,6 +871,86 @@ func (s *sqliteStore) DeleteEdgesByType(t string) error {
 		return fmt.Errorf("delete edges by type %q: %w", t, err)
 	}
 	return nil
+}
+
+// PendingRefRow is the storage wire shape for parse.PendingRef. Defined in
+// persist (rather than reusing parse.PendingRef directly) so persist stays
+// import-free of the parse package — buildpipe bridges the two when emitting
+// from cold path or reloading for partial-cache rebuild.
+//
+// G6 v3 (schema 1.5): persisting pending refs lets the partial path replay
+// Pass 2 over the merged dirty + cached input set without re-parsing cached
+// files. Without this table the cached-side pending refs were silently
+// dropped (the v1/v2 cross-file edge regression).
+type PendingRefRow struct {
+	FilePath    string
+	SrcID       string
+	TargetQName string
+	EdgeType    string
+	Line        int
+	HintFile    string
+}
+
+// InsertPendingRefs bulk-inserts pending_refs rows. INSERT OR IGNORE is used
+// because the (file_path, src_id, target_qname, edge_type, line) primary key
+// can naturally collide when a single source line emits the same logical ref
+// twice (e.g. a doubly-imported symbol surfacing in two pending-ref sites of
+// the same file). Cold path always wipes the table beforehand via openColdStore;
+// partial path relies on FK CASCADE from DeleteNodesByFilePath. Either way,
+// IGNORE guards against PK violations without forcing a SELECT-then-INSERT
+// pattern in the hot loop.
+func (s *sqliteStore) InsertPendingRefs(refs []PendingRefRow) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO pending_refs
+		(file_path, src_id, target_qname, edge_type, line, hint_file)
+		VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, r := range refs {
+		if _, err := stmt.Exec(r.FilePath, r.SrcID, r.TargetQName,
+			r.EdgeType, r.Line, r.HintFile); err != nil {
+			return fmt.Errorf("insert pending_ref %s→%s: %w", r.SrcID, r.TargetQName, err)
+		}
+	}
+	return tx.Commit()
+}
+
+// PendingRefsByFilePath returns every pending_refs row where file_path matches.
+// Empty path returns nil. Used by the partial-cache rebuild path: cached files
+// have their pending refs reloaded so Pass 2 Resolve sees the same input set
+// it would have seen under cold rebuild.
+func (s *sqliteStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error) {
+	if path == "" {
+		return nil, nil
+	}
+	rows, err := s.db.Query(`SELECT file_path, src_id, target_qname, edge_type, line,
+		COALESCE(hint_file,'') FROM pending_refs WHERE file_path = ?`, path)
+	if err != nil {
+		return nil, fmt.Errorf("pending_refs by file_path %q: %w", path, err)
+	}
+	defer rows.Close()
+	var out []PendingRefRow
+	for rows.Next() {
+		var r PendingRefRow
+		if err := rows.Scan(&r.FilePath, &r.SrcID, &r.TargetQName,
+			&r.EdgeType, &r.Line, &r.HintFile); err != nil {
+			return nil, fmt.Errorf("scan pending_ref: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending_refs: %w", err)
+	}
+	return out, nil
 }
 
 // InsertEdges bulk-inserts edges (transactional).

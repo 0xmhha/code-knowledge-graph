@@ -21,6 +21,44 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// emitDerivedPasses runs the post-graph.Build derived passes against g IN
+// MEMORY: cross-language link (Sol→TS binds_to), G6 Temporal (commit nodes
+// + changed_in/blame), cluster (pkg + topic), and score. Returns the cluster
+// outputs so the caller can persist them.
+//
+// Both runCold and the partial-cache rebuild path call this — the v2 bug
+// (temporal emitting to g but never persisting under incremental) is
+// structurally impossible because both paths feed the same g into the same
+// downstream persist step.
+//
+// solParser nil = skip xlang. Cold passes the parser when Sol files exist;
+// incremental passes nil when no TS/Sol file is dirty (the cached binds_to
+// edges are reloaded directly into g instead). DB-side drops for temporal
+// and binds_to are the caller's responsibility (cold wipes everything via
+// openColdStore; incremental issues targeted DeleteEdgesByType).
+func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
+	log *slog.Logger) (*cluster.PkgTree, *cluster.TopicTree, error) {
+	if solParser != nil {
+		abi := convertABI(solParser.ABI())
+		xlEdges := link.SolToTS(g.Nodes, abi)
+		g.Edges = append(g.Edges, xlEdges...)
+		if err := graph.Validate(g); err != nil {
+			return nil, nil, fmt.Errorf("validate after xlang: %w", err)
+		}
+		log.Info("xlang linked", "binds_to", len(xlEdges))
+	}
+	if err := emitTemporalEdges(g, srcRoot, log, 0); err != nil {
+		return nil, nil, fmt.Errorf("temporal: %w", err)
+	}
+	if err := graph.Validate(g); err != nil {
+		return nil, nil, fmt.Errorf("validate after temporal: %w", err)
+	}
+	pkgTree := cluster.BuildPkgTree(g)
+	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
+	score.Compute(g)
+	return pkgTree, topicTree, nil
+}
+
 // Options controls one ckg build invocation.
 type Options struct {
 	SrcRoot    string
@@ -66,26 +104,16 @@ func Run(opt Options) (persist.Manifest, error) {
 	}
 	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
 
-	// (2) cache routing
+	// (2) cache routing — three paths (G6 v3, schema 1.5):
 	//
-	// Two paths only:
-	//   - runShortCircuit: 100% cache hit (no parse, no graph rewrite, manifest
-	//     timestamp refresh). This is the load-bearing speedup case — CI re-runs
-	//     on unchanged source finish in <1s instead of cold rebuild time.
-	//   - runCold: any miss or removal → full rebuild.
-	//
-	// runIncremental (the partial-rebuild path) is intentionally NOT routed
-	// here. Empirical reproduction (testdata/synthetic, modifying vault.go)
-	// showed cross-file `calls` edges where the caller is cached and callee
-	// is dirty are silently dropped (cold: 2 calls → warm-incremental: 0).
-	// Root cause: cached files are not re-parsed, so their pending refs are
-	// not re-emitted; Pass 2 only sees pending refs from dirty files. The
-	// existing reloadCachedEdges drops cross-file edges spanning dirty↔cached
-	// because the dirty-side node IDs don't match (content-hash IDs change).
-	// runIncremental + helpers are kept as dead code for the eventual
-	// re-enable (see WORK-PLAN.md C1 / Phase 2 reverse-reference index OR a
-	// "persisted pending refs" approach) — until then the safe fallback is
-	// cold rebuild on any non-full-hit case.
+	//   - runShortCircuit: 100% cache hit, no removals (manifest timestamp
+	//     refresh only). Load-bearing for CI re-runs on unchanged source.
+	//   - runIncremental: DEAD CODE (D4 escape hatch executed 2026-05-04).
+	//     Partial-hit cases fall back to cold rebuild for correctness. See
+	//     comment below. Preserved for future v4 attempt (B3 tree-sitter
+	//     Tree.Edit or C1 reverse-reference index as prerequisite).
+	//   - runCold: --no-cache, missing manifest, schema/version mismatch,
+	//     OR partial hit (post-D4 fallback).
 	dbPath := filepath.Join(opt.OutDir, "graph.db")
 	old := readOldManifestFromDB(dbPath)
 	if !opt.NoCache && ManifestUsable(old, opt.CKGVersion) {
@@ -96,8 +124,15 @@ func Run(opt Options) (persist.Manifest, error) {
 		if decisions.IsAllCached() {
 			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount)
 		}
-		log.Info("Cache: partial hit; falling back to cold rebuild for correctness",
-			"hits", decisions.Hits, "misses", decisions.Misses, "removed", decisions.Removed)
+		// partial hit → cold fallback for correctness (D4 escape hatch executed
+		// 2026-05-04). Root cause: NodesByFilePath returns nodes in DB rowid
+		// order, not AST declaration order; ambiguous qname resolution produces
+		// different Dst nodes between cold and partial paths (+2675 edge
+		// over-emit on go-stablenet, § 7.1 FAIL). runIncremental and
+		// pending_refs infra are preserved as dead code for future v4 attempt.
+		// Fix direction: sort NodesByFilePath by start_line ASC.
+		log.Info("Cache: partial hit; falling back to cold rebuild for correctness")
+		return runCold(opt, log, discovery, goCount, tsCount, solCount)
 	}
 	if opt.NoCache {
 		log.Info("Cache: bypassed (--no-cache); full rebuild")
@@ -120,35 +155,39 @@ func runCold(opt Options, log *slog.Logger,
 
 	// (2)+(3) parse + link, per language
 	resolved := []*parse.ResolvedGraph{}
+	allPending := []persist.PendingRefRow{}
 	parseErrs := 0
 	if shouldRun("go", opt.Languages) && len(goFiles) > 0 {
-		rg, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
+		rg, pending, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("go pipeline: %w", err)
 		}
 		parseErrs += n
 		resolved = append(resolved, rg)
+		allPending = append(allPending, pending...)
 	}
 	// solParser is retained across the language passes so that the
 	// cross-language linker (T20) can read Solidity ABI sigs after graph.Build.
 	// nil signals "no Sol pipeline ran" — xlang stage is skipped in that case.
 	var solParser *solp.Parser
 	if shouldRun("ts", opt.Languages) && len(files.TS) > 0 {
-		rg, n, err := runTSPipeline(opt.SrcRoot, files.TS, log)
+		rg, pending, n, err := runTSPipeline(opt.SrcRoot, files.TS, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("ts pipeline: %w", err)
 		}
 		parseErrs += n
 		resolved = append(resolved, rg)
+		allPending = append(allPending, pending...)
 	}
 	if shouldRun("sol", opt.Languages) && len(files.Sol) > 0 {
-		rg, n, p, err := runSolPipeline(opt.SrcRoot, files.Sol, log)
+		rg, pending, n, p, err := runSolPipeline(opt.SrcRoot, files.Sol, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("sol pipeline: %w", err)
 		}
 		parseErrs += n
 		solParser = p
 		resolved = append(resolved, rg)
+		allPending = append(allPending, pending...)
 	}
 
 	// (4) graph build + validate
@@ -160,38 +199,15 @@ func runCold(opt Options, log *slog.Logger,
 		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
 	}
 
-	// (4b) cross-language linking: Sol -> TS binds_to edges (spec §4.7.3).
-	// Re-validate after appending so any dangling refs are caught defensively.
-	if solParser != nil {
-		abi := convertABI(solParser.ABI())
-		xlEdges := link.SolToTS(g.Nodes, abi)
-		g.Edges = append(g.Edges, xlEdges...)
-		if err := graph.Validate(g); err != nil {
-			return persist.Manifest{}, fmt.Errorf("validate after xlang: %w", err)
-		}
-		log.Info("xlang linked", "binds_to", len(xlEdges))
+	// (4b/4c/5/6) derived passes — xlang, temporal, cluster, score. Shared
+	// helper so the partial-cache rebuild path runs identical in-memory
+	// transformations (G6 v3 § 4.4). v2's "emitted-vs-DB 0" bug was caused
+	// by temporal living only in cold; the helper makes that recurrence
+	// structurally impossible.
+	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log)
+	if err != nil {
+		return persist.Manifest{}, err
 	}
-
-	// (4c) G6 Temporal: append Commit nodes + changed_in/blame edges from
-	// `git log`. Runs BEFORE cluster + score so PageRank can see the new
-	// nodes if it wants — commits are leaves with no outbound edges so they
-	// don't redirect PageRank mass; including them keeps the cluster pass's
-	// node universe consistent with the persisted DB.
-	// Skips silently for non-git source trees (no fatal). Re-validate so a
-	// regression in the temporal pass surfaces here, not at runtime.
-	if err := emitTemporalEdges(g, opt.SrcRoot, log, 0); err != nil {
-		return persist.Manifest{}, fmt.Errorf("temporal: %w", err)
-	}
-	if err := graph.Validate(g); err != nil {
-		return persist.Manifest{}, fmt.Errorf("validate after temporal: %w", err)
-	}
-
-	// (5) cluster
-	pkgTree := cluster.BuildPkgTree(g)
-	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
-
-	// (6) score
-	score.Compute(g)
 
 	// (7) persist — cold rebuild wipes graph.db so we don't accumulate stale
 	// rows. Incremental path lives in incremental.go and reuses prior rows.
@@ -202,6 +218,15 @@ func runCold(opt Options, log *slog.Logger,
 	defer store.Close()
 	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree); err != nil {
 		return persist.Manifest{}, err
+	}
+	// G6 v3 (schema 1.5): persist Pass 1 pending refs so the next partial
+	// build can replay Pass 2 over a merged dirty + cached input set without
+	// re-parsing cached files. INSERT after persistColdArtifacts so node FKs
+	// are satisfied. The cold path always wipes graph.db beforehand
+	// (openColdStore.os.Remove), so the table starts empty — IGNORE on the PK
+	// in InsertPendingRefs handles the rare emit-twice case.
+	if err := store.InsertPendingRefs(allPending); err != nil {
+		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
 
 	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol),

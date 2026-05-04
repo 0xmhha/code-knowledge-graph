@@ -79,3 +79,22 @@ CREATE TABLE IF NOT EXISTS manifest (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Pending refs (G6 v3, schema 1.5): per-file unresolved cross-file references
+-- emitted by Pass 1 and consumed by Pass 2 Resolve. Persisted so the partial-
+-- cache rebuild path can reconstruct Pass 2's full input without re-parsing
+-- cached files (the v1/v2 silent-drop bug).
+--
+-- FK src_id → nodes(id) ON DELETE CASCADE matches the file lifecycle: when a
+-- dirty/removed file's nodes are dropped via DeleteNodesByFilePath, its
+-- pending refs follow automatically — no separate cleanup statement needed.
+CREATE TABLE IF NOT EXISTS pending_refs (
+  file_path    TEXT NOT NULL,
+  src_id       TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  target_qname TEXT NOT NULL,
+  edge_type    TEXT NOT NULL,
+  line         INTEGER NOT NULL,
+  hint_file    TEXT,
+  PRIMARY KEY (file_path, src_id, target_qname, edge_type, line)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_refs_file ON pending_refs(file_path);
