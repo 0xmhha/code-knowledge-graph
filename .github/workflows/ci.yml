@@ -10,8 +10,12 @@ jobs:
       matrix:
         include:
           - { os: ubuntu-latest,  arch: amd64, goos: linux }
-          - { os: macos-13,       arch: amd64, goos: darwin }
           - { os: macos-latest,   arch: arm64, goos: darwin }
+          # macos-13 (Intel/amd64) dropped: GitHub-hosted runner pool is
+          # effectively retired — jobs sit in `queued` indefinitely.
+          # amd64 coverage is provided by ubuntu-latest; arm64 darwin
+          # by macos-latest. Re-add macos-13-large (paid) if Intel macOS
+          # runtime testing becomes required.
           # Windows support is dropped for now: cli-wrapper (used by
           # internal/eval) calls syscall.Socketpair without a build
           # constraint, which is unix-only. Re-evaluate once cli-wrapper
