@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
 )
 
 // Result is one row in the CSV.
@@ -38,7 +38,7 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, err
 	}
-	store, err := persist.OpenReadOnly(filepath.Join(graphDir, "graph.db"))
+	store, err := pkgstore.OpenReadOnly(filepath.Join(graphDir, "graph.db"))
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +76,7 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 //   - β/γ/δ: register MCP tool names; tool execution is in-process here
 //     (we call Store directly instead of spawning ckg mcp), keeping eval
 //     hermetic and reproducible.
-func runOne(ctx context.Context, llm LLMClient, store persist.StoreReader,
+func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	t Task, b Baseline, stale bool) (Result, error) {
 	start := time.Now()
 	system := SystemPrompt(b)
@@ -114,7 +114,7 @@ func runOne(ctx context.Context, llm LLMClient, store persist.StoreReader,
 		TaskID: t.ID, Baseline: b,
 		InputTokens: out.InputTokens, OutputTokens: out.OutputTokens,
 		CachedTokens: out.CacheReadTokens + out.CacheCreateTokens,
-		Score: score, LatencyMS: time.Since(start).Milliseconds(),
+		Score:        score, LatencyMS: time.Since(start).Milliseconds(),
 		NumToolCalls: calls, Stale: stale, RawOutput: out.OutputText,
 	}, nil
 }
@@ -177,7 +177,7 @@ func dumpFiles(root string, count, perFileLimit int) string {
 	return b.String()
 }
 
-func isStale(store persist.StoreReader, graphDir string) bool {
+func isStale(store pkgstore.Reader, graphDir string) bool {
 	m, err := store.GetManifest()
 	if err != nil || m.StalenessMethod != "git" {
 		return false
@@ -192,7 +192,7 @@ func isStale(store persist.StoreReader, graphDir string) bool {
 // smartContext duplicates the get_context_for_task logic (in-process).
 // In production it would call the MCP tool; for V0 hermetic eval we share
 // the implementation. Should be moved into a shared package in V1.
-func smartContext(store persist.StoreReader, query string) (string, error) {
+func smartContext(store pkgstore.Reader, query string) (string, error) {
 	// Reuse internal/mcp.buildContext via an exported symbol — for V0 we
 	// call SearchFTS + a brief packing here to avoid a circular import.
 	hits, err := store.SearchFTS(query, 10)
