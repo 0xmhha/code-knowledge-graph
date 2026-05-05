@@ -1,5 +1,5 @@
-// Minimal Playwright config for the ckg viewer smoke test.
-// CI (T37) reuses this without modification.
+// Minimal Playwright config for the ckg viewer-next smoke test.
+// CI mirrors this without modification.
 export default {
   testDir: './tests',
   timeout: 60000,

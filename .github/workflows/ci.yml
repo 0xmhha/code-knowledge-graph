@@ -32,12 +32,12 @@ jobs:
       - run: go test -race ./...
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-      - run: cd web/viewer && npm ci && node esbuild.config.js
+      - run: cd web/viewer-next && npm ci && npm run build
       - shell: bash
         run: |
-          mkdir -p internal/server/web_assets/assets
-          cp web/viewer/index.html internal/server/web_assets/index.html
-          cp web/viewer/dist/viewer.js internal/server/web_assets/assets/viewer.js
+          rm -rf internal/server/web_assets
+          mkdir -p internal/server/web_assets
+          cp -R web/viewer-next/out/. internal/server/web_assets/
       - run: go build -o bin/ckg ./cmd/ckg
 
   smoke:
@@ -49,13 +49,13 @@ jobs:
         with: { go-version: '1.25' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-      - run: cd web/viewer && npm ci && npx playwright install chromium && node esbuild.config.js
+      - run: cd web/viewer-next && npm ci && npx playwright install --with-deps chromium && npm run build
       - run: |
-          mkdir -p internal/server/web_assets/assets
-          cp web/viewer/index.html internal/server/web_assets/index.html
-          cp web/viewer/dist/viewer.js internal/server/web_assets/assets/viewer.js
+          rm -rf internal/server/web_assets
+          mkdir -p internal/server/web_assets
+          cp -R web/viewer-next/out/. internal/server/web_assets/
           go build -o bin/ckg ./cmd/ckg
           ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-smoke
           ./bin/ckg serve --graph=/tmp/ckg-smoke --port=8787 &
           sleep 3
-          cd web/viewer && npx playwright test
+          cd web/viewer-next && npx playwright test

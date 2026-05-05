@@ -15,8 +15,11 @@ coverage.out
 .DS_Store
 
 # Build outputs
-/web/viewer/dist/
-/web/viewer/node_modules/
+/web/viewer-next/node_modules/
+/web/viewer-next/.next/
+/web/viewer-next/out/
+/web/viewer-next/test-results/
+/web/viewer-next/playwright-report/
 
 # CKG runtime outputs
 /tmp/ckg-*
