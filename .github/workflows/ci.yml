@@ -12,7 +12,10 @@ jobs:
           - { os: ubuntu-latest,  arch: amd64, goos: linux }
           - { os: macos-13,       arch: amd64, goos: darwin }
           - { os: macos-latest,   arch: arm64, goos: darwin }
-          - { os: windows-latest, arch: amd64, goos: windows }
+          # Windows support is dropped for now: cli-wrapper (used by
+          # internal/eval) calls syscall.Socketpair without a build
+          # constraint, which is unix-only. Re-evaluate once cli-wrapper
+          # has a Windows-compatible transport or eval is gated off.
     runs-on: ${{ matrix.os }}
     env:
       GOOS:   ${{ matrix.goos }}
