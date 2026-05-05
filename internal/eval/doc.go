@@ -22,4 +22,9 @@
 //     the get_context_for_task MCP tool; extract to a shared
 //     package (e.g. pkg/contextcompose) so both eval and mcp
 //     share one implementation.
+//
+// The paths and test names above (cmd/ckg/eval.go, eval/tasks/*.yaml,
+// TestCLIClient_Complete_Smoke_ClaudeFallback, ...) reference concrete
+// repo state. If you rename or move any of them before extraction lands,
+// update this doc in the same commit so the checklist doesn't go stale.
 package eval
