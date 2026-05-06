@@ -129,7 +129,16 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 			results = append(results, r)
 		}
 	}
-	return p.Resolve(results)
+	rg, err := p.Resolve(results)
+	if err != nil || rg == nil {
+		return rg, err
+	}
+	// P0: implements / extends edges are a post-Resolve pass — they need
+	// (a) the union of nodes (qname → ID lookup) and (b) the loaded package
+	// scopes (go/types satisfaction queries). Wired here so tests using
+	// LoadAndResolve exercise the same code path as production buildpipe.
+	rg.Edges = append(rg.Edges, EmitImplementsEdges(p.Pkgs(), rg.Nodes)...)
+	return rg, nil
 }
 
 func simpleName(qname string) string {

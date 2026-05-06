@@ -35,6 +35,10 @@ type Parser struct {
 	// fileIndex: absolute file path → (TypesInfo, *ast.File) loaded via
 	// packages.Load. Populated by SetPackages; nil when AST-only mode.
 	fileIndex map[string]typedFile
+	// pkgs retains the loaded packages slice so post-Pass-2 phases (e.g.
+	// EmitImplementsEdges) can iterate package scopes. Same lifetime as
+	// fileIndex — both populated by SetPackages, both nil in AST-only mode.
+	pkgs []*packages.Package
 }
 
 // typedFile holds the parsed AST + resolved type info for one source file,
@@ -58,10 +62,18 @@ func New(srcRoot string) *Parser {
 func (p *Parser) SetPackages(pkgs []*packages.Package) {
 	if len(pkgs) == 0 {
 		p.fileIndex = nil
+		p.pkgs = nil
 		return
 	}
 	p.fileIndex = buildFileIndex(pkgs)
+	p.pkgs = pkgs
 }
+
+// Pkgs returns the loaded packages slice registered by SetPackages, or nil
+// when the parser is in AST-only mode. Consumers (e.g. the implements pass)
+// use this to iterate package scopes after Pass 2 Resolve has run. The slice
+// is the live value — callers must not mutate it.
+func (p *Parser) Pkgs() []*packages.Package { return p.pkgs }
 
 // buildFileIndex flattens a slice of packages into one (path → typedFile)
 // map. When the same file appears in multiple package variants (base + test),

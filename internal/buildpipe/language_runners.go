@@ -168,6 +168,16 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 	results, errs := parseConcurrent(srcRoot, files, log, p.ParseFile, "go")
 	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
+	// P0: emit implements / extends edges from go/types satisfaction. Runs
+	// post-Resolve because (a) it needs the union of Struct/Interface IDs
+	// across all files and (b) only the typed-load path has the package
+	// scopes to query. Soft no-op when Resolve failed or pkgs are unavailable
+	// (AST-only fallback) — preserves existing buildpipe error semantics.
+	if err == nil && rg != nil {
+		implEdges := gop.EmitImplementsEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, implEdges...)
+		log.Debug("implements emitted", "count", len(implEdges))
+	}
 	return rg, pending, errs, err
 }
 
