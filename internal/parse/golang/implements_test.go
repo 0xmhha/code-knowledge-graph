@@ -172,6 +172,39 @@ func TestImplements_ExtendsForEmbeddedInterface(t *testing.T) {
 	}
 }
 
+// TestImplements_CrossPackageSatisfaction asserts the implements pass emits
+// an edge when the concrete type and interface live in different packages.
+// This is the production case (sqliteStore in internal/persist implements
+// persist.Store / pkg/types.StoreReader across files and would-be packages).
+// Without it, the most common real-world satisfaction relationship — interface
+// in pkg A, struct in pkg B — silently produces zero edges.
+func TestImplements_CrossPackageSatisfaction(t *testing.T) {
+	root := "testdata/implements_xpkg"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	nodeByID := make(map[string]*types.Node, len(g.Nodes))
+	for i := range g.Nodes {
+		nodeByID[g.Nodes[i].ID] = &g.Nodes[i]
+	}
+
+	type pair struct{ implQ, ifaceQ string }
+	have := map[pair]bool{}
+	for _, e := range edgesByType(g.Edges, types.EdgeImplements) {
+		src := nodeByID[e.Src]
+		dst := nodeByID[e.Dst]
+		if src == nil || dst == nil {
+			t.Errorf("dangling implements edge: src=%q dst=%q", e.Src, e.Dst)
+			continue
+		}
+		have[pair{src.QualifiedName, dst.QualifiedName}] = true
+	}
+	if !have[pair{"impl.MemStore", "defs.Store"}] {
+		t.Errorf("missing cross-package implements edge impl.MemStore -> defs.Store; got %+v", have)
+	}
+}
+
 // TestImplements_NoEmptyInterfaceNoise asserts that the empty interface
 // (Anything) does not collect implements edges. Every type satisfies it,
 // so emitting them would be O(N) low-signal noise.

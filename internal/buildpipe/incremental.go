@@ -149,7 +149,10 @@ func runIncremental(opt Options, log *slog.Logger,
 	// (1) Drop always-rebuilt edges from DB so the in-memory re-emit + ID==0
 	// filter at persist time produces exactly one DB row per logical edge.
 	// changed_in/blame come from the temporal pass; binds_to from xlang.
-	for _, t := range []string{"changed_in", "blame", "binds_to"} {
+	// implements/extends are emitted by the Go post-Resolve pass with empty
+	// FilePath, so the per-file CASCADE in step (2) does not remove them —
+	// they must be dropped here or every incremental build duplicates rows.
+	for _, t := range []string{"changed_in", "blame", "binds_to", "implements", "extends"} {
 		if err := store.DeleteEdgesByType(t); err != nil {
 			return persist.Manifest{}, fmt.Errorf("clear %s: %w", t, err)
 		}
@@ -503,6 +506,16 @@ func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		})
 	}
 	rg, err := p.Resolve(results)
+	// Mirror cold path: implements/extends edges need the union of nodes
+	// across the whole module to resolve cross-package satisfaction. Without
+	// this re-emission, dirty files lose their implements rows on every
+	// incremental build (those edges were dropped by DeleteEdgesByType in
+	// runIncremental step (1) and nothing repopulates them).
+	if err == nil && rg != nil {
+		implEdges := gop.EmitImplementsEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, implEdges...)
+		log.Debug("implements emitted (incremental)", "count", len(implEdges))
+	}
 	return rg, dirtyPending, errs, err
 }
 

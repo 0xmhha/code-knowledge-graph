@@ -404,6 +404,88 @@ func Helper() {}
 	}
 }
 
+// TestIncremental_ImplementsEdgesNoDrift is the regression guard for the
+// incremental-path implements/extends bug: cold builds emit implements via
+// the post-Resolve EmitImplementsEdges pass, but runGoPipelineIncremental
+// previously did not, AND the runIncremental DROP step did not include the
+// "implements"/"extends" types. Net effect: the first incremental rebuild
+// after touching any Go file silently dropped the row count to zero (no
+// re-emission) OR doubled it (no DROP), depending on call order.
+//
+// Module shape:
+//
+//	greeter.go: type Greeter interface { Greet() string }
+//	hello.go:   type Hello struct{}; func (Hello) Greet() string { ... }
+//
+// Cold build → 1 implements edge (hello.Hello → greeter.Greeter — same pkg
+// here, but the same code path drives cross-pkg satisfaction). Touch
+// hello.go to dirty it → second build is incremental. Implements count
+// must equal cold count (no drift, no duplicates).
+func TestIncremental_ImplementsEdgesNoDrift(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "go.mod"), `module example.com/implpin
+
+go 1.21
+`)
+	mustWrite(t, filepath.Join(dir, "greeter.go"), `package implpin
+
+// Greeter is satisfied by Hello below.
+type Greeter interface {
+	Greet() string
+}
+`)
+	helloPath := filepath.Join(dir, "hello.go")
+	mustWrite(t, helloPath, `package implpin
+
+// Hello satisfies Greeter via a value-receiver method.
+type Hello struct{}
+
+func (h Hello) Greet() string { return "hi" }
+`)
+	out := t.TempDir()
+
+	// Cold build — establishes baseline implements count.
+	_ = runBuild(t, dir, out)
+	dbPath := filepath.Join(out, "graph.db")
+	coldImpl := countEdgesByType(t, dbPath, "implements")
+	if coldImpl < 1 {
+		t.Fatalf("cold build must emit ≥1 implements edge, got %d", coldImpl)
+	}
+
+	// Incremental rebuild — touch hello.go's mtime AND content (comment edit)
+	// to force the cache classifier to mark it dirty.
+	mustWrite(t, helloPath, `package implpin
+
+// Hello satisfies Greeter via a value-receiver method (comment edited
+// to invalidate this file's cache for the incremental drift test).
+type Hello struct{}
+
+func (h Hello) Greet() string { return "hi" }
+`)
+	runBuild(t, dir, out)
+	incImpl := countEdgesByType(t, dbPath, "implements")
+	if incImpl != coldImpl {
+		t.Errorf("implements drift on incremental rebuild: cold=%d inc=%d (regression: incremental path missing EmitImplementsEdges or DROP)",
+			coldImpl, incImpl)
+	}
+}
+
+// countEdgesByType opens the SQLite graph at dbPath read-only and returns
+// the number of edges of the given type. Used by edge-preservation tests.
+func countEdgesByType(t *testing.T, dbPath, edgeType string) int {
+	t.Helper()
+	store, err := persist.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("open db %s: %v", dbPath, err)
+	}
+	defer store.Close()
+	edges, err := store.QueryEdgesByType(edgeType)
+	if err != nil {
+		t.Fatalf("query %s edges: %v", edgeType, err)
+	}
+	return len(edges)
+}
+
 // countCrossFileCallsEdges queries the SQLite graph for `calls` edges whose
 // src and dst nodes live in different files. Used by edge-preservation tests.
 func countCrossFileCallsEdges(t *testing.T, dbPath string) int {

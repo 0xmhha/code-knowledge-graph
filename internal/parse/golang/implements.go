@@ -93,10 +93,18 @@ func EmitImplementsEdges(pkgs []*packages.Package, nodes []types.Node) []types.E
 				continue
 			}
 			qname := pkgName + "." + tn.Name()
-			if _, dup := seen[qname]; dup {
+			// Dedup key uses the full import path so two packages declaring
+			// the same simple name (e.g. internal/parse/golang and
+			// internal/parse/typescript both named "parser") don't collide
+			// and silently drop one package's types. The stored qname keeps
+			// the short form because that's what visitFuncDecl/emitTypeSpec
+			// produce when emitting node IDs — downstream qnameToID lookup
+			// must match those.
+			seenKey := pkg.Types.Path() + "." + tn.Name()
+			if _, dup := seen[seenKey]; dup {
 				continue
 			}
-			seen[qname] = struct{}{}
+			seen[seenKey] = struct{}{}
 
 			if iface, ok := named.Underlying().(*gotypes.Interface); ok {
 				ifaces = append(ifaces, typedNamed{qname: qname, named: named, iface: iface})
@@ -106,7 +114,13 @@ func EmitImplementsEdges(pkgs []*packages.Package, nodes []types.Node) []types.E
 		}
 	}
 
-	out := make([]types.Edge, 0, len(concretes))
+	// Capacity hint: max-bound estimate (every concrete satisfies every
+	// interface). Undershooting causes append re-grows on dense graphs.
+	maxIfaces := len(ifaces)
+	if maxIfaces == 0 {
+		maxIfaces = 1
+	}
+	out := make([]types.Edge, 0, len(concretes)*maxIfaces)
 
 	// Pair (concrete, interface) → emit implements when satisfied.
 	for _, iface := range ifaces {
@@ -132,6 +146,12 @@ func EmitImplementsEdges(pkgs []*packages.Package, nodes []types.Node) []types.E
 			// Check both T and *T — value-receiver methods belong to both
 			// method sets, pointer-receiver methods only to *T's. Standard
 			// Go interface satisfaction semantics.
+			//
+			// Generics caveat: uninstantiated *gotypes.Named with TypeParams()
+			// != nil return false from Implements — go/types only resolves
+			// satisfaction once type arguments are known. V0 doesn't track
+			// instantiation sites, so generic-implementations of interfaces
+			// are intentionally skipped here.
 			if gotypes.Implements(impl.named, iface.iface) ||
 				gotypes.Implements(gotypes.NewPointer(impl.named), iface.iface) {
 				out = append(out, types.Edge{
