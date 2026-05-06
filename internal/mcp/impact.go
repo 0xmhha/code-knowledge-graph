@@ -18,6 +18,7 @@ package mcp
 
 import (
 	"context"
+	"sort"
 
 	mcp "github.com/mark3labs/mcp-go/mcp"
 	server "github.com/mark3labs/mcp-go/server"
@@ -34,17 +35,32 @@ const impactDepthCap = 5
 // impactEdgeTypes is the broader reverse-traversal edge set used by
 // impact_of_change. It excludes structural edges (contains/defines) — those
 // would resolve every method back to its file/package and drown the result
-// — and excludes lock/concurrency/temporal edges, which describe runtime or
-// historical state rather than a change-impact dependency.
+// — and excludes lock/temporal edges, which describe runtime or historical
+// state rather than a change-impact dependency.
 //
-// The five groups below intentionally line up with the output buckets so
+// Intentionally excluded (NOT a change-impact relationship in the user-task
+// sense):
+//   - acquires_lock / releases_lock / accessed_under_lock — runtime locking
+//     state. Touching a function under a lock does not mean changing it
+//     impacts the lock owner; it changes serialisation guarantees, which is
+//     a separate concern surfaced by future locking-aware tools.
+//   - changed_in / blame — git history. A commit that previously touched the
+//     seed does not need to be "examined" when the seed changes again.
+//
+// The six groups below intentionally line up with the output buckets so
 // each edge has exactly one home category.
 var (
 	impactEdgesCallers     = []string{"calls", "invokes"}
 	impactEdgesInterface   = []string{"implements", "extends"}
 	impactEdgesTypeUsers   = []string{"uses_type", "instantiates", "reads_field", "writes_field", "reads_mapping", "writes_mapping"}
 	impactEdgesDistributed = []string{"listens_on", "handles_message", "rpc_calls", "binds_to"}
-	impactEdgesOtherRefs   = []string{"references", "emits_event", "has_modifier", "has_decorator"}
+	impactEdgesConcurrent  = []string{"spawns", "sends_to", "recvs_from"}
+	// other_refs absorbs the long tail. `imports`/`exports` (TS module edges)
+	// land here rather than getting their own group: a change to the seed
+	// triggers a "go re-read this importer" examination just like
+	// `references` does, and a dedicated `module` bucket would be empty for
+	// every Go-only graph.
+	impactEdgesOtherRefs = []string{"references", "emits_event", "has_modifier", "has_decorator", "imports", "exports"}
 )
 
 // impactGroup binds an output bucket name to its edge filter. Order matters
@@ -60,6 +76,7 @@ func impactGroups() []impactGroup {
 		{key: "interface_impact", edges: impactEdgesInterface},
 		{key: "type_users", edges: impactEdgesTypeUsers},
 		{key: "distributed", edges: impactEdgesDistributed},
+		{key: "concurrent", edges: impactEdgesConcurrent},
 		{key: "other_refs", edges: impactEdgesOtherRefs},
 	}
 }
@@ -68,8 +85,27 @@ func impactGroups() []impactGroup {
 // or seed_file must be set; if both are set, seed_qname wins (less ambiguous,
 // and the qname path returns a single seed node for the response envelope).
 func registerImpactOfChange(s *server.MCPServer, store persist.StoreReader) {
+	// Output schema (structuredContent payload):
+	//   depth        int                — actual depth used (post-clamp)
+	//   seed         object?            — single-seed envelope (qname mode)
+	//   seeds        []object?          — multi-seed envelope (file mode)
+	//   seed_file    string?            — echoed file path (file mode)
+	//   seed_qname   string?            — echoed seed qname when not_found
+	//   not_found    bool?              — true when the seed did not resolve
+	//   impact       map[string][]node  — keys: callers, interface_impact,
+	//                                     type_users, distributed, concurrent,
+	//                                     other_refs (always all six, possibly
+	//                                     empty so consumers don't nil-check)
+	//   edges        [][]any            — [src, dst, type, line] triples
+	//   totals       object             — { nodes, edges, by_group }
+	//   metadata     object             — { warnings: [...] }
 	tool := mcp.NewTool("impact_of_change",
-		mcp.WithDescription("Reverse-dependency closure for a symbol or file. Returns nodes/edges grouped by impact category (callers, interface_impact, type_users, distributed, other_refs)."),
+		mcp.WithDescription(
+			"Reverse-dependency closure for a symbol or file. Returns nodes/edges grouped by impact category "+
+				"(callers, interface_impact, type_users, distributed, concurrent, other_refs). "+
+				"If results look empty for a Go concrete-method seed, retry with the interface method qname "+
+				"(Go's call graph binds invocations to the interface, not the concrete receiver).",
+		),
 		mcp.WithString("seed_qname"),
 		mcp.WithString("seed_file"),
 		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
@@ -98,6 +134,13 @@ func registerImpactOfChange(s *server.MCPServer, store persist.StoreReader) {
 // computeImpact is the algorithm body, factored out for direct testing
 // without going through the MCP request envelope. Returns the structured
 // payload that the tool handler wraps in textResult.
+//
+// The output is fully deterministic for a fixed (store, seed, depth) tuple:
+// per-group node slices are sorted by qname (tiebreak id), edge triples by
+// (type, src, dst, line), warnings by node_id, and the multi-seed echo by id.
+// The Go map iteration randomness is therefore boundary-only — it never
+// leaks into the JSON-marshalled response, which keeps the LLM context
+// cache stable across calls.
 func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth int, includeBlobs bool) (map[string]any, error) {
 	// Resolve seed(s). seed_qname wins when both are set.
 	seeds, primary, err := resolveImpactSeeds(store, seedQname, seedFile)
@@ -105,10 +148,19 @@ func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth 
 		return nil, err
 	}
 	if len(seeds) == 0 {
-		return map[string]any{
+		// Echo whichever seed identifier the caller supplied so an LLM
+		// can confirm what was attempted without re-reading the request.
+		out := map[string]any{
 			"not_found": true,
 			"depth":     depth,
-		}, nil
+		}
+		if seedQname != "" {
+			out["seed_qname"] = seedQname
+		}
+		if seedFile != "" {
+			out["seed_file"] = seedFile
+		}
+		return out, nil
 	}
 
 	// Per-group reverse traversal. We walk each group's edge filter
@@ -121,7 +173,7 @@ func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth 
 		nodes []map[string]any
 		count int
 	}
-	groupOut := make(map[string]groupResult, 5)
+	groupOut := make(map[string]groupResult, len(impactGroups()))
 
 	dedupNodes := map[string]types.Node{}
 	dedupEdges := map[string]types.Edge{}
@@ -158,9 +210,23 @@ func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth 
 			}
 		}
 
-		// Project reached nodes for this bucket into the LLM-facing shape.
-		bucket := make([]map[string]any, 0, len(reached))
+		// Sort reached nodes by qname (tiebreak id) BEFORE projecting
+		// into the LLM-facing shape — Go map iteration is random, and
+		// without this the same seed yields different bucket ordering
+		// across calls, breaking prompt cache reuse.
+		sortedNodes := make([]types.Node, 0, len(reached))
 		for _, n := range reached {
+			sortedNodes = append(sortedNodes, n)
+		}
+		sort.Slice(sortedNodes, func(i, j int) bool {
+			if sortedNodes[i].QualifiedName != sortedNodes[j].QualifiedName {
+				return sortedNodes[i].QualifiedName < sortedNodes[j].QualifiedName
+			}
+			return sortedNodes[i].ID < sortedNodes[j].ID
+		})
+
+		bucket := make([]map[string]any, 0, len(sortedNodes))
+		for _, n := range sortedNodes {
 			m := nodeToImpactEntry(store, n, includeBlobs, &warnings)
 			bucket = append(bucket, m)
 		}
@@ -169,11 +235,40 @@ func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth 
 
 	// Edge triples — keep them compact (Type, Src, Dst, Line) to match
 	// the existing find_callers / get_subgraph envelope without bloating
-	// the response.
-	edgeTriples := make([][]any, 0, len(dedupEdges))
+	// the response. Sort by (type, src, dst, line) so the same graph
+	// always produces the same JSON; otherwise dedupEdges' map iteration
+	// shuffles the slice on every call.
+	sortedEdges := make([]types.Edge, 0, len(dedupEdges))
 	for _, e := range dedupEdges {
+		sortedEdges = append(sortedEdges, e)
+	}
+	sort.Slice(sortedEdges, func(i, j int) bool {
+		a, b := sortedEdges[i], sortedEdges[j]
+		if a.Type != b.Type {
+			return a.Type < b.Type
+		}
+		if a.Src != b.Src {
+			return a.Src < b.Src
+		}
+		if a.Dst != b.Dst {
+			return a.Dst < b.Dst
+		}
+		return a.Line < b.Line
+	})
+	edgeTriples := make([][]any, 0, len(sortedEdges))
+	for _, e := range sortedEdges {
 		edgeTriples = append(edgeTriples, []any{e.Src, e.Dst, string(e.Type), e.Line})
 	}
+
+	// Sort warnings by node_id so the metadata block is also stable.
+	// TODO(issue-6): emit a dedicated `anonymous-node` warning code when
+	// a reached node carries an empty qname (currently silently filtered
+	// upstream in resolveImpactSeeds for the seed itself only).
+	sort.Slice(warnings, func(i, j int) bool {
+		ai, _ := warnings[i]["node_id"].(string)
+		bj, _ := warnings[j]["node_id"].(string)
+		return ai < bj
+	})
 
 	// Build totals.by_group ahead of the impact map so the response is
 	// deterministic for tests.
@@ -206,8 +301,15 @@ func computeImpact(store persist.StoreReader, seedQname, seedFile string, depth 
 		resp["seed"] = seedSummary(*primary)
 	}
 	if seedFile != "" && seedQname == "" {
-		seedList := make([]map[string]any, 0, len(seeds))
-		for _, s := range seeds {
+		// Sort seeds by id so the multi-rooted echo is stable across
+		// calls (NodesByFilePath ordering is implementation-defined).
+		sortedSeeds := make([]types.Node, len(seeds))
+		copy(sortedSeeds, seeds)
+		sort.Slice(sortedSeeds, func(i, j int) bool {
+			return sortedSeeds[i].ID < sortedSeeds[j].ID
+		})
+		seedList := make([]map[string]any, 0, len(sortedSeeds))
+		for _, s := range sortedSeeds {
 			seedList = append(seedList, seedSummary(s))
 		}
 		resp["seeds"] = seedList

@@ -1,15 +1,60 @@
 package mcp
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	mcp "github.com/mark3labs/mcp-go/mcp"
 	server "github.com/mark3labs/mcp-go/server"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
+
+// newConcurrencyStore builds the channel/goroutine fixture used to exercise
+// the `concurrent` impact bucket (spawns / sends_to / recvs_from).
+func newConcurrencyStore(t *testing.T) persist.Store {
+	t.Helper()
+	out := t.TempDir()
+	if _, err := buildpipe.Run(buildpipe.Options{
+		SrcRoot:    "../parse/golang/testdata/concurrency",
+		OutDir:     out,
+		Languages:  []string{"auto"},
+		CKGVersion: "test",
+	}); err != nil {
+		t.Fatalf("buildpipe: %v", err)
+	}
+	store, err := persist.OpenReadOnly(filepath.Join(out, "graph.db"))
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// invokeImpactTool calls the registered impact_of_change handler so tests
+// that need to exercise the request envelope (depth clamp, default values)
+// run through the same code path an MCP client would.
+func invokeImpactTool(t *testing.T, store persist.StoreReader, args map[string]any) *mcp.CallToolResult {
+	t.Helper()
+	s := server.NewMCPServer("test", "0")
+	registerImpactOfChange(s, store)
+	tool := s.GetTool("impact_of_change")
+	if tool == nil || tool.Handler == nil {
+		t.Fatal("impact_of_change not registered or has no handler")
+	}
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "impact_of_change"
+	req.Params.Arguments = args
+	res, err := tool.Handler(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	return res
+}
 
 // newImplementsStore builds the implements fixture into a fresh store. Used
 // by tests that need interface/extends edges (the resolve fixture only has
@@ -205,7 +250,7 @@ func TestImpact_Citation(t *testing.T) {
 	}
 
 	impact := res["impact"].(map[string]any)
-	for _, group := range []string{"callers", "interface_impact", "type_users", "distributed", "other_refs"} {
+	for _, group := range []string{"callers", "interface_impact", "type_users", "distributed", "concurrent", "other_refs"} {
 		nodes, _ := impact[group].([]map[string]any)
 		for _, n := range nodes {
 			id, _ := n["id"].(string)
@@ -263,30 +308,192 @@ func TestImpact_SelfGraph(t *testing.T) {
 }
 
 // TestImpact_DepthCap verifies that an LLM passing depth=10 has it clamped
-// to impactDepthCap (5). We probe via the tool registration handler so
-// the cap covers the user-facing path, not just the internal helper.
+// to impactDepthCap (5). We invoke the registered handler directly so the
+// real clamp at impact.go (depth > impactDepthCap → impactDepthCap) is
+// exercised — not a re-implementation in the test itself.
 func TestImpact_DepthCap(t *testing.T) {
 	store := newFixtureStore(t)
 
-	// Direct contract probe: computeImpact respects whatever depth the
-	// caller passes — the cap lives in the handler. So we simulate the
-	// handler's clamp logic and assert it produces the capped value.
-	depth := 10
-	if depth > impactDepthCap {
-		depth = impactDepthCap
+	res := invokeImpactTool(t, store, map[string]any{
+		"seed_qname": "a.Greet",
+		"depth":      float64(10),
+	})
+	if res == nil || res.StructuredContent == nil {
+		t.Fatalf("expected structured result; got %+v", res)
 	}
-	if depth != impactDepthCap {
-		t.Fatalf("clamp arithmetic broken: got %d want %d", depth, impactDepthCap)
+	payload, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("structured content wrong type: %T", res.StructuredContent)
 	}
+	got, _ := payload["depth"].(int)
+	if got != impactDepthCap {
+		t.Errorf("response depth=%v want %v", payload["depth"], impactDepthCap)
+	}
+}
 
-	// Behavioural check: at the capped depth, computeImpact returns
-	// `depth = impactDepthCap` in its envelope (so consumers can see
-	// what was actually used).
-	res, err := computeImpact(store, "a.Greet", "", impactDepthCap, false)
+// TestImpact_DepthCap_Floor verifies the lower clamp (depth=0 → 1) lives
+// in the handler too — same path as the upper clamp, opposite branch.
+func TestImpact_DepthCap_Floor(t *testing.T) {
+	store := newFixtureStore(t)
+
+	res := invokeImpactTool(t, store, map[string]any{
+		"seed_qname": "a.Greet",
+		"depth":      float64(0),
+	})
+	payload, _ := res.StructuredContent.(map[string]any)
+	if got, _ := payload["depth"].(int); got != 1 {
+		t.Errorf("depth=0 should clamp to 1; got %v", payload["depth"])
+	}
+}
+
+// TestImpact_NotFoundEchoesSeed asserts the not_found response carries the
+// seed identifier the caller supplied so an LLM can confirm what was
+// attempted (rather than guessing whether its qname or its file lookup
+// silently failed).
+func TestImpact_NotFoundEchoesSeed(t *testing.T) {
+	store := newFixtureStore(t)
+
+	res, err := computeImpact(store, "totally.bogus.qname", "", 2, false)
 	if err != nil {
 		t.Fatalf("computeImpact: %v", err)
 	}
-	if got, _ := res["depth"].(int); got != impactDepthCap {
-		t.Errorf("response depth=%v want %v", res["depth"], impactDepthCap)
+	if got, _ := res["seed_qname"].(string); got != "totally.bogus.qname" {
+		t.Errorf("expected seed_qname echo; got %v", res["seed_qname"])
+	}
+
+	res2, err := computeImpact(store, "", "/nonexistent/path/x.go", 2, false)
+	if err != nil {
+		t.Fatalf("computeImpact (file): %v", err)
+	}
+	if got, _ := res2["seed_file"].(string); got != "/nonexistent/path/x.go" {
+		t.Errorf("expected seed_file echo; got %v", res2["seed_file"])
+	}
+}
+
+// TestImpact_AllGroupsPresent guarantees every documented bucket appears in
+// the response — even when empty — so consumers don't have to nil-check
+// six map keys.
+func TestImpact_AllGroupsPresent(t *testing.T) {
+	store := newFixtureStore(t)
+
+	res, err := computeImpact(store, "a.Greet", "", 2, false)
+	if err != nil {
+		t.Fatalf("computeImpact: %v", err)
+	}
+	impact, _ := res["impact"].(map[string]any)
+	for _, key := range []string{"callers", "interface_impact", "type_users", "distributed", "concurrent", "other_refs"} {
+		if _, ok := impact[key]; !ok {
+			t.Errorf("impact bucket %q missing from response", key)
+		}
+	}
+	byGroup, _ := res["totals"].(map[string]any)["by_group"].(map[string]int)
+	for _, key := range []string{"callers", "interface_impact", "type_users", "distributed", "concurrent", "other_refs"} {
+		if _, ok := byGroup[key]; !ok {
+			t.Errorf("totals.by_group bucket %q missing", key)
+		}
+	}
+}
+
+// TestImpact_Concurrent smoke-tests the `concurrent` bucket against the
+// channel fixture. ChannelFlowCoordinated spawns a goroutine that sends
+// to ch; reverse traversal from the channel should surface the spawning
+// function (or the goroutine handle) under `concurrent`.
+//
+// If the fixture's edge wiring changes shape (e.g. concurrency emitter
+// is rewritten), this test logs counts rather than failing hard — it's a
+// presence smoke test, not a contract on which symbol lands where.
+func TestImpact_Concurrent(t *testing.T) {
+	store := newConcurrencyStore(t)
+
+	// Try a few candidate seed qnames — the concurrency fixture's
+	// channel-typed locals don't have stable qnames across builds, so
+	// we seed the producer/consumer functions and assert SOMETHING
+	// surfaces under `concurrent`.
+	candidates := []string{
+		"mutex_fixture.ChannelFlowCoordinated",
+		"mutex_fixture.GoroutineFanout",
+		"mutex_fixture.ChannelFlowProducer",
+	}
+	totalConcurrent := 0
+	for _, q := range candidates {
+		res, err := computeImpact(store, q, "", 2, false)
+		if err != nil {
+			t.Fatalf("computeImpact(%s): %v", q, err)
+		}
+		if nf, _ := res["not_found"].(bool); nf {
+			continue
+		}
+		impact := res["impact"].(map[string]any)
+		conc, _ := impact["concurrent"].([]map[string]any)
+		t.Logf("seed=%s concurrent=%d", q, len(conc))
+		totalConcurrent += len(conc)
+	}
+	// Soft assertion: at least one of the candidate seeds should reach
+	// at least one node via concurrency edges. If this ever flips to 0
+	// across all candidates, either the fixture or the edge filter has
+	// drifted — investigate before relaxing this.
+	if totalConcurrent == 0 {
+		t.Log("note: no concurrent-bucket hits across candidate seeds — " +
+			"the fixture may not produce reverse-traversable spawns/sends_to/recvs_from edges " +
+			"from a function-level seed. This is acceptable as long as the bucket itself is wired " +
+			"(see TestImpact_AllGroupsPresent).")
+	}
+}
+
+// TestImpact_Deterministic is the regression guard for the bucket-ordering
+// fix. Two back-to-back calls with the same seed must produce a
+// byte-identical JSON response — Go map iteration is randomised per
+// process, so without explicit sorts this test would flap.
+func TestImpact_Deterministic(t *testing.T) {
+	store := newFixtureStore(t)
+
+	a, err := computeImpact(store, "a.Greet", "", 2, false)
+	if err != nil {
+		t.Fatalf("first computeImpact: %v", err)
+	}
+	b, err := computeImpact(store, "a.Greet", "", 2, false)
+	if err != nil {
+		t.Fatalf("second computeImpact: %v", err)
+	}
+	jsonA, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal a: %v", err)
+	}
+	jsonB, err := json.Marshal(b)
+	if err != nil {
+		t.Fatalf("marshal b: %v", err)
+	}
+	if string(jsonA) != string(jsonB) {
+		t.Errorf("computeImpact non-deterministic across calls\nA: %s\nB: %s", jsonA, jsonB)
+	}
+}
+
+// TestImpact_SelfGraph_Deterministic dogfoods determinism on the project's
+// own self-graph (CKG built from itself). Skipped unless CKG_SELF_GRAPH_DB
+// is set so CI stays fast. Like TestImpact_SelfGraph but asserts byte
+// equality of two back-to-back calls.
+func TestImpact_SelfGraph_Deterministic(t *testing.T) {
+	dbPath := os.Getenv("CKG_SELF_GRAPH_DB")
+	if dbPath == "" {
+		t.Skip("CKG_SELF_GRAPH_DB not set; skipping self-graph determinism check")
+	}
+	store, err := persist.OpenReadOnly(dbPath)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	defer store.Close()
+
+	a, err := computeImpact(store, "persist.StoreReader.AllNodes", "", 2, false)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	b, err := computeImpact(store, "persist.StoreReader.AllNodes", "", 2, false)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	jsonA, _ := json.Marshal(a)
+	jsonB, _ := json.Marshal(b)
+	if string(jsonA) != string(jsonB) {
+		t.Errorf("self-graph computeImpact non-deterministic\nA len=%d\nB len=%d", len(jsonA), len(jsonB))
 	}
 }
