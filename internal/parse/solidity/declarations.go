@@ -23,8 +23,12 @@ type declVisitor struct {
 	abi     map[string][]ABISig
 }
 
-func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node, abi map[string][]ABISig) *declVisitor {
-	v := &declVisitor{rel: rel, src: src, lang: lang, root: root, abi: abi}
+// newDeclVisitor allocates a per-file visitor with a local abi map. The
+// caller (ParseFile) merges v.abi into the shared Parser.abi under lock
+// after visit() returns — this keeps collectABI race-free under the
+// concurrent ParseFile dispatch buildpipe now uses.
+func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
+	v := &declVisitor{rel: rel, src: src, lang: lang, root: root, abi: map[string][]ABISig{}}
 	fileQ := "file:" + rel
 	v.fileID = parse.MakeID(fileQ, "sol", 0)
 	v.nodes = append(v.nodes, types.Node{

@@ -9,6 +9,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
+	"sync"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
 	"github.com/0xmhha/code-knowledge-graph/internal/link"
@@ -18,6 +21,103 @@ import (
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
+
+// parseWorkers caps the parallel parser goroutine count. Capped at 8 to keep
+// disk IO predictable on laptops with NVMe + many cores; larger values gain
+// little because parse work is mostly CPU-bound after read.
+func parseWorkers() int {
+	n := runtime.GOMAXPROCS(0)
+	if n > 8 {
+		return 8
+	}
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// parseConcurrent runs parseOne across files in parallel and streams the
+// per-file ParseResults through a channel to a single collector goroutine.
+// This pattern is intentional dogfood material for ckg's own concurrency
+// detector: parseConcurrent emits real `go` statements, sync.WaitGroup
+// usage, channel sends/recvs, and a sync.Mutex guarding the error counter.
+// When ckg analyses its own source, the resulting graph contains non-zero
+// G4 (concurrency) edges that exercise spawns / sends_to / recvs_from /
+// acquires_lock paths end-to-end.
+//
+// "Many parsers, single writer" is preserved — the parser side fans out
+// freely, but the consumer side is one goroutine that drains the result
+// channel before passing the slice to Pass 2 Resolve. This mirrors the
+// SQLite single-writer constraint downstream and keeps Pass 2 deterministic.
+//
+// Determinism: results are sorted by file path before return, so Pass 2
+// Resolve sees the same iteration order as the previous sequential code.
+func parseConcurrent(
+	srcRoot string,
+	files []string,
+	log *slog.Logger,
+	parseOne func(full string, src []byte) (*parse.ParseResult, error),
+	logTag string,
+) ([]*parse.ParseResult, int) {
+	workers := parseWorkers()
+	resultCh := make(chan *parse.ParseResult, workers)
+	sem := make(chan struct{}, workers)
+
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	errs := 0
+
+	for _, rel := range files {
+		wg.Add(1)
+		go func(rel string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			full := filepath.Join(srcRoot, rel)
+			src, err := os.ReadFile(full)
+			if err != nil {
+				log.Warn(logTag+" read", "path", full, "err", err)
+				errMu.Lock()
+				errs++
+				errMu.Unlock()
+				return
+			}
+			r, err := parseOne(full, src)
+			if err != nil {
+				log.Warn(logTag+" parse", "path", full, "err", err)
+				errMu.Lock()
+				errs++
+				errMu.Unlock()
+				return
+			}
+			stampFilePath(r)
+			resultCh <- r
+		}(rel)
+	}
+
+	// Closer goroutine: waits for all parsers, then closes the result
+	// channel so the collector loop terminates.
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Single collector goroutine — owns the result slice and is the only
+	// writer to it. Mirrors the persist side's single-writer contract.
+	collected := make(chan []*parse.ParseResult, 1)
+	go func() {
+		var out []*parse.ParseResult
+		for r := range resultCh {
+			out = append(out, r)
+		}
+		collected <- out
+	}()
+	results := <-collected
+
+	sort.Slice(results, func(i, j int) bool { return results[i].Path < results[j].Path })
+	return results, errs
+}
 
 // collectPendingRefs flattens per-file ParseResults into PendingRefRow records
 // (G6 v3, schema 1.5) with file_path stamped from each ParseResult.Path.
@@ -65,25 +165,7 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 	} else {
 		p.SetPackages(pkgs)
 	}
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("read file", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("parse file", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
+	results, errs := parseConcurrent(srcRoot, files, log, p.ParseFile, "go")
 	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
 	return rg, pending, errs, err
@@ -116,25 +198,7 @@ func stampFilePath(r *parse.ParseResult) {
 // and any fatal Resolve error. Mirrors runGoPipeline.
 func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
 	p := tsp.New(srcRoot)
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("ts read", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("ts parse", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
+	results, errs := parseConcurrent(srcRoot, files, log, p.ParseFile, "ts")
 	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
 	return rg, pending, errs, err
@@ -144,25 +208,7 @@ func runTSPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 // instance so callers can read the accumulated ABI for cross-language linking.
 func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, *solp.Parser, error) {
 	p := solp.New(srcRoot)
-	results := []*parse.ParseResult{}
-	errs := 0
-	for _, rel := range files {
-		full := filepath.Join(srcRoot, rel)
-		src, err := os.ReadFile(full)
-		if err != nil {
-			log.Warn("sol read", "path", full, "err", err)
-			errs++
-			continue
-		}
-		r, err := p.ParseFile(full, src)
-		if err != nil {
-			log.Warn("sol parse", "path", full, "err", err)
-			errs++
-			continue
-		}
-		stampFilePath(r)
-		results = append(results, r)
-	}
+	results, errs := parseConcurrent(srcRoot, files, log, p.ParseFile, "sol")
 	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
 	return rg, pending, errs, p, err

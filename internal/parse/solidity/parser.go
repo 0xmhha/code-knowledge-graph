@@ -10,6 +10,7 @@ package solidity
 import (
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
@@ -21,10 +22,11 @@ import (
 //
 // abi accumulates per-contract function signatures across ParseFile calls
 // so that the cross-language linker (T20) can match them to TypeScript
-// classes by name. Mutated in place from declVisitor.collectABI; safe under
-// the dispatcher's per-language sequential Resolve pass.
+// classes by name. Mutated in place from declVisitor.collectABI under
+// abiMu — buildpipe runs ParseFile concurrently across files.
 type Parser struct {
 	srcRoot string
+	abiMu   sync.Mutex
 	abi     map[string][]ABISig
 }
 
@@ -53,8 +55,17 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		return nil, fmt.Errorf("solidity: parser returned nil tree for %s", rel)
 	}
 	defer tree.Close()
-	v := newDeclVisitor(rel, src, lang, tree.RootNode(), p.abi)
+	v := newDeclVisitor(rel, src, lang, tree.RootNode())
 	v.visit()
+	// Merge per-visitor abi into the shared Parser.abi under lock —
+	// ParseFile is dispatched concurrently across files (buildpipe).
+	if len(v.abi) > 0 {
+		p.abiMu.Lock()
+		for contract, sigs := range v.abi {
+			p.abi[contract] = append(p.abi[contract], sigs...)
+		}
+		p.abiMu.Unlock()
+	}
 	return &parse.ParseResult{
 		Path:    rel,
 		Nodes:   v.nodes,
@@ -64,8 +75,19 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 }
 
 // ABI returns the per-contract signatures collected during ParseFile.
-// Used by the cross-language linker (T20).
-func (p *Parser) ABI() map[string][]ABISig { return p.abi }
+// Used by the cross-language linker (T20). Caller is expected to invoke
+// ABI only after all ParseFile calls have completed (buildpipe enforces
+// this by collecting all results before reading ABI). The mutex guard is
+// defensive — under the documented call sequence there is no contention.
+func (p *Parser) ABI() map[string][]ABISig {
+	p.abiMu.Lock()
+	defer p.abiMu.Unlock()
+	out := make(map[string][]ABISig, len(p.abi))
+	for k, v := range p.abi {
+		out[k] = append([]ABISig(nil), v...)
+	}
+	return out
+}
 
 // Compile-time check that *Parser satisfies parse.Parser.
 var _ parse.Parser = (*Parser)(nil)
