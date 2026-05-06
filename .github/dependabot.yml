@@ -1,0 +1,54 @@
+# Dependabot keeps the three dependency surfaces this repo touches in
+# sync with upstream advisories: the Go module, the Next.js viewer's npm
+# tree, and the GitHub Actions used by .github/workflows/ci.yml.
+#
+# Update strategy:
+#   - weekly cadence (Monday default) so vulnerability windows close in
+#     ≤ 7 days from public disclosure.
+#   - minor + patch updates are GROUPED into one PR per ecosystem to
+#     reduce review noise. Major bumps still land as individual PRs so
+#     breaking changes are reviewed in isolation (next 14 → 15 was a
+#     hand-reviewed bump for exactly this reason — see commit 3451a7d).
+#   - open-pull-requests-limit: 5 per ecosystem caps PR queue length so
+#     dependabot can never overwhelm the human review surface.
+#
+# Reference: https://docs.github.com/en/code-security/dependabot
+version: 2
+updates:
+  # Go module — tracks go.mod / go.sum at repo root.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # npm — tracks the embedded Next.js viewer.
+  - package-ecosystem: "npm"
+    directory: "/web/viewer-next"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      npm-deps:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # GitHub Actions — tracks workflow uses: directives.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"

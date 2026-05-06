@@ -1,4 +1,4 @@
-.PHONY: all build viewer test test-race lint clean
+.PHONY: all build viewer test test-race lint audit clean
 
 GO ?= go
 
@@ -43,6 +43,32 @@ test-race:
 
 lint:
 	$(GO) vet ./...
+
+# audit: dependency-tree vulnerability scan for both languages.
+#
+#   - govulncheck (Go side): hits the Go vulnerability DB via
+#     golang.org/x/vuln/cmd/govulncheck. Reports only call-graph-reachable
+#     vulns by default — false-positive rate is much lower than naive
+#     fingerprint scans.
+#   - npm audit (web/viewer-next): tree-fingerprint scan against npm's
+#     advisory DB. Gated at --audit-level=high so transitive low/moderate
+#     warnings (npm's stretch use of moderate) don't fail CI.
+#
+# Both must pass for the target to succeed. govulncheck is a soft
+# dependency: if not installed, we surface the install hint and exit
+# non-zero so operators know the gate is incomplete.
+audit:
+	@echo "=== Go module vulnerabilities (govulncheck) ==="
+	@if command -v govulncheck >/dev/null 2>&1; then \
+	    govulncheck ./...; \
+	else \
+	    echo "govulncheck not installed."; \
+	    echo "  install: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
+	    exit 1; \
+	fi
+	@echo ""
+	@echo "=== npm dependencies (web/viewer-next) ==="
+	cd web/viewer-next && npm audit --audit-level=high
 
 clean:
 	rm -rf bin/ /tmp/ckg-* coverage.out \
