@@ -6,6 +6,7 @@ import (
 
 	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/smartctx"
 )
 
 // TestBuildContextNotFound exercises the smart tool against an unrelated
@@ -28,7 +29,9 @@ func TestBuildContextNotFound(t *testing.T) {
 	}
 	defer store.Close()
 
-	res, err := buildContext(store, "zzzzz_no_match", 4000, true, 5)
+	res, err := smartctx.BuildContext(store, "zzzzz_no_match", smartctx.Options{
+		BudgetTokens: 4000, IncludeBlobs: true, MaxBodies: 5,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

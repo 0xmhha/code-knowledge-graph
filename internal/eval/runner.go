@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/0xmhha/code-knowledge-graph/pkg/smartctx"
 	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
 )
 
@@ -189,17 +190,22 @@ func isStale(store pkgstore.Reader, graphDir string) bool {
 	return strings.TrimSpace(string(out)) != m.SrcCommit
 }
 
-// smartContext duplicates the get_context_for_task logic (in-process).
-// In production it would call the MCP tool; for V0 hermetic eval we share
-// the implementation. Should be moved into a shared package in V1.
+// smartContext now delegates to pkg/smartctx — the same shared algorithm
+// MCP's get_context_for_task tool runs in production. Earlier eval used
+// `SearchFTS top-10 dump` which made H1/H2 hypotheses non-comparable
+// against real MCP behaviour (real BM25, 1-hop expand, score fusion).
+// Citation Enforcement metadata.warnings flows through too, so eval can
+// surface citation coverage as part of the δ baseline report.
 func smartContext(store pkgstore.Reader, query string) (string, error) {
-	// Reuse internal/mcp.buildContext via an exported symbol — for V0 we
-	// call SearchFTS + a brief packing here to avoid a circular import.
-	hits, err := store.SearchFTS(query, 10)
+	pack, err := smartctx.BuildContext(store, query, smartctx.Options{
+		BudgetTokens: 8000,
+		IncludeBlobs: true,
+		MaxBodies:    5,
+	})
 	if err != nil {
 		return "", err
 	}
-	return jsonString(hits), nil
+	return jsonString(pack), nil
 }
 
 func jsonString(v any) string {
