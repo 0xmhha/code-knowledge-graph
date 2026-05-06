@@ -15,6 +15,10 @@ func main() {
 		if errors.As(err, &ae) {
 			os.Exit(int(ae))
 		}
+		var ve validateExitCode
+		if errors.As(err, &ve) {
+			os.Exit(int(ve))
+		}
 		fmt.Fprintln(os.Stderr, "ckg:", err)
 		os.Exit(1)
 	}
