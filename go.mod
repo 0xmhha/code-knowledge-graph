@@ -2,6 +2,8 @@ module github.com/0xmhha/code-knowledge-graph
 
 go 1.25.5
 
+toolchain go1.25.9
+
 require (
 	github.com/0xmhha/cli-wrapper v0.2.1
 	github.com/anthropics/anthropic-sdk-go v1.38.0
