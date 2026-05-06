@@ -40,6 +40,34 @@ jobs:
           cp -R web/viewer-next/out/. internal/server/web_assets/
       - run: go build -o bin/ckg ./cmd/ckg
 
+  audit:
+    # Dependency-tree vulnerability scan over both languages. Runs in
+    # parallel with `test` so it never blocks fast feedback on code
+    # changes, but a failure here still fails the PR (no
+    # continue-on-error) — vulnerabilities should not be allowed to
+    # accumulate between releases.
+    #
+    # Single ubuntu runner is sufficient: advisory data is identical
+    # across OS/arch, so a matrix would only multiply the cost without
+    # adding signal.
+    #
+    # All `run:` steps below are static commands with no untrusted
+    # github.event.* interpolation, so workflow-injection guidance
+    # (https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/)
+    # does not apply here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      # `npm ci` (not `npm install`) so the audit reflects the exact
+      # locked tree, not the latest semver-resolved one.
+      - run: cd web/viewer-next && npm ci
+      - run: make audit
+
   smoke:
     needs: test
     runs-on: ubuntu-latest
