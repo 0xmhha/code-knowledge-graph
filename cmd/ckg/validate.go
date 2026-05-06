@@ -22,7 +22,7 @@ func (e validateExitCode) Error() string { return fmt.Sprintf("validate exit %d"
 
 func newValidateCmd() *cobra.Command {
 	var graphDir, dbDsn, format string
-	var useLLM bool
+	var useLLM, llmDryRun bool
 	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate a built graph for integrity (empty values, dangling edges, schema invariants)",
@@ -61,7 +61,11 @@ Exit codes:
 			ctx := cmd.Context()
 			validators := []validate.Validator{validate.NewSchemaValidator()}
 			if useLLM {
-				validators = append(validators, validate.NewLLMValidator())
+				lv := validate.NewLLMValidator()
+				// --llm-dry-run defaults to true; operators flip it to
+				// false explicitly to opt into the (V1+) wired path.
+				lv.DryRun = llmDryRun
+				validators = append(validators, lv)
 			}
 
 			reports := make([]*validate.Report, 0, len(validators))
@@ -101,7 +105,8 @@ Exit codes:
 	cmd.Flags().StringVar(&graphDir, "graph", "", "graph directory containing graph.db (required when --db is empty)")
 	cmd.Flags().StringVar(&dbDsn, "db", "", "PostgreSQL DSN; takes precedence over --graph when set")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text|json")
-	cmd.Flags().BoolVar(&useLLM, "llm", false, "run the LLMValidator skeleton (V0 no-op; V1+ wires real LLM checks)")
+	cmd.Flags().BoolVar(&useLLM, "llm", false, "run the LLMValidator (V0 dry-run: emits LLM-ready prompts; V1+ wires real LLM calls)")
+	cmd.Flags().BoolVar(&llmDryRun, "llm-dry-run", true, "in --llm mode, emit prompts instead of calling an LLM (default true; --llm-dry-run=false errors until V1 wiring lands)")
 	return cmd
 }
 
