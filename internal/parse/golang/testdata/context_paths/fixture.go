@@ -22,6 +22,12 @@ func WithCancelOnly() {
 	_ = cancel
 }
 
+func WithCancelCauseSite() {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	_ = ctx
+	cancel(nil) // call to silence lostcancel lint
+}
+
 func TwoTimeoutSites() {
 	a, _ := context.WithTimeout(context.Background(), time.Second)
 	b, _ := context.WithTimeout(context.Background(), 2*time.Second)

@@ -102,6 +102,30 @@ func TestContextPaths_Cancel(t *testing.T) {
 	}
 }
 
+// TestContextPaths_CancelCause — WithCancelCauseSite produces exactly one
+// cancellation_path self-loop in typed mode (EXTRACTED). Locks down the
+// Go 1.20+ context.WithCancelCause variant alongside WithCancel.
+func TestContextPaths_CancelCause(t *testing.T) {
+	root := "testdata/context_paths"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	got := findContextEdgesFor(t, g.Edges, g.Nodes, "context_paths_fixture.WithCancelCauseSite")
+	if len(got) != 1 {
+		t.Fatalf("WithCancelCauseSite edges: got %d, want 1 — %+v", len(got), got)
+	}
+	if got[0].Type != types.EdgeCancellationPath {
+		t.Errorf("edge type = %q, want %q", got[0].Type, types.EdgeCancellationPath)
+	}
+	if got[0].Src != got[0].Dst {
+		t.Errorf("expected self-loop, got src=%s dst=%s", got[0].Src, got[0].Dst)
+	}
+	if got[0].Confidence != types.ConfExtracted {
+		t.Errorf("typed-mode emit must be EXTRACTED, got %q", got[0].Confidence)
+	}
+}
+
 // TestContextPaths_TwoSites — TwoTimeoutSites produces TWO timeout_path
 // edges with distinct Lines (graph.Build's 4-tuple dedup keeps them
 // separate when Line differs).
@@ -220,11 +244,12 @@ func TestContextPaths_ASTOnlyFallback(t *testing.T) {
 		}
 	}
 	// Fixture has 4 timeout sites (1 in WithTimeoutOnly + 1 in WithDeadlineOnly
-	// + 2 in TwoTimeoutSites) and 1 cancellation site.
+	// + 2 in TwoTimeoutSites) and 2 cancellation sites (WithCancelOnly +
+	// WithCancelCauseSite).
 	if gotTimeout != 4 {
 		t.Errorf("AST-only timeout_path count = %d, want 4", gotTimeout)
 	}
-	if gotCancel != 1 {
-		t.Errorf("AST-only cancellation_path count = %d, want 1", gotCancel)
+	if gotCancel != 2 {
+		t.Errorf("AST-only cancellation_path count = %d, want 2", gotCancel)
 	}
 }
