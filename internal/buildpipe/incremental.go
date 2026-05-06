@@ -21,6 +21,7 @@ import (
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
+	"github.com/0xmhha/code-knowledge-graph/internal/filterlist"
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
@@ -32,7 +33,12 @@ import (
 
 // discoveryAll returns every discovered file in slash form with language tag.
 // Output is sorted by path so cache-decision logging is deterministic.
-func discoveryAll(srcRoot string, languages []string) ([]DiscoveredFile, persist.Manifest, int, int, int, error) {
+//
+// filter (optional): when non-nil, paths that fail filter.Allow are excluded
+// from the result before counting. This keeps the cache-decision logic in
+// sync with what runCold actually parses (--files-from is honoured by both
+// paths or neither — never one and not the other).
+func discoveryAll(srcRoot string, languages []string, filter *filterlist.FilterList) ([]DiscoveredFile, persist.Manifest, int, int, int, error) {
 	var lc persist.Manifest // language counts only — caller fills full manifest later
 	files, err := detect.Walk(srcRoot)
 	if err != nil {
@@ -41,6 +47,11 @@ func discoveryAll(srcRoot string, languages []string) ([]DiscoveredFile, persist
 	goFiles, err := detect.GoFiles(srcRoot)
 	if err != nil {
 		return nil, lc, 0, 0, 0, fmt.Errorf("detect go: %w", err)
+	}
+	if filter != nil {
+		goFiles = filter.FilterPaths(goFiles)
+		files.TS = filter.FilterPaths(files.TS)
+		files.Sol = filter.FilterPaths(files.Sol)
 	}
 	out := make([]DiscoveredFile, 0, len(goFiles)+len(files.TS)+len(files.Sol))
 	if shouldRun("go", languages) {
@@ -193,14 +204,14 @@ func runIncremental(opt Options, log *slog.Logger,
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Build: %w", err)
 	}
-	if err := graph.Validate(g); err != nil {
-		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
+	if _, err := validateAndSanitize(g, log, "incremental", opt.StrictValidate); err != nil {
+		return persist.Manifest{}, err
 	}
 
 	// (5) Derived passes — xlang, temporal, cluster, score. Same helper as
 	// cold path; DB drops in step (1) ensure the in-memory re-emission
 	// translates cleanly to the persist step.
-	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log)
+	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
 	if err != nil {
 		return persist.Manifest{}, err
 	}

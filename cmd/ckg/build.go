@@ -10,9 +10,9 @@ import (
 )
 
 func newBuildCmd() *cobra.Command {
-	var src, out, dbDsn string
+	var src, out, dbDsn, filesFrom string
 	var langs []string
-	var noCache, rebuildMetrics bool
+	var noCache, rebuildMetrics, strictValidate bool
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
@@ -32,6 +32,8 @@ func newBuildCmd() *cobra.Command {
 				NoCache:        noCache,
 				RebuildMetrics: rebuildMetrics,
 				DBDSN:          dbDsn,
+				StrictValidate: strictValidate,
+				FilesFromPath:  filesFrom,
 			})
 			if err != nil {
 				return err
@@ -50,6 +52,10 @@ func newBuildCmd() *cobra.Command {
 		"force PageRank/Leiden recompute even when cache would otherwise reuse them")
 	cmd.Flags().StringVar(&dbDsn, "db", "",
 		"PostgreSQL DSN (e.g. postgres://user:pass@host/dbname); if set, store graph in PG instead of local SQLite")
+	cmd.Flags().BoolVar(&strictValidate, "strict-validate", false,
+		"abort on first dangling edge (legacy v0.x behaviour); default lenient drops them with a warning")
+	cmd.Flags().StringVar(&filesFrom, "files-from", "",
+		"path to JSON file with {include, exclude} glob patterns; restricts which files reach the parsers")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

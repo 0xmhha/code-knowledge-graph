@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/internal/detect"
+	"github.com/0xmhha/code-knowledge-graph/internal/filterlist"
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
 	"github.com/0xmhha/code-knowledge-graph/internal/link"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
@@ -38,21 +39,21 @@ import (
 // and binds_to are the caller's responsibility (cold wipes everything via
 // openColdStore; incremental issues targeted DeleteEdgesByType).
 func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
-	log *slog.Logger) (*cluster.PkgTree, *cluster.TopicTree, error) {
+	log *slog.Logger, strict bool) (*cluster.PkgTree, *cluster.TopicTree, error) {
 	if solParser != nil {
 		abi := convertABI(solParser.ABI())
 		xlEdges := link.SolToTS(g.Nodes, abi)
 		g.Edges = append(g.Edges, xlEdges...)
-		if err := graph.Validate(g); err != nil {
-			return nil, nil, fmt.Errorf("validate after xlang: %w", err)
+		if _, err := validateAndSanitize(g, log, "xlang", strict); err != nil {
+			return nil, nil, err
 		}
 		log.Info("xlang linked", "binds_to", len(xlEdges))
 	}
 	if err := emitTemporalEdges(g, srcRoot, log, 0); err != nil {
 		return nil, nil, fmt.Errorf("temporal: %w", err)
 	}
-	if err := graph.Validate(g); err != nil {
-		return nil, nil, fmt.Errorf("validate after temporal: %w", err)
+	if _, err := validateAndSanitize(g, log, "temporal", strict); err != nil {
+		return nil, nil, err
 	}
 	pkgTree := cluster.BuildPkgTree(g)
 	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
@@ -81,6 +82,44 @@ type Options struct {
 	// OutDir is still used for manifest.json; --no-cache and incremental work the
 	// same way (NodesByFilePath reads from PG with ORDER BY start_line).
 	DBDSN string
+	// StrictValidate, when true, fails the build on the first dangling edge or
+	// schema violation (legacy v0.x behaviour). Default false: dangling edges
+	// are dropped with a warning, schema violations still abort. Lenient mode
+	// is required for dogfooding self-analysis, where parser bugs would
+	// otherwise prevent graph.db from being written and block measurement.
+	StrictValidate bool
+	// FilesFromPath is the optional path to a JSON include/exclude filter
+	// (see internal/filterlist). When set, only files matching the filter
+	// reach the parsers. Empty means "use heuristic discovery as before".
+	FilesFromPath string
+}
+
+// validateAndSanitize runs the lenient/strict validation gate against g and
+// returns (droppedDanglingCount, error). Schema errors always abort. Dangling
+// edges abort only when strict; otherwise they are dropped in place and
+// surfaced via warn-level logs grouped by edge type.
+func validateAndSanitize(g *graph.Graph, log *slog.Logger, stage string, strict bool) (int, error) {
+	report := graph.Inspect(g)
+	if report.HasSchemaErrors() {
+		return 0, fmt.Errorf("graph.Validate(%s): %w", stage, report.SchemaErrors[0])
+	}
+	if !report.HasDangling() {
+		return 0, nil
+	}
+	if strict {
+		d := report.DanglingEdges[0]
+		side := "src"
+		if !d.Src && d.Dst {
+			side = "dst"
+		}
+		return 0, fmt.Errorf("graph.Validate(%s): dangling %s on edge of type %s: %s -> %s",
+			stage, side, d.Edge.Type, d.Edge.Src, d.Edge.Dst)
+	}
+	dropped := graph.Sanitize(g, report)
+	for et, n := range report.CountByEdgeType() {
+		log.Warn("dangling edges dropped", "stage", stage, "edge_type", string(et), "count", n)
+	}
+	return dropped, nil
 }
 
 // Run executes the full pipeline. Side effects: writes OutDir/graph.db
@@ -105,7 +144,11 @@ func Run(opt Options) (persist.Manifest, error) {
 	// go/packages.Load (detect.GoFiles) to honor build constraints. See
 	// pipeline_test.go for the 41-file drift this eliminates.
 	log.Debug("discovery.start", "src", opt.SrcRoot)
-	discovery, _, goCount, tsCount, solCount, err := discoveryAll(opt.SrcRoot, opt.Languages)
+	filter, err := filterlist.Load(opt.FilesFromPath)
+	if err != nil {
+		return persist.Manifest{}, err
+	}
+	discovery, _, goCount, tsCount, solCount, err := discoveryAll(opt.SrcRoot, opt.Languages, filter)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
@@ -149,6 +192,21 @@ func runCold(opt Options, log *slog.Logger,
 	goFiles, err := detect.GoFiles(opt.SrcRoot)
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("detect go: %w", err)
+	}
+	// --files-from filter: trim every per-language list before parsing.
+	filter, err := filterlist.Load(opt.FilesFromPath)
+	if err != nil {
+		return persist.Manifest{}, err
+	}
+	if filter != nil {
+		preGo, preTS, preSol := len(goFiles), len(files.TS), len(files.Sol)
+		goFiles = filter.FilterPaths(goFiles)
+		files.TS = filter.FilterPaths(files.TS)
+		files.Sol = filter.FilterPaths(files.Sol)
+		log.Info("files-from applied",
+			"go", preGo, "go_after", len(goFiles),
+			"ts", preTS, "ts_after", len(files.TS),
+			"sol", preSol, "sol_after", len(files.Sol))
 	}
 
 	// (2)+(3) parse + link, per language
@@ -200,8 +258,8 @@ func runCold(opt Options, log *slog.Logger,
 	if err != nil {
 		return persist.Manifest{}, fmt.Errorf("graph.Build: %w", err)
 	}
-	if err := graph.Validate(g); err != nil {
-		return persist.Manifest{}, fmt.Errorf("graph.Validate: %w", err)
+	if _, err := validateAndSanitize(g, log, "post-build", opt.StrictValidate); err != nil {
+		return persist.Manifest{}, err
 	}
 	log.Debug("pass2.resolve.end", "nodes", len(g.Nodes), "edges", len(g.Edges))
 
@@ -211,7 +269,7 @@ func runCold(opt Options, log *slog.Logger,
 	// by temporal living only in cold; the helper makes that recurrence
 	// structurally impossible.
 	log.Debug("metrics.start")
-	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log)
+	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
