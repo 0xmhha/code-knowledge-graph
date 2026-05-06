@@ -641,6 +641,29 @@ func (s *pgStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	return scanPGEdges(rows)
 }
 
+// AllNodes returns every node in the graph. Used by `ckg validate` for
+// in-memory reconstruction. Order is unspecified.
+func (s *pgStore) AllNodes() ([]types.Node, error) {
+	rows, err := s.pool.Query(background, `SELECT `+pgNodeColumns+` FROM nodes`)
+	if err != nil {
+		return nil, fmt.Errorf("all nodes: %w", err)
+	}
+	defer rows.Close()
+	return scanPGNodes(rows)
+}
+
+// AllEdges returns every edge in the graph. Pair with AllNodes for full
+// graph reconstruction in `ckg validate`.
+func (s *pgStore) AllEdges() ([]types.Edge, error) {
+	rows, err := s.pool.Query(background,
+		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+	if err != nil {
+		return nil, fmt.Errorf("all edges: %w", err)
+	}
+	defer rows.Close()
+	return scanPGEdges(rows)
+}
+
 // QueryEdgesForNodes returns every edge that has src OR dst in ids. Chunked
 // by queryEdgesChunk (400) for parity with the SQLite implementation;
 // PostgreSQL doesn't have a hard parameter limit but chunking bounds memory.

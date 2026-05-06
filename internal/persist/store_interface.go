@@ -77,6 +77,14 @@ type StoreReader interface {
 	// JSON to disk — its sole caller (cmd/ckg/export_static.go) opens via
 	// OpenReadOnly, which proves it doesn't need write access to the DB.
 	ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error
+
+	// AllNodes / AllEdges return the full graph. Added for `ckg validate`
+	// which reconstructs the in-memory graph from a built DB so it can
+	// run validators (schema, future LLM) against persisted state. Avoid
+	// these on huge graphs in tight loops; they are intentionally
+	// streaming-unaware (callers want everything in memory).
+	AllNodes() ([]types.Node, error)
+	AllEdges() ([]types.Edge, error)
 }
 
 // StoreWriter is the write surface used by buildpipe to materialise a graph

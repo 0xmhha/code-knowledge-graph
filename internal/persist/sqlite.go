@@ -766,6 +766,46 @@ func (s *sqliteStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	return scanNodes(rows)
 }
 
+// AllNodes returns every node in the graph. Order is unspecified — callers
+// (validate) sort if needed. Used by `ckg validate` to reconstruct the
+// in-memory graph for SchemaValidator.
+func (s *sqliteStore) AllNodes() ([]types.Node, error) {
+	rows, err := s.db.Query(`SELECT ` + nodeColumns + ` FROM nodes`)
+	if err != nil {
+		return nil, fmt.Errorf("all nodes: %w", err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// AllEdges returns every edge in the graph. Pair with AllNodes for full
+// graph reconstruction in `ckg validate`.
+func (s *sqliteStore) AllEdges() ([]types.Edge, error) {
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+	if err != nil {
+		return nil, fmt.Errorf("all edges: %w", err)
+	}
+	defer rows.Close()
+	var out []types.Edge
+	for rows.Next() {
+		var e types.Edge
+		var fp string
+		var line int
+		var conf string
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf); err != nil {
+			return nil, fmt.Errorf("scan edge row: %w", err)
+		}
+		e.FilePath = fp
+		e.Line = line
+		e.Confidence = types.Confidence(conf)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge rows: %w", err)
+	}
+	return out, nil
+}
+
 // mapKeys is a generic helper that returns the keys of a map as a slice.
 // Used by NeighborhoodByQname to convert the seen-set into a frontier.
 func mapKeys[V any](m map[string]V) []string {

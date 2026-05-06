@@ -79,6 +79,16 @@ func (m *mockStoreReader) PendingRefsByFilePath(_ string) ([]PendingRefRow, erro
 }
 func (m *mockStoreReader) ReverseDepsForFiles(_ []string) ([]string, error) { return nil, nil }
 func (m *mockStoreReader) ExportChunked(_ string, _, _ int) error           { return nil }
+func (m *mockStoreReader) AllNodes() ([]types.Node, error) {
+	var out []types.Node
+	for _, byFile := range m.nodesByLang {
+		for _, ns := range byFile {
+			out = append(out, ns...)
+		}
+	}
+	return out, nil
+}
+func (m *mockStoreReader) AllEdges() ([]types.Edge, error) { return nil, nil }
 
 // Compile-time check: mockStoreReader must satisfy StoreReader.
 var _ StoreReader = (*mockStoreReader)(nil)
