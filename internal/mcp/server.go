@@ -1,5 +1,7 @@
 // Package mcp wires CKG's read-only SQLite store to the Model Context
-// Protocol via stdio. All six tools (spec §8.3) share the same Store.
+// Protocol via stdio. The toolbox is now seven tools: the original six
+// (spec §8.3) plus impact_of_change (P1a, dogfood plan) — all sharing
+// the same Store instance.
 package mcp
 
 import (
@@ -22,6 +24,7 @@ func Run(ctx context.Context, store persist.StoreReader) error {
 	registerGetSubgraph(s, store)
 	registerSearchText(s, store)
 	registerGetContextForTask(s, store)
+	registerImpactOfChange(s, store)
 
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("mcp serve stdio: %w", err)
