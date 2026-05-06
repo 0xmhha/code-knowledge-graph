@@ -127,6 +127,10 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		// the Function/Method node IDs we resolve handler / RPC-target args
 		// against. Idempotent within a single file.
 		v.emitDistributedDecls(tf.file)
+		// P2 (G3 control-flow context propagation): runs AFTER
+		// emitDistributedDecls so the same v.nodes function-ID lookup is
+		// usable. Self-loop edges only — never produces new nodes.
+		v.emitContextPaths(tf.file)
 		return &parse.ParseResult{
 			Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 		}, nil
@@ -139,6 +143,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	v.emitConcurrencyDecls(f)
 	ast.Walk(v, f)
 	v.emitDistributedDecls(f)
+	v.emitContextPaths(f)
 	return &parse.ParseResult{
 		Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 	}, nil

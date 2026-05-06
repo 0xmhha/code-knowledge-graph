@@ -1,16 +1,18 @@
 # CKG Schema (V0)
 
-Schema version: **1.4** (v0.2 — E4 added one temporal node kind (`Commit`)
-and two git-history edge kinds (`changed_in`, `blame`) for CKS deep-dive
-§ 4.1 G6 Temporal. Pre-1.4 DBs lack these rows; the file-level cache
-treats the bump as cache-invalidating, so the next `ckg build` falls
-into the cold path on first run with this binary.)
+Schema version: **1.6** (v0.2 — P2 added two G3 control-flow edge kinds
+(`timeout_path`, `cancellation_path`) for Go `context.With*` constructor
+sites. Pre-1.6 DBs lack those rows; the file-level cache treats the bump
+as cache-invalidating, so the next `ckg build` falls into the cold path
+on first run with this binary.)
 
 A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
 incremental cache infrastructure (FK ON DELETE CASCADE on
 edges/blobs/pkg_tree/topic_tree); E3 (1.2 → 1.3) added distributed
-topology nodes/edges; E4 (1.3 → 1.4) adds temporal commit nodes/edges.
-All bumps invalidate the file-level cache by design.
+topology nodes/edges; E4 (1.3 → 1.4) adds temporal commit nodes/edges;
+G6v3 (1.4 → 1.5) added pending_refs persistence; P2 (1.5 → 1.6) adds
+context-propagation edges. All bumps invalidate the file-level cache by
+design.
 
 ## Node types (33)
 
@@ -51,7 +53,7 @@ by the post-Build temporal pass (`internal/buildpipe/temporal.go`)
 from a single `git log --raw --no-renames` invocation per build.
 Capped at 10 most-recent commits per file by default.
 
-## Edge types (30)
+## Edge types (32)
 
 `contains, defines, calls, invokes, uses_type, instantiates, references,
 reads_field, writes_field, imports, exports, implements, extends,
@@ -59,7 +61,8 @@ has_modifier, emits_event, reads_mapping, writes_mapping, has_decorator,
 spawns, sends_to, recvs_from, binds_to,
 acquires_lock, releases_lock, accessed_under_lock,
 listens_on, handles_message, rpc_calls,
-changed_in, blame`
+changed_in, blame,
+timeout_path, cancellation_path`
 
 `acquires_lock`, `releases_lock`, `accessed_under_lock` are **slot-reserved**
 for B1 (Wave 5) — same status as `NodeMutex` above. The viewer registers
@@ -80,6 +83,21 @@ Line-level blame (true `file:line → commit`) is deferred to G6 Phase 2.
 `blame` (E4): `File` node → its most recent commit (V0 simplification
 of the spec's `file:line → commit (마지막 수정)`). Both are off by
 default in the viewer; toggle via filter UI.
+
+`timeout_path` (P2): self-loop on a Go Function/Method whose body calls
+`context.WithTimeout` or `context.WithDeadline`. Deadline rolls into
+`timeout_path` because both express a wall-clock budget — graph queries
+that ask "which functions impose a time bound?" don't care about the
+distinction. Confidence is `EXTRACTED` when typesInfo confirms the
+`context` package binding, `INFERRED` in AST-only mode (matches
+`context.WithTimeout` selector by name only). `cancellation_path` (P2):
+self-loop on a Go Function/Method whose body calls `context.WithCancel`
+or `context.WithCancelCause` (Go 1.20+). Distinct from `timeout_path`
+because cancellation is event-driven, not deadline-driven. Multiple call
+sites in the same function produce multiple edges (different `Line`).
+**`retry_path` is reserved but NOT emitted** — heuristic too noisy for
+V0; deferred until a typed retry primitive lands (backoff library
+detection or annotated loops). Both edges off by default in the viewer.
 
 ## Confidence
 

@@ -81,10 +81,11 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
-// EdgeType enumerates the 30 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 32 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
-// G6 Temporal — git history derived).
+// G6 Temporal — git history derived; schema 1.6 appended timeout_path /
+// cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation).
 type EdgeType string
 
 const (
@@ -137,9 +138,31 @@ const (
 	// test snapshots stay stable.
 	EdgeChangedIn EdgeType = "changed_in"
 	EdgeBlame     EdgeType = "blame"
+	// Schema 1.6 (P2 — CKS G3 control-flow context propagation): Go
+	// context.With* creation sites. Self-loop edges anchored on the
+	// enclosing Function/Method:
+	//   timeout_path:      context.WithTimeout / context.WithDeadline call
+	//                      site. Deadline is treated as a timeout variant —
+	//                      both express "this work is bounded by a wall-clock
+	//                      budget" and consumers (graph queries / viewer)
+	//                      benefit from collapsing them.
+	//   cancellation_path: context.WithCancel / context.WithCancelCause call
+	//                      site (Go 1.20+ for the latter). Distinct from
+	//                      timeout_path because cancellation is event-driven,
+	//                      not deadline-driven.
+	// TODO: retry_path is intentionally NOT emitted in V0 — the heuristic
+	// (loops around RPC calls? error-handling branches?) is too noisy to
+	// ship without false-positive cleanup. Reserved for a follow-up once
+	// we have a typed retry pattern (e.g. detecting backoff libraries
+	// like cenkalti/backoff or built-in `for { ...err... }` loops with
+	// rpc_calls inside).
+	// Appended (not interleaved) so existing edge-type hash positions /
+	// test snapshots stay stable.
+	EdgeTimeoutPath      EdgeType = "timeout_path"
+	EdgeCancellationPath EdgeType = "cancellation_path"
 )
 
-// AllEdgeTypes returns all 30 edge types in stable order.
+// AllEdgeTypes returns all 32 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -151,6 +174,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeAcquiresLock, EdgeReleasesLock, EdgeAccessedUnderLock,
 		EdgeListensOn, EdgeHandlesMessage, EdgeRPCCalls,
 		EdgeChangedIn, EdgeBlame,
+		EdgeTimeoutPath, EdgeCancellationPath,
 	}
 }
 

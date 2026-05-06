@@ -33,10 +33,13 @@ import (
 // cross-file references are now persisted per-file so the partial-cache
 // rebuild path can reconstruct Pass 2's input without re-parsing cached
 // files. Pre-1.5 DBs are missing the table, so the first 1.5 build is forced
-// cold by ManifestUsable's version check. Kept here (not in pkg/types)
-// because only the cache key needs it; pkg/types schema version bumps already
-// trigger rebuilds via this constant.
-const SchemaVersion = "1.5"
+// cold by ManifestUsable's version check. Bumped from "1.5" to "1.6" by P2
+// (CKS G3 control-flow context propagation): timeout_path /
+// cancellation_path self-loop edges are emitted from Go context.With* call
+// sites; pre-1.6 DBs are missing those rows so the first 1.6 build must run
+// cold. Kept here (not in pkg/types) because only the cache key needs it;
+// pkg/types schema version bumps already trigger rebuilds via this constant.
+const SchemaVersion = "1.6"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

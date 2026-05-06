@@ -187,6 +187,26 @@ func (v *SchemaValidator) Validate(ctx context.Context, g *graph.Graph, store pe
 					FilePath: e.FilePath,
 				})
 			}
+		case types.EdgeTimeoutPath:
+			if !isContextPathShape(src, dst, e) {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "timeout-path-bad-shape",
+					Message: "timeout_path edge must be a Function/Method self-loop (got src=" +
+						string(src.Type) + ", dst=" + string(dst.Type) + ", self=" + boolStr(e.Src == e.Dst) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
+		case types.EdgeCancellationPath:
+			if !isContextPathShape(src, dst, e) {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "cancellation-path-bad-shape",
+					Message: "cancellation_path edge must be a Function/Method self-loop (got src=" +
+						string(src.Type) + ", dst=" + string(dst.Type) + ", self=" + boolStr(e.Src == e.Dst) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
 		}
 	}
 
@@ -203,4 +223,31 @@ func isCallable(t types.NodeType) bool {
 		return true
 	}
 	return false
+}
+
+// isContextPathShape enforces the timeout_path / cancellation_path
+// invariants (P2): both endpoints must be the same Function or Method
+// node, i.e. a self-loop anchored on the enclosing function. Used by
+// SchemaValidator to surface emitter regressions early.
+func isContextPathShape(src, dst *types.Node, e types.Edge) bool {
+	if src == nil || dst == nil {
+		return false
+	}
+	if e.Src != e.Dst {
+		return false
+	}
+	switch src.Type {
+	case types.NodeFunction, types.NodeMethod:
+		return true
+	}
+	return false
+}
+
+// boolStr returns "true"/"false" — a tiny helper so error messages don't
+// import strconv just to format a single bool. Kept local to schema.go.
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
