@@ -84,6 +84,64 @@ func TestDistributed_HTTP_ListensOnEdges(t *testing.T) {
 	}
 }
 
+// TestDistributed_HTTP_MethodHandler_NoDangling pins down the regression
+// where method-receiver handlers (s.mux.HandleFunc("/x", s.handleX))
+// produced dangling listens_on edges. idForFunc was computing the ID
+// from fn.Pos() (the method NAME offset per go/types semantics) while
+// visitFuncDecl uses the FuncDecl's Pos (the `func` keyword) — for
+// methods these differ by the receiver-clause width. The fix is a
+// qname lookup against v.nodes.
+//
+// This test asserts BOTH (a) the listens_on edges exist for the method
+// handlers, and (b) every edge's Src is a Method node actually present
+// in the graph. Before the fix, (b) would fail because Src pointed at
+// a recomputed ID with no matching node.
+func TestDistributed_HTTP_MethodHandler_NoDangling(t *testing.T) {
+	root := "testdata/distributed"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	nodeByID := make(map[string]*types.Node, len(g.Nodes))
+	for i := range g.Nodes {
+		nodeByID[g.Nodes[i].ID] = &g.Nodes[i]
+	}
+	methodRoutes := map[string]bool{
+		"http:/method-a": false,
+		"http:/method-b": false,
+	}
+	listensOn := edgesByType(g.Edges, types.EdgeListensOn)
+	for _, e := range listensOn {
+		dst := nodeByID[e.Dst]
+		if dst == nil || dst.Type != types.NodeEndpoint {
+			continue
+		}
+		if _, want := methodRoutes[dst.QualifiedName]; !want {
+			continue
+		}
+		methodRoutes[dst.QualifiedName] = true
+		src := nodeByID[e.Src]
+		if src == nil {
+			t.Errorf("listens_on for %s has dangling src %q (regression)",
+				dst.QualifiedName, e.Src)
+			continue
+		}
+		if src.Type != types.NodeMethod {
+			t.Errorf("listens_on for %s src is %s, want Method", dst.QualifiedName, src.Type)
+		}
+		if !strings.HasSuffix(src.QualifiedName, ".MethodServer.handleA") &&
+			!strings.HasSuffix(src.QualifiedName, ".MethodServer.handleB") {
+			t.Errorf("listens_on for %s src qname is %q, want MethodServer.handle{A,B}",
+				dst.QualifiedName, src.QualifiedName)
+		}
+	}
+	for route, found := range methodRoutes {
+		if !found {
+			t.Errorf("listens_on edge missing for method-handler route %q", route)
+		}
+	}
+}
+
 // TestDistributed_JSONRPC_HandlesMessage asserts the EchoService.Echo
 // handler matches the net/rpc shape and produces a handles_message edge to
 // the EchoArgs MessageType. Confirms false-positive guards: NotJSONRPC

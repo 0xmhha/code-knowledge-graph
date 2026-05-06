@@ -333,13 +333,25 @@ func isHandlerFuncConversion(fun ast.Expr) bool {
 	return pkg.Name == "http" && sel.Sel.Name == "HandlerFunc"
 }
 
-// idForFunc derives the qname → ID for a *gotypes.Func object. Mirrors
-// declarations.go.visitFuncDecl naming so the resulting ID matches an
-// existing Function/Method node in v.nodes.
+// idForFunc returns the existing Function/Method node ID for fn by
+// qname lookup against v.nodes. Returns "" when fn is nil, has no
+// package, or no matching node exists in the current file's nodes
+// (cross-file or stdlib calls fall through to the PendingRef path).
 //
-// Note: types.Func.Pos() points at the func declaration's Pos, which is
-// what visitFuncDecl uses for startByte. This makes the ID deterministic
-// even though we recompute it here.
+// Earlier this function recomputed an ID via MakeID(qname, "go", offset)
+// where offset came from v.fset.Position(fn.Pos()).Offset. That offset
+// is the position of the function NAME (per go/types semantics), but
+// visitFuncDecl in declarations.go uses the *ast.FuncDecl's Pos —
+// the position of the `func` keyword. For methods these differ by
+// the receiver-clause width (~17 bytes for "func (s *Server) "), so
+// the recomputed ID never matched the emitted Method node, producing
+// dangling listens_on edges (every server.go HandleFunc call).
+//
+// Looking up by qname against v.nodes — populated by the ast.Walk that
+// runs before emitDistributedDecls — sidesteps the offset mismatch
+// entirely. qname is unique within a package (Go forbids same-name
+// methods on the same receiver), so this lookup is unambiguous for
+// any handler defined in the same file as its registration.
 func (v *declVisitor) idForFunc(fn *gotypes.Func) string {
 	if fn == nil {
 		return ""
@@ -356,8 +368,16 @@ func (v *declVisitor) idForFunc(fn *gotypes.Func) string {
 			qname = pkgName + "." + recvName + "." + fn.Name()
 		}
 	}
-	pos := v.fset.Position(fn.Pos())
-	return MakeID(qname, "go", pos.Offset)
+	for i := range v.nodes {
+		n := &v.nodes[i]
+		if n.Type != types.NodeFunction && n.Type != types.NodeMethod {
+			continue
+		}
+		if n.QualifiedName == qname {
+			return n.ID
+		}
+	}
+	return ""
 }
 
 // receiverTypeName extracts the bare type name from a method receiver type,
