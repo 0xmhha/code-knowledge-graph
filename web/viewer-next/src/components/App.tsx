@@ -17,6 +17,7 @@ import NodeDetail from './NodeDetail';
 import Legend from './Legend';
 import EdgeTypeFilters from './EdgeTypeFilters';
 import TraceControls from './TraceControls';
+import { DEFAULT_EDGE_TYPES } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
 
 const DEPTH_MAX = 6;
@@ -146,19 +147,31 @@ export default function App() {
 
   const onHome = useCallback(async () => {
     if (!api) return;
-    setAnchor(null, 0);
-    setSelected(null);
-    // Clear the user's search state too — the spec for the prominent
-    // Home button is "return to root view", which means dropping any
-    // active query/results so the canvas isn't still tinted by hits
-    // from the previous search.
-    useStore.getState().setSearchQuery('');
-    useStore.getState().setSearchResults([]);
+    // Home = "reset to initial state". Wipe exploration + filter state
+    // (anchor, selection, search, trace settings, edge-type whitelist,
+    // graph-isolation, community dim/isolate) but preserve the user's
+    // display preferences (viewMode, colorMode, fontSize, panel open
+    // state, edgeFiltersCollapsed) and one-shot flags (firstTimeSeen).
+    // Zustand setState merges partials atomically so subscribers
+    // re-render once instead of N times across individual setters.
+    useStore.setState({
+      anchorId: null,
+      depth: 0,
+      selectedId: null,
+      searchQuery: '',
+      searchResults: [],
+      edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
+      graphModeIsolation: false,
+      dimmedCommunities: new Set<number>(),
+      isolatedCommunity: null,
+      traceDirection: 'both',
+      traceDepth: 2,
+    });
     await navigate(async () => {
       const g = await recomputeVisible(api);
       commit(g);
     });
-  }, [api, navigate, commit, setAnchor, setSelected]);
+  }, [api, navigate, commit]);
 
   // Sidebar list pick — keep the anchor + visible set, but make the
   // canvas highlight the picked node so the user can actually see what

@@ -18,25 +18,24 @@ export default function TopBar({ api, srcInfo, onTogglePanel, onHome, onHelpClic
   const colorMode = useStore(s => s.colorMode);
   const setViewMode = useStore(s => s.setViewMode);
   const setColorMode = useStore(s => s.setColorMode);
-  // Home is only meaningful when the user has navigated away from the
-  // root view — either by trace-anchoring a node or by typing a search.
-  // Hiding it on first paint avoids drawing attention to an action that
-  // would be a no-op.
-  const homeRelevant = useStore(s => s.anchorId !== null || s.searchQuery.length > 0);
 
   return (
     <div className="topbar">
       <strong>ckg</strong>
       <SearchBox api={api} />
-      {homeRelevant && (
-        <button
-          className="topbar-home"
-          title="Return to root view (Home)"
-          onClick={onHome}
-        >
-          🏠 Home
-        </button>
-      )}
+      {/* Home is always visible. Click resets exploration/filter state
+          to its initial form (anchor/selection/search/trace/whitelist
+          /isolation/community-dim) while preserving display preferences.
+          Idempotent on the root view, so showing it unconditionally
+          gives a stable affordance and avoids the previous
+          "click → button vanishes" UX glitch. */}
+      <button
+        className="topbar-home"
+        title="Reset to initial state (Home)"
+        onClick={onHome}
+      >
+        🏠 Home
+      </button>
       <button
         title="Toggle 2D / 3D rendering"
         onClick={() => {

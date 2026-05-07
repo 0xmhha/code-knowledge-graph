@@ -56,6 +56,20 @@ export default function SearchBox({ api }: Props) {
   // empty state) can show the actual query the user typed.
   useEffect(() => { setSearchQuery(q); }, [q, setSearchQuery]);
 
+  // External resets (Home button → store.setState({ searchQuery: '' }))
+  // must visibly clear the input. The store→local sync only fires when
+  // the store ends up at empty, so a user typing mid-search isn't
+  // disrupted (their local q already matches what they're typing). On
+  // empty, we also wipe results so a stale `Set<GraphNode>` doesn't
+  // leak through to NodeList between Home and the next render.
+  const storeQuery = useStore(s => s.searchQuery);
+  useEffect(() => {
+    if (storeQuery === '' && q !== '') {
+      setQ('');
+      setSearchResults([]);
+    }
+  }, [storeQuery, q, setSearchResults]);
+
   useEffect(() => {
     if (!q.trim()) {
       setSearchResults([]);
