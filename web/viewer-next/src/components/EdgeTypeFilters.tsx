@@ -10,6 +10,7 @@ import {
 // Default-collapsed groups (most numerous, least interesting for trace mode).
 const DEFAULT_COLLAPSED: ReadonlyArray<GraphID> = ['G1', 'G2'];
 const STORAGE_KEY = 'ckg.edgeFiltersCollapsed';
+const GRAPH_MODE_KEY = 'ckg.graphMode';
 
 function loadCollapsed(): Set<GraphID> {
   try {
@@ -41,19 +42,46 @@ function hex(n: number): string {
 // "all on" (full opacity) / "some on" (mid) / "all off" (dim) so the
 // user can read the current 6-graph state at a glance without
 // expanding any sublist.
+//
+// When `graphModeIsolation` is on, pill clicks REPLACE the whitelist
+// with just the clicked group's edges (single-graph view). The pill
+// for the currently-active group is marked `pill-active` so the user
+// always sees which axis they're focused on.
 function GraphPillStrip() {
   const whitelist = useStore(s => s.edgeTypeWhitelist);
   const setBulk = useStore(s => s.setEdgeTypeWhitelistBulk);
+  const setOnly = useStore(s => s.setEdgeTypeWhitelistOnlyGroup);
+  const isolation = useStore(s => s.graphModeIsolation);
 
   return (
     <div className="graph-pills" role="group" aria-label="6-graph axis toggles">
       {GRAPH_GROUPS.map(g => {
         const allOn = groupHasAllEdges(g, whitelist);
         const anyOn = groupHasAnyEdge(g, whitelist);
-        const cls = allOn ? 'pill-on' : (anyOn ? 'pill-partial' : 'pill-off');
-        // Mirrors GroupSection header toggle semantics — partial state always
-        // turns on the rest, all-on state turns off.
-        const onClick = () => setBulk(g.edges, !allOn);
+        // In isolation mode "active" means this group's edges are the
+        // ENTIRE whitelist — i.e. allOn AND no other group contributes.
+        // We approximate "no other group" by checking whitelist size
+        // matches this group's edge count; allOn already guarantees the
+        // forward direction, so equal sizes implies set equality.
+        const isolatedActive = isolation && allOn && whitelist.size === g.edges.length;
+        let cls: string;
+        if (isolation) {
+          cls = isolatedActive ? 'pill-on pill-active' : 'pill-off';
+        } else {
+          cls = allOn ? 'pill-on' : (anyOn ? 'pill-partial' : 'pill-off');
+        }
+        const onClick = () => {
+          if (isolation) {
+            setOnly(g);
+          } else {
+            // Mirrors GroupSection header toggle semantics — partial state
+            // always turns on the rest, all-on state turns off.
+            setBulk(g.edges, !allOn);
+          }
+        };
+        const title = isolation
+          ? `${g.id} ${g.label} — ${g.description}\nClick to focus this graph (replaces whitelist).`
+          : `${g.id} ${g.label} — ${g.description}\nClick to ${allOn ? 'turn all off' : 'turn all on'}.`;
         return (
           <button
             key={g.id}
@@ -61,7 +89,7 @@ function GraphPillStrip() {
             className={`graph-pill ${cls}`}
             style={{ borderColor: hex(g.color) }}
             onClick={onClick}
-            title={`${g.id} ${g.label} — ${g.description}\nClick to ${allOn ? 'turn all off' : 'turn all on'}.`}
+            title={title}
           >
             <span className="graph-pill-dot" style={{ background: hex(g.color) }} />
             <span className="graph-pill-id">{g.id}</span>
@@ -70,6 +98,37 @@ function GraphPillStrip() {
         );
       })}
     </div>
+  );
+}
+
+// GraphModeToggle is a small button that flips graphModeIsolation. We
+// keep the visible label deliberately short ("Solo") so it can sit on
+// the same row as the section heading without wrapping on a 280px panel.
+function GraphModeToggle() {
+  const isolation = useStore(s => s.graphModeIsolation);
+  const setIsolation = useStore(s => s.setGraphModeIsolation);
+  const onClick = () => {
+    const next = !isolation;
+    setIsolation(next);
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(GRAPH_MODE_KEY, next ? '1' : '0');
+      }
+    } catch { /* localStorage may be blocked */ }
+  };
+  return (
+    <button
+      type="button"
+      className={`graph-mode-toggle ${isolation ? 'on' : 'off'}`}
+      onClick={onClick}
+      title={
+        isolation
+          ? 'Solo mode ON — clicking a pill switches to that graph only.\nClick to turn OFF (cumulative toggling).'
+          : 'Solo mode OFF — pills cumulatively toggle groups.\nClick to turn ON (single-graph view).'
+      }
+    >
+      🎯 Solo {isolation ? 'ON' : 'OFF'}
+    </button>
   );
 }
 
@@ -128,8 +187,21 @@ function GroupSection({ group, collapsed, onToggleCollapse }: GroupSectionProps)
 
 export default function EdgeTypeFilters() {
   const [collapsed, setCollapsed] = useState<Set<GraphID>>(() => loadCollapsed());
+  const setIsolation = useStore(s => s.setGraphModeIsolation);
 
   useEffect(() => { saveCollapsed(collapsed); }, [collapsed]);
+
+  // Hydrate graphModeIsolation from localStorage on mount. We do this
+  // here (not in the store initialiser) because the store also runs on
+  // the SSR pass where `localStorage` is undefined; reading it during
+  // initial render would throw.
+  useEffect(() => {
+    try {
+      if (typeof localStorage === 'undefined') return;
+      const raw = localStorage.getItem(GRAPH_MODE_KEY);
+      if (raw === '1') setIsolation(true);
+    } catch { /* localStorage may be blocked */ }
+  }, [setIsolation]);
 
   const onToggle = useCallback((id: GraphID) => {
     setCollapsed(prev => {
@@ -141,7 +213,10 @@ export default function EdgeTypeFilters() {
 
   return (
     <div className="edge-filters">
-      <h4>Edge Types (6-graph axis)</h4>
+      <div className="edge-filters-header">
+        <h4>Edge Types (6-graph axis)</h4>
+        <GraphModeToggle />
+      </div>
       <GraphPillStrip />
       {GRAPH_GROUPS.map(g => (
         <GroupSection

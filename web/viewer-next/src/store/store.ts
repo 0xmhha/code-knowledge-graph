@@ -3,7 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   CommitGraph, GraphEdge, GraphNode, NodeId, ColorMode, ViewMode, TraceDirection,
 } from '@/types';
-import { DEFAULT_EDGE_TYPES } from '@/lib/edges';
+import { DEFAULT_EDGE_TYPES, type GraphGroupSpec } from '@/lib/edges';
 
 interface State {
   // Read-only data caches.
@@ -38,6 +38,12 @@ interface State {
   colorMode: ColorMode;
   fontSize: number;
   edgeTypeWhitelist: Set<string>;
+  // graphModeIsolation: when true, GraphPillStrip pill clicks REPLACE the
+  // whitelist with just that group's edges (single-graph view) instead of
+  // bulk-toggling the group on/off. Used to study one CKS axis (e.g. G4
+  // concurrency) in isolation when the dense G1/G3 layers would otherwise
+  // dominate the canvas. Persisted via localStorage in EdgeTypeFilters.
+  graphModeIsolation: boolean;
   dimmedCommunities: Set<number>;
   isolatedCommunity: number | null;
 
@@ -68,6 +74,12 @@ interface State {
   setFontSize: (n: number) => void;
   toggleEdgeType: (t: string) => void;
   setEdgeTypeWhitelistBulk: (edgeTypes: ReadonlyArray<string>, on: boolean) => void;
+  // setEdgeTypeWhitelistOnlyGroup REPLACES the whitelist with the given
+  // group's edges. Used by GraphPillStrip when graphModeIsolation is on
+  // so the user can switch between G1..G6 axes without having to first
+  // turn the previously-active group off.
+  setEdgeTypeWhitelistOnlyGroup: (group: GraphGroupSpec) => void;
+  setGraphModeIsolation: (on: boolean) => void;
   toggleDimCommunity: (c: number) => void;
   setIsolatedCommunity: (c: number | null) => void;
   setTraceDirection: (d: TraceDirection) => void;
@@ -96,6 +108,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   colorMode: 'lang',
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
+  graphModeIsolation: false,
   dimmedCommunities: new Set(),
   isolatedCommunity: null,
   traceDirection: 'both',
@@ -187,6 +200,10 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
     else    for (const t of edgeTypes) next.delete(t);
     set({ edgeTypeWhitelist: next });
   },
+  setEdgeTypeWhitelistOnlyGroup: (group) => {
+    set({ edgeTypeWhitelist: new Set(group.edges) });
+  },
+  setGraphModeIsolation: (on) => set({ graphModeIsolation: on }),
   toggleDimCommunity: (c) => {
     const next = new Set(get().dimmedCommunities);
     if (next.has(c)) next.delete(c); else next.add(c);

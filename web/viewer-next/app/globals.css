@@ -197,6 +197,32 @@ html, body {
   font-size: 11px;
 }
 .edge-filters h4 { font-size: 11px; margin: 0 0 4px 0; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Header row hosts the section heading + the Solo-mode toggle so they
+   share one line on the 280px panel without forcing a second row. */
+.edge-filters .edge-filters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.edge-filters .graph-mode-toggle {
+  background: #232529;
+  color: #cfd0d3;
+  border: 1px solid #2a2c30;
+  padding: 2px 7px;
+  cursor: pointer;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  border-radius: 3px;
+  line-height: 1.4;
+}
+.edge-filters .graph-mode-toggle:hover { background: #2a2c30; }
+.edge-filters .graph-mode-toggle.on {
+  background: #1d2a3a;
+  border-color: #7ab8ff;
+  color: #7ab8ff;
+}
 .edge-filters label {
   display: inline-flex;
   align-items: center;
@@ -232,6 +258,12 @@ html, body {
 .edge-filters .graph-pill.pill-on { opacity: 1; }
 .edge-filters .graph-pill.pill-partial { opacity: 0.65; }
 .edge-filters .graph-pill.pill-off { opacity: 0.35; }
+/* In Solo mode the active group's pill gets a stronger ring so the
+   user always sees which axis is isolated even at a glance. */
+.edge-filters .graph-pill.pill-active {
+  background: #1d2a3a;
+  box-shadow: 0 0 0 1px #7ab8ff inset;
+}
 .edge-filters .graph-pill-dot {
   width: 8px;
   height: 8px;
