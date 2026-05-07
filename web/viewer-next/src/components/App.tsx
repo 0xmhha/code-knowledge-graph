@@ -28,7 +28,17 @@ export default function App() {
   const [api, setApi] = useState<IAPI | null>(null);
   const [srcInfo, setSrcInfo] = useState('');
   const [stale, setStale] = useState<{ src: string; cur: string } | null>(null);
-  const [panelHidden, setPanelHidden] = useState(false);
+  // Persist the right-panel visibility across reloads. Defaulting to
+  // closed sidesteps the brief flash users reported when the panel
+  // mounted, ran its first NodeDetail render, and then immediately
+  // re-rendered as the boot commit landed. With the toggle now a
+  // prominent labelled button (📋 Detail) operators open it on demand
+  // instead of having it always pop in. Read synchronously at first
+  // render to avoid a hydration flash.
+  const [panelHidden, setPanelHidden] = useState<boolean>(() => {
+    if (typeof localStorage === 'undefined') return true;
+    return localStorage.getItem('ckg.panelOpen') !== '1';
+  });
   const [helpOpen, setHelpOpen] = useState(false);
 
   const forceGraphRef = useRef<GraphCanvasHandle>(null);
@@ -282,7 +292,16 @@ export default function App() {
         <TopBar
           api={apiBox}
           srcInfo={srcInfo}
-          onTogglePanel={() => setPanelHidden(p => !p)}
+          panelOpen={!panelHidden}
+          onTogglePanel={() => {
+            setPanelHidden(p => {
+              const nextHidden = !p;
+              try {
+                localStorage.setItem('ckg.panelOpen', nextHidden ? '0' : '1');
+              } catch { /* ignore */ }
+              return nextHidden;
+            });
+          }}
           onHome={onHome}
         />
       )}

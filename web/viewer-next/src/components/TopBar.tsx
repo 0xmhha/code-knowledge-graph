@@ -9,9 +9,10 @@ interface Props {
   srcInfo: string;
   onTogglePanel: () => void;
   onHome: () => void;
+  panelOpen: boolean;
 }
 
-export default function TopBar({ api, srcInfo, onTogglePanel, onHome }: Props) {
+export default function TopBar({ api, srcInfo, onTogglePanel, onHome, panelOpen }: Props) {
   const viewMode = useStore(s => s.viewMode);
   const colorMode = useStore(s => s.colorMode);
   const setViewMode = useStore(s => s.setViewMode);
@@ -55,7 +56,14 @@ export default function TopBar({ api, srcInfo, onTogglePanel, onHome }: Props) {
       >
         {colorMode === 'lang' ? 'LANG' : 'COMMUNITY'}
       </button>
-      <button title="Hide / show right panel" onClick={onTogglePanel}>⇆</button>
+      <button
+        type="button"
+        className={`topbar-detail-toggle${panelOpen ? ' is-open' : ''}`}
+        title={panelOpen ? 'Hide the right detail panel' : 'Show the right detail panel'}
+        onClick={onTogglePanel}
+      >
+        📋 Detail {panelOpen ? '▸' : '◂'}
+      </button>
       <span className="src-info">{srcInfo}</span>
     </div>
   );

@@ -18,10 +18,31 @@ html, body {
   grid-template-columns: 1fr 280px;
   height: 100vh;
   width: 100vw;
-  transition: grid-template-columns 120ms ease;
+  /* No grid-template-columns transition. Animating a layout property
+     while the canvas re-runs its force simulation produced a visible
+     panel flash on selection changes — the panel briefly slid as the
+     column width interpolated and the canvas resized mid-animation.
+     Snap-toggle is jarring once but never flashes. */
 }
 #app.no-panel { grid-template-columns: 1fr 0px; }
 #app.no-panel .panel { display: none; }
+
+/* Detail toggle — the prominent button users actually find. The plain
+   ⇆ glyph used to live with the rest of the topbar buttons, easily
+   missed. Pulled out into its own class with a colored border and an
+   open/closed text label so the affordance is obvious at first paint. */
+.topbar-detail-toggle {
+  background: #232529;
+  color: #cfd0d3;
+  border: 1px solid #3a3c40;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: 24px;
+}
+.topbar-detail-toggle.is-open { border-color: #44aaff; color: #7ab8ff; }
+.topbar-detail-toggle:hover { background: #2a2c30; }
 
 .topbar {
   grid-column: 1 / span 2;
