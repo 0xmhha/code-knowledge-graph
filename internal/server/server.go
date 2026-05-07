@@ -71,6 +71,7 @@ func (s *Server) routes(opts Options) {
 	s.mux.HandleFunc("POST /api/edges", s.handleEdges)
 	s.mux.HandleFunc("GET /api/blob/{id}", s.handleBlob)
 	s.mux.HandleFunc("GET /api/search", s.handleSearch)
+	s.mux.HandleFunc("GET /api/impact", s.handleImpact)
 
 	if opts.NoViewer {
 		// API-only surface; operators wire their own viewer (typically the

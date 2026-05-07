@@ -4,6 +4,64 @@ const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
 export type TopMetric = 'pagerank' | 'usage';
 
+// ImpactNode is one row in any impact bucket. Mirrors the shape returned
+// by pkg/impact.Compute → nodeToImpactEntry on the backend (see
+// internal/server/handleImpact and pkg/impact/impact.go). Optional fields
+// reflect that some node kinds (Package, Endpoint) lack file scope.
+export interface ImpactNode {
+  id: NodeId;
+  type?: string;
+  name?: string;
+  qname?: string;
+  file?: string;
+  line?: number;
+  confidence?: string;
+  signature?: string;
+  usage_score?: number;
+  citation?: string;
+  source?: string;  // present only when include_blobs=1
+}
+
+// ImpactBuckets keys mirror pkg/impact bucket order so consumers can
+// iterate in a stable shape. Always all six keys (possibly empty arrays).
+export interface ImpactBuckets {
+  callers: ImpactNode[];
+  interface_impact: ImpactNode[];
+  type_users: ImpactNode[];
+  distributed: ImpactNode[];
+  concurrent: ImpactNode[];
+  other_refs: ImpactNode[];
+}
+
+export interface ImpactSeedSummary {
+  id: NodeId;
+  type?: string;
+  name?: string;
+  qname?: string;
+  file_path?: string;
+  start_line?: number;
+  citation?: string;
+}
+
+export interface ImpactWarning {
+  code?: string;
+  node_id?: NodeId;
+  qname?: string;
+}
+
+export interface ImpactResult {
+  depth?: number;
+  not_found?: boolean;
+  seed?: ImpactSeedSummary;
+  seeds?: ImpactSeedSummary[];
+  seed_qname?: string;
+  seed_file?: string;
+  impact?: ImpactBuckets;
+  edges?: Array<[NodeId, NodeId, string, number]>;
+  totals?: { nodes: number; edges: number; by_group: Record<string, number> };
+  metadata?: { warnings: ImpactWarning[] };
+}
+
 export interface IAPI {
   manifest(): Promise<Manifest>;
   hierarchy(kind?: string): Promise<HierarchyRow[]>;
@@ -20,6 +78,13 @@ export interface IAPI {
   nodesByIds(ids: NodeId[]): Promise<GraphNode[]>;
   blob(nodeId: NodeId): Promise<string>;
   search(q: string): Promise<GraphNode[]>;
+  // impact returns the reverse-dependency closure for a seed qname,
+  // grouped by impact category (callers, interface_impact, type_users,
+  // distributed, concurrent, other_refs). Backed by pkg/impact.Compute on
+  // serve mode; static mode rejects with a clear error since the static
+  // export bundle does not include the SQLite store needed for arbitrary
+  // qname lookups.
+  impact(seedQname: string, depth: number): Promise<ImpactResult>;
 }
 
 export class API implements IAPI {
@@ -79,6 +144,13 @@ export class API implements IAPI {
   async search(q: string): Promise<GraphNode[]> {
     return fetch(`${this.base}/api/search?q=${encodeURIComponent(q)}`)
       .then(r => r.json()).then(asArray<GraphNode>);
+  }
+
+  async impact(seedQname: string, depth: number): Promise<ImpactResult> {
+    const q = new URLSearchParams({ seed_qname: seedQname, depth: String(depth) });
+    const r = await fetch(`${this.base}/api/impact?${q}`);
+    if (!r.ok) throw new Error(`/api/impact ${r.status}`);
+    return await r.json() as ImpactResult;
   }
 }
 
@@ -155,6 +227,15 @@ export class StaticAPI implements IAPI {
   }
 
   async search(_q: string): Promise<GraphNode[]> { return []; }
+
+  async impact(_seedQname: string, _depth: number): Promise<ImpactResult> {
+    // Static export mode ships pre-computed JSON chunks but no SQLite
+    // store, so impact_of_change (which needs FindSymbol +
+    // NeighborhoodByQname) cannot run client-side. Fail fast so
+    // NodeDetail can surface a clear "use ckg serve" message instead of
+    // silently returning empty buckets.
+    throw new Error('impact_of_change unavailable in static export mode (use `ckg serve`)');
+  }
 }
 
 async function concatChunks<T>(prefix: string): Promise<T[]> {

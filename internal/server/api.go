@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/impact"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -159,6 +160,36 @@ func (s *Server) handleNodesByIDs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.decorateNodes(nodes))
+}
+
+// handleImpact delegates to pkg/impact.Compute so the viewer's "🔍 Impact"
+// affordance returns the same shape the MCP impact_of_change tool returns.
+// Inputs are GET query params (seed_qname / seed_file / depth / include_blobs)
+// — small enough that POST + JSON body would be ceremonial. include_blobs
+// defaults to false because the viewer surfaces source via /api/blob/{id} on
+// demand; an LLM-targeted client can opt into inline blobs by passing 1.
+func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	seedQ := q.Get("seed_qname")
+	seedF := q.Get("seed_file")
+	if seedQ == "" && seedF == "" {
+		http.Error(w, "seed_qname or seed_file required", http.StatusBadRequest)
+		return
+	}
+	depth, _ := strconv.Atoi(q.Get("depth"))
+	if depth <= 0 {
+		depth = 2
+	}
+	includeBlobs := q.Get("include_blobs") == "1" || q.Get("include_blobs") == "true"
+	out, err := impact.Compute(s.store, seedQ, seedF, impact.Options{
+		Depth:        depth,
+		IncludeBlobs: includeBlobs,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, out)
 }
 
 // handleSearch delegates the smart routing (FTS / CJK substring,
