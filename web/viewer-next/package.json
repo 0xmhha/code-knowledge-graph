@@ -16,15 +16,15 @@
     "react-dom": "18.3.1",
     "react-force-graph-2d": "^1.27.0",
     "react-force-graph-3d": "^1.26.0",
-    "three": "^0.169.0",
-    "zustand": "^5.0.2"
+    "three": "^0.184.0",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@types/three": "^0.169.0",
+    "@types/three": "^0.184.1",
     "@typescript-eslint/parser": "^8.59.2",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
