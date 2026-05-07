@@ -28,16 +28,19 @@ export default function App() {
   const [api, setApi] = useState<IAPI | null>(null);
   const [srcInfo, setSrcInfo] = useState('');
   const [stale, setStale] = useState<{ src: string; cur: string } | null>(null);
-  // Persist the right-panel visibility across reloads. Defaulting to
-  // closed sidesteps the brief flash users reported when the panel
-  // mounted, ran its first NodeDetail render, and then immediately
-  // re-rendered as the boot commit landed. With the toggle now a
-  // prominent labelled button (📋 Detail) operators open it on demand
-  // instead of having it always pop in. Read synchronously at first
-  // render to avoid a hydration flash.
+  // Right-panel visibility, persisted across reloads via localStorage
+  // ckg.panelOpen ∈ {'1','0'}. Default OPEN — the panel is the only way
+  // to see the visible-nodes list and the per-node detail / impact
+  // panel; defaulting closed left users with no visible affordance
+  // beyond the bare canvas. Operators who don't want it explicitly
+  // close via the 📋 Detail toggle and the choice persists.
+  // Read synchronously at first render so the first paint matches the
+  // user's stored preference (no hydration flash).
   const [panelHidden, setPanelHidden] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem('ckg.panelOpen') !== '1';
+    if (typeof localStorage === 'undefined') return false;
+    // Only treat the panel as hidden when the user has explicitly set
+    // it to '0'. Any other value (null, '1', leftover) → open.
+    return localStorage.getItem('ckg.panelOpen') === '0';
   });
   const [helpOpen, setHelpOpen] = useState(false);
 

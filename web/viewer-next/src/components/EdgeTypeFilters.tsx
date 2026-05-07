@@ -7,8 +7,14 @@ import {
   type GraphGroupSpec, type GraphID,
 } from '@/lib/edges';
 
-// Default-collapsed groups (most numerous, least interesting for trace mode).
-const DEFAULT_COLLAPSED: ReadonlyArray<GraphID> = ['G1', 'G2'];
+// All six groups default-collapsed. Earlier we kept G3..G6 expanded so the
+// individual edge-type checkboxes were visible, but on a 280px panel the
+// expanded sublists consumed ~520px of vertical space — that pushed
+// NodeList down to ~110px (about one item visible) and made users think
+// the visible-nodes list was empty. The pill strip alone is enough for
+// the common toggle case; opening a section is a deliberate action when
+// fine-grained per-edge-type control is needed.
+const DEFAULT_COLLAPSED: ReadonlyArray<GraphID> = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6'];
 const STORAGE_KEY = 'ckg.edgeFiltersCollapsed';
 const GRAPH_MODE_KEY = 'ckg.graphMode';
 
