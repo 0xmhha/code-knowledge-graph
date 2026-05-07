@@ -201,7 +201,12 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
         focusDistance: g.focusDistance,
         lastCommitReason: g.reason,
       };
-      if (g.reason !== 'search-pick' && g.reason !== 'filter') {
+      // 'list-pick' is also transient: clicking a Visible-Nodes list item
+      // updates focusDistance (so the canvas highlights the picked node)
+      // without changing the underlying view. Reverting search after a
+      // list-pick should restore the trace/boot view, not the list-picked
+      // single-node halo.
+      if (g.reason !== 'search-pick' && g.reason !== 'filter' && g.reason !== 'list-pick') {
         patch.visibleRootIds = g.visibleIds;
       }
       set(patch);

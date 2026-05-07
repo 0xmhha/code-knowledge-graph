@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { API, StaticAPI, detectMode } from '@/lib/api';
 import type { IAPI } from '@/lib/api';
-import { useStore } from '@/store/store';
+import { useStore, computeFocusDistance } from '@/store/store';
 import { recomputeVisible } from '@/lib/depth';
 import { traceFromNode } from '@/lib/trace';
 import GraphCanvas from './GraphCanvas';
@@ -148,10 +148,36 @@ export default function App() {
     });
   }, [api, navigate, commit, setAnchor, setSelected]);
 
-  // Sidebar list pick — inspect without navigating (preserves anchor).
-  const onListPick = useCallback((id: NodeId) => {
+  // Sidebar list pick — keep the anchor + visible set, but make the
+  // canvas highlight the picked node so the user can actually see what
+  // they selected.
+  //
+  // Three steps in order:
+  //   1. Update detail panel via setSelected (cheap, immediate).
+  //   2. Lazy-fetch edges for the picked node so computeFocusDistance
+  //      can BFS its 1-hop / 2-hop neighbours within the visible set.
+  //      Skip the fetch when the edges are already cached.
+  //   3. Commit a 'list-pick' graph with the SAME visibleIds and a
+  //      fresh focusDistance map. The store excludes 'list-pick' from
+  //      visibleRootIds updates, so a subsequent search-clear still
+  //      reverts to the trace/boot view that was active before this
+  //      pick — not to the single-node halo state.
+  //   4. Tell GraphCanvas to centerOnNode so an off-screen pick is
+  //      pulled into view; the focus halo alone wouldn't help if the
+  //      picked dot is far outside the camera frustum.
+  const onListPick = useCallback(async (id: NodeId) => {
     setSelected(id);
-  }, [setSelected]);
+    if (!api) return;
+    const s = useStore.getState();
+    if (!s.edgesBySrc.has(id) && !s.edgesByDst.has(id)) {
+      const fresh = await api.edges([id]);
+      if (fresh.length) s.addEdges(fresh);
+    }
+    const after = useStore.getState();
+    const focus = computeFocusDistance(id, after.edgesBySrc, after.edgesByDst, 2);
+    commit({ visibleIds: after.visibleIds, focusDistance: focus, reason: 'list-pick' });
+    forceGraphRef.current?.centerOnNode(id);
+  }, [api, setSelected, commit]);
 
   // Keyboard shortcuts.
   useEffect(() => {

@@ -46,6 +46,11 @@ export interface GraphCanvasHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   zoomReset: () => void;
+  // centerOnNode pans the camera so the given node is on-screen and
+  // recognisable. Called by App.onListPick so picking a list item visibly
+  // moves the canvas to the chosen node — without this, the focus halo
+  // updates but a node off-screen stays off-screen.
+  centerOnNode: (id: NodeId) => void;
 }
 
 // 2D zoom uses fg.zoom(factor, durationMs).
@@ -76,6 +81,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // re-creating the handle on every viewMode change.
   viewModeRef.current = viewMode;
 
+  // Live ref to the latest graphData so the centerOnNode imperative
+  // method (whose closure is captured once via useImperativeHandle with
+  // an empty deps array) can read the current node positions instead
+  // of a snapshot from first mount.
+  const graphDataRef = useRef<{ nodes: GraphNode[]; links: GraphEdge[] } | null>(null);
+
   useImperativeHandle(ref, () => {
     // Local typed shim: react-force-graph ships without TS types, so we
     // declare the surface we actually call. Cast the imperative ref once
@@ -85,10 +96,12 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       zoom?: (factor: number, duration?: number) => void;
       zoomToFit?: (duration?: number) => void;
       cameraPosition?: (pos?: Vec3, lookAt?: Vec3, duration?: number) => Vec3 | void;
+      centerAt?: (x?: number, y?: number, durationMs?: number) => void;
     }
     const fg = (): FGShim | null => (fgRef.current as FGShim | null) ?? null;
     const RESET_3D: Vec3 = { x: 0, y: 0, z: 600 };
     const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
+    const CENTER_DURATION_MS = 600;
 
     const zoom3D = (factor: number) => {
       const f = fg();
@@ -130,6 +143,39 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           fg()?.cameraPosition?.(RESET_3D, ORIGIN, ZOOM_DURATION_MS);
         }
       },
+      centerOnNode(id: NodeId) {
+        // Look up the node's current simulation position. force-graph
+        // mutates x/y/z on the node objects in place; we read whatever
+        // values are present at click time.
+        const data = graphDataRef.current;
+        if (!data) return;
+        const n = data.nodes.find(x => x.id === id);
+        if (!n) return;
+        const f = fg();
+        if (!f) return;
+        if (viewModeRef.current === '2d') {
+          // 2D: pan the canvas to the node's (x, y).
+          if (typeof n.x === 'number' && typeof n.y === 'number') {
+            f.centerAt?.(n.x, n.y, CENTER_DURATION_MS);
+          }
+        } else {
+          // 3D: keep the camera's current distance, just move it so it
+          // looks at the node. Easiest robust trick: place the camera
+          // along the +z axis offset from the node by the current
+          // viewing distance.
+          const nz = (n as GraphNode & { z?: number }).z ?? 0;
+          if (typeof n.x !== 'number' || typeof n.y !== 'number') return;
+          const cur = f.cameraPosition?.() as Vec3 | undefined;
+          const dist = cur
+            ? Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2) || RESET_3D.z
+            : RESET_3D.z;
+          f.cameraPosition?.(
+            { x: n.x, y: n.y, z: nz + dist },
+            { x: n.x, y: n.y, z: nz },
+            CENTER_DURATION_MS,
+          );
+        }
+      },
     };
   }, []);
 
@@ -155,6 +201,11 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
     return { nodes, links };
   }, [visibleIds, allNodes, edgesBySrc]);
+
+  // Mirror graphData into a ref so the centerOnNode imperative method
+  // (captured once in useImperativeHandle's empty-deps closure) reads
+  // the live node positions instead of a snapshot from first mount.
+  graphDataRef.current = graphData;
 
   const focusDistance = useStore(s => s.focusDistance);
 

@@ -43,7 +43,12 @@ export interface HierarchyRow {
   topic_label?: string;
 }
 
-export type CommitReason = 'navigate' | 'trace' | 'search-pick' | 'filter' | 'boot';
+// CommitReason classifies why a commit fired so the store can decide whether
+// to update visibleRootIds (the snapshot search reverts to). 'list-pick',
+// 'search-pick', and 'filter' are all transient view changes — none of them
+// should redefine "root", because reverting after one of these means going
+// back to the prior trace/boot view, not to the list-picked node.
+export type CommitReason = 'navigate' | 'trace' | 'list-pick' | 'search-pick' | 'filter' | 'boot';
 
 export interface CommitGraph {
   visibleIds: Set<NodeId>;
