@@ -71,6 +71,35 @@ export default function NodeDetail({ api }: Props) {
     return () => { cancelled = true; };
   }, [selectedId, api]);
 
+  // Mirrors App.traceAndCommit semantics so the canvas actually shows
+  // the clicked impact node and its 1-hop neighbours — without this the
+  // detail panel updated but the canvas stayed on the original seed,
+  // confusing the user. Depth=1 because the impact list already supplied
+  // multi-hop context; a deeper trace would just clutter the view.
+  //
+  // MUST be declared before the `if (!node) return ...` early-return below
+  // — useCallback is a hook, and React requires the same hook order on
+  // every render. Putting it after the early return triggered React error
+  // #310 ("Rendered fewer hooks than expected") whenever the user clicked
+  // a node, because the unselected-state render skipped this hook entirely.
+  const onImpactItemClick = useCallback(async (id: NodeId) => {
+    setSelected(id);
+    const target = useStore.getState().nodes.get(id);
+    if (!target?.qualified_name) {
+      // Node lacks qname, trace would yield 0 results — fall back to
+      // selection-only so the detail pane still updates.
+      return;
+    }
+    const s = useStore.getState();
+    const g = await traceFromNode(api, id, {
+      direction: s.traceDirection,
+      depth: 1,
+      edgeTypes: s.edgeTypeWhitelist,
+    });
+    setAnchor(id, 1);
+    commit(g);
+  }, [api, setSelected, setAnchor, commit]);
+
   if (!node) {
     return <div className="node-detail">Select a node to inspect.</div>;
   }
@@ -94,29 +123,6 @@ export default function NodeDetail({ api }: Props) {
       setImpactLoading(false);
     }
   };
-
-  // Mirrors App.traceAndCommit semantics so the canvas actually shows
-  // the clicked impact node and its 1-hop neighbours — without this the
-  // detail panel updated but the canvas stayed on the original seed,
-  // confusing the user. Depth=1 because the impact list already supplied
-  // multi-hop context; a deeper trace would just clutter the view.
-  const onImpactItemClick = useCallback(async (id: NodeId) => {
-    setSelected(id);
-    const target = useStore.getState().nodes.get(id);
-    if (!target?.qualified_name) {
-      // Node lacks qname, trace would yield 0 results — fall back to
-      // selection-only so the detail pane still updates.
-      return;
-    }
-    const s = useStore.getState();
-    const g = await traceFromNode(api, id, {
-      direction: s.traceDirection,
-      depth: 1,
-      edgeTypes: s.edgeTypeWhitelist,
-    });
-    setAnchor(id, 1);
-    commit(g);
-  }, [api, setSelected, setAnchor, commit]);
 
   return (
     <div className="node-detail">
