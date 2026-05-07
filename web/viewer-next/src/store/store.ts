@@ -47,6 +47,12 @@ interface State {
   dimmedCommunities: Set<number>;
   isolatedCommunity: number | null;
 
+  // First-time UX overlay. firstTimeSeen flips to true once the user
+  // dismisses the overlay; persisted via localStorage so subsequent
+  // visits don't show it again. App.tsx renders FirstTimeOverlay only
+  // when api is ready AND firstTimeSeen is false.
+  firstTimeSeen: boolean;
+
   // Trace controls.
   traceDirection: TraceDirection;
   traceDepth: number;
@@ -80,6 +86,7 @@ interface State {
   // turn the previously-active group off.
   setEdgeTypeWhitelistOnlyGroup: (group: GraphGroupSpec) => void;
   setGraphModeIsolation: (on: boolean) => void;
+  setFirstTimeSeen: (v: boolean) => void;
   toggleDimCommunity: (c: number) => void;
   setIsolatedCommunity: (c: number | null) => void;
   setTraceDirection: (d: TraceDirection) => void;
@@ -109,6 +116,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
   graphModeIsolation: false,
+  firstTimeSeen: false,
   dimmedCommunities: new Set(),
   isolatedCommunity: null,
   traceDirection: 'both',
@@ -204,6 +212,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
     set({ edgeTypeWhitelist: new Set(group.edges) });
   },
   setGraphModeIsolation: (on) => set({ graphModeIsolation: on }),
+  setFirstTimeSeen: (v) => set({ firstTimeSeen: v }),
   toggleDimCommunity: (c) => {
     const next = new Set(get().dimmedCommunities);
     if (next.has(c)) next.delete(c); else next.add(c);

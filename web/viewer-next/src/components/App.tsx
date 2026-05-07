@@ -10,6 +10,7 @@ import GraphCanvas from './GraphCanvas';
 import type { GraphCanvasHandle } from './GraphCanvas';
 import ControlLayer from './ControlLayer';
 import HelpOverlay from './HelpOverlay';
+import FirstTimeOverlay from './FirstTimeOverlay';
 import TopBar from './TopBar';
 import BottomBar from './BottomBar';
 import NodeList from './NodeList';
@@ -242,6 +243,10 @@ export default function App() {
   return (
     <div id="app" className={panelHidden ? 'no-panel' : ''}>
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* FirstTimeOverlay self-gates: renders nothing once dismissed.
+          Mount only after api is ready so the overlay doesn't appear
+          briefly on top of an empty canvas during boot. */}
+      {apiBox && <FirstTimeOverlay />}
       {stale && (
         <div className="stale-banner" style={{ gridColumn: '1 / span 2' }}>
           ⚠️ Graph built from {stale.src} but src is now at {stale.cur}. Run `ckg build` to refresh.
