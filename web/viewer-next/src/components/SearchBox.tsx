@@ -1,18 +1,38 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/store';
 import type { IAPI } from '@/lib/api';
+import type { NodeId } from '@/types';
 
 interface Props { api: IAPI; }
 
 export default function SearchBox({ api }: Props) {
   const [q, setQ] = useState('');
   const setSearchResults = useStore(s => s.setSearchResults);
+  const setSearchQuery = useStore(s => s.setSearchQuery);
   const loadNodes = useStore(s => s.loadNodes);
   const addEdges = useStore(s => s.addEdges);
   const commit = useStore(s => s.commit);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // clearSearch resets the query AND reverts visibleIds to the most
+  // recent non-search root snapshot. Without the visibleIds revert,
+  // search-introduced nodes would linger on the canvas after the user
+  // emptied the input — the original V1 wiring just hid them from the
+  // sidebar list, which made the UI feel "stuck on search results".
+  const clearSearch = useCallback(() => {
+    setQ('');
+    setSearchQuery('');
+    setSearchResults([]);
+    const cur = useStore.getState();
+    commit({
+      visibleIds: new Set(cur.visibleRootIds),
+      focusDistance: cur.focusDistance,
+      reason: 'search-pick',
+    });
+    inputRef.current?.focus();
+  }, [setSearchResults, setSearchQuery, commit]);
 
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
@@ -27,6 +47,10 @@ export default function SearchBox({ api }: Props) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // Mirror the input value into the store so other components (NodeList
+  // empty state) can show the actual query the user typed.
+  useEffect(() => { setSearchQuery(q); }, [q, setSearchQuery]);
 
   useEffect(() => {
     if (!q.trim()) {
@@ -45,16 +69,20 @@ export default function SearchBox({ api }: Props) {
 
         // Push results onto the canvas as well as the sidebar — without
         // this, hits show up in the list but never appear in the graph,
-        // which makes search feel broken (V1-5). We extend (∪) the
-        // current visible set rather than replace so the user keeps
-        // their existing context — typing while exploring shouldn't
-        // wipe the canvas.
+        // which makes search feel broken (V1-5).
+        //
+        // Critically: union onto visibleRootIds (the stable boot/trace
+        // snapshot), NOT the current visibleIds. Unioning onto current
+        // would accumulate hits across consecutive queries until we hit
+        // MAX_VISIBLE for no good reason. Each new query REPLACES the
+        // previous query's contribution while preserving the user's
+        // boot/trace context.
         const ids = results.map(n => n.id);
         const fresh = await api.edges(ids);
         if (fresh.length) addEdges(fresh);
 
         const cur = useStore.getState();
-        const next = new Set(cur.visibleIds);
+        const next = new Set<NodeId>(cur.visibleRootIds);
         for (const id of ids) next.add(id);
         commit({
           visibleIds: next,
@@ -70,14 +98,27 @@ export default function SearchBox({ api }: Props) {
   }, [q, api, setSearchResults, loadNodes, addEdges, commit]);
 
   return (
-    <input
-      ref={inputRef}
-      className="search"
-      type="text"
-      placeholder="search… (/) "
-      value={q}
-      onChange={e => setQ(e.target.value)}
-      autoComplete="off"
-    />
+    <span className="search-wrap">
+      <input
+        ref={inputRef}
+        className="search"
+        type="text"
+        placeholder="search… (/) "
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        autoComplete="off"
+      />
+      {q && (
+        <button
+          type="button"
+          className="search-clear"
+          onClick={clearSearch}
+          title="Clear search (revert to root view)"
+          aria-label="Clear search"
+        >
+          ✕
+        </button>
+      )}
+    </span>
   );
 }

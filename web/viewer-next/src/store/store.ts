@@ -18,9 +18,18 @@ interface State {
   focusDistance: Map<NodeId, number>;
   lastCommitReason: CommitGraph['reason'];
 
+  // visibleRootIds is the "non-search" base — i.e. what visibleIds was the
+  // last time something other than a search committed (boot / navigate /
+  // trace / filter). Search results are unioned ON TOP of this set, so
+  // each new search REPLACES the previous search additions instead of
+  // accumulating them, and clearing search reverts to this snapshot.
+  // Without it, successive searches grew visibleIds past MAX_VISIBLE.
+  visibleRootIds: Set<NodeId>;
+
   // UX state.
   selectedId: NodeId | null;
   searchResults: GraphNode[];
+  searchQuery: string;
   anchorId: NodeId | null;
   depth: number;
 
@@ -52,6 +61,7 @@ interface State {
 
   setSelected: (id: NodeId | null) => void;
   setSearchResults: (rs: GraphNode[]) => void;
+  setSearchQuery: (q: string) => void;
   setAnchor: (id: NodeId | null, depth: number) => void;
   setViewMode: (m: ViewMode) => void;
   setColorMode: (m: ColorMode) => void;
@@ -76,8 +86,10 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   visibleIds: new Set(),
   focusDistance: new Map(),
   lastCommitReason: 'boot',
+  visibleRootIds: new Set(),
   selectedId: null,
   searchResults: [],
+  searchQuery: '',
   anchorId: null,
   depth: 0,
   viewMode: '3d',
@@ -140,16 +152,26 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
       const g = pending;
       pending = null;
       if (!g) return;
-      set({
+      // Track the "root" view (everything except search additions) so
+      // SearchBox can union onto a stable base instead of unioning onto
+      // the previous union — that accumulation grew visibleIds past
+      // MAX_VISIBLE on repeated queries. Filter commits also leave the
+      // root snapshot alone: the user is just re-rendering.
+      const patch: Partial<State> = {
         visibleIds: g.visibleIds,
         focusDistance: g.focusDistance,
         lastCommitReason: g.reason,
-      });
+      };
+      if (g.reason !== 'search-pick' && g.reason !== 'filter') {
+        patch.visibleRootIds = g.visibleIds;
+      }
+      set(patch);
     });
   },
 
   setSelected: (id) => set({ selectedId: id }),
   setSearchResults: (rs) => set({ searchResults: rs }),
+  setSearchQuery: (q) => set({ searchQuery: q }),
   setAnchor: (id, depth) => set({ anchorId: id, depth }),
   setViewMode: (m) => set({ viewMode: m }),
   setColorMode: (m) => set({ colorMode: m }),

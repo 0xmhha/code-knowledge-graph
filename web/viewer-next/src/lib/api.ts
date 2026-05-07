@@ -40,12 +40,16 @@ export class API implements IAPI {
   }
 
   // topNodes hits the /api/nodes/top endpoint added in schema 1.6 wiring.
-  // Returns [] on 404 so callers can transparently fall back to nodes('')
-  // against older backends that only expose /api/nodes.
+  // Returns [] ONLY on 404 so callers can transparently fall back to
+  // nodes('') against older backends that don't expose this route. Any
+  // other non-2xx (500, 502, …) is a real backend error and MUST surface
+  // — silently mapping it to [] hid actual failures behind the "older
+  // backend" fallback path and made debugging impossible.
   async topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]> {
     const q = new URLSearchParams({ metric, limit: String(limit) });
     const r = await fetch(`${this.base}/api/nodes/top?${q}`);
-    if (!r.ok) return [];
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`/api/nodes/top ${r.status}`);
     return asArray<GraphNode>(await r.json());
   }
 
