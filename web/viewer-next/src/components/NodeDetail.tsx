@@ -22,9 +22,10 @@ const IMPACT_GROUPS: Array<{ key: keyof ImpactBuckets; label: string }> = [
 ];
 
 // IMPACT_TOP_N caps how many items per bucket we render in the panel —
-// surfacing 100+ items in a 280px column buries the rest of the UI. The
-// number lines up with what an LLM finds useful (~10 items per bucket per
-// the dogfood plan); users wanting deeper traversal use the MCP tool.
+// surfacing 100+ items at the panel's 240px clamp floor buries the rest
+// of the UI. The number lines up with what an LLM finds useful (~10 items
+// per bucket per the dogfood plan); users wanting deeper traversal use
+// the MCP tool.
 const IMPACT_TOP_N = 10;
 
 export default function NodeDetail({ api }: Props) {

@@ -8,12 +8,12 @@ import {
 } from '@/lib/edges';
 
 // All six groups default-collapsed. Earlier we kept G3..G6 expanded so the
-// individual edge-type checkboxes were visible, but on a 280px panel the
-// expanded sublists consumed ~520px of vertical space — that pushed
-// NodeList down to ~110px (about one item visible) and made users think
-// the visible-nodes list was empty. The pill strip alone is enough for
-// the common toggle case; opening a section is a deliberate action when
-// fine-grained per-edge-type control is needed.
+// individual edge-type checkboxes were visible, but within the panel's
+// 240..360px clamp range the expanded sublists consumed ~520px of vertical
+// space — that pushed NodeList down to ~110px (about one item visible) and
+// made users think the visible-nodes list was empty. The pill strip alone
+// is enough for the common toggle case; opening a section is a deliberate
+// action when fine-grained per-edge-type control is needed.
 const DEFAULT_COLLAPSED: ReadonlyArray<GraphID> = ['G1', 'G2', 'G3', 'G4', 'G5', 'G6'];
 const STORAGE_KEY = 'ckg.edgeFiltersCollapsed';
 const GRAPH_MODE_KEY = 'ckg.graphMode';
@@ -38,8 +38,11 @@ function loadCollapsed(): Set<GraphID> {
         // mirror it to STORAGE_KEY so the persisted value matches the
         // in-memory Set on first paint (avoids a transient mismatch
         // between what the UI shows and what reload would restore).
-        localStorage.setItem(MIGRATION_KEY, MIGRATION_VAL);
+        // Write data first, sentinel last — sentinel acts as a commit marker so
+        // a crash between the two writes simply re-runs the migration on next
+        // load instead of leaving a stale STORAGE_KEY with a satisfied sentinel.
         localStorage.setItem(STORAGE_KEY, JSON.stringify([...DEFAULT_COLLAPSED]));
+        localStorage.setItem(MIGRATION_KEY, MIGRATION_VAL);
         return new Set(DEFAULT_COLLAPSED);
       }
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -132,7 +135,8 @@ function GraphPillStrip() {
 
 // GraphModeToggle is a small button that flips graphModeIsolation. We
 // keep the visible label deliberately short ("Solo") so it can sit on
-// the same row as the section heading without wrapping on a 280px panel.
+// the same row as the section heading without wrapping at the panel's
+// narrow end (240px clamp floor).
 function GraphModeToggle() {
   const isolation = useStore(s => s.graphModeIsolation);
   const setIsolation = useStore(s => s.setGraphModeIsolation);

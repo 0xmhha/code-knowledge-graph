@@ -15,14 +15,20 @@ html, body {
      is absent the row collapses to 0px (no children). Without this row the
      banner shoves TopBar into the 1fr canvas row, breaking the layout. */
   grid-template-rows: auto 32px 1fr 28px;
-  /* Panel column = 360px (was 280px). 280 was too cramped for a 5-section
-     stack: NodeList items truncated, EdgeFilters pill labels wrapped to a
-     second row, and the search field in NodeList lost its trailing chrome.
-     360 fits all of the above without truncation while still leaving
-     ≥800px (1280 viewport) / ≥1080px (1440 viewport) for the canvas — the
-     canvas is the primary surface, so we deliberately stay below half-width
-     even on a 1280 laptop. */
-  grid-template-columns: 1fr 360px;
+  /* minmax(0, 1fr): the spec default `1fr` is `minmax(auto, 1fr)`, whose
+     `auto` minimum follows the min-content size of the cell's contents.
+     react-force-graph-2d sizes its <canvas> from the initial parent
+     width (~1200px on first paint), and that becomes the 1fr track's
+     min-content. Without `minmax(0, ...)` grid honours that min and
+     encroaches on the fixed panel track when viewport < 1fr_min + panel,
+     visibly crushing the panel to <360px on narrow windows.
+
+     clamp(240px, 32vw, 360px): keep 360px on ≥1125px viewports (where
+     32vw ≥ 360), scale down to 32vw on mid widths so the canvas keeps a
+     usable share, never below 240px (legibility floor for NodeList +
+     EdgeFilters labels). At 720px viewport: panel ≈ 240px, canvas ≈
+     480px — both visible. */
+  grid-template-columns: minmax(0, 1fr) clamp(240px, 32vw, 360px);
   height: 100vh;
   width: 100vw;
   /* No grid-template-columns transition. Animating a layout property
@@ -31,7 +37,7 @@ html, body {
      column width interpolated and the canvas resized mid-animation.
      Snap-toggle is jarring once but never flashes. */
 }
-#app.no-panel { grid-template-columns: 1fr 0px; }
+#app.no-panel { grid-template-columns: minmax(0, 1fr) 0px; }
 #app.no-panel .panel { display: none; }
 
 /* Detail toggle — the prominent button users actually find. The plain
@@ -125,7 +131,7 @@ html, body {
    absolutely-positioned ControlLayer that's also a direct child. Without
    the :not, ControlLayer gets width: 100% which combined with its
    right: 12px pushes it off-screen left. */
-.canvas-host > div:not(.control-layer) { width: 100%; height: 100%; }
+.canvas-host > div:not(.control-layer) { width: 100%; height: 100%; min-width: 0; }
 
 .panel {
   background: #1a1c1f;
@@ -207,7 +213,7 @@ html, body {
   line-height: 1;
   opacity: 0.85;
 }
-.node-detail-empty-title {
+.node-detail .node-detail-empty-title {
   font-size: 13px;
   font-weight: 600;
   color: #cfd0d3;
