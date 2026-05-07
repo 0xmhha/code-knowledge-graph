@@ -28,6 +28,10 @@ export default function SearchBox({ api }: Props) {
     const cur = useStore.getState();
     commit({
       visibleIds: new Set(cur.visibleRootIds),
+      // Preserve the trace's focus distances if any — clearing search reverts
+      // to the pre-search view, which may be a trace; we want its anchor halo
+      // to come back too. When the pre-search view was a fresh boot (no
+      // trace), focusDistance is already empty so this is a no-op.
       focusDistance: cur.focusDistance,
       reason: 'search-pick',
     });

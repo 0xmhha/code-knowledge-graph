@@ -51,7 +51,9 @@ function GraphPillStrip() {
         const allOn = groupHasAllEdges(g, whitelist);
         const anyOn = groupHasAnyEdge(g, whitelist);
         const cls = allOn ? 'pill-on' : (anyOn ? 'pill-partial' : 'pill-off');
-        const onClick = () => setBulk(g.edges, !anyOn);
+        // Mirrors GroupSection header toggle semantics — partial state always
+        // turns on the rest, all-on state turns off.
+        const onClick = () => setBulk(g.edges, !allOn);
         return (
           <button
             key={g.id}
@@ -59,7 +61,7 @@ function GraphPillStrip() {
             className={`graph-pill ${cls}`}
             style={{ borderColor: hex(g.color) }}
             onClick={onClick}
-            title={`${g.id} ${g.label} — ${g.description}\nClick to ${anyOn ? 'turn all off' : 'turn all on'}.`}
+            title={`${g.id} ${g.label} — ${g.description}\nClick to ${allOn ? 'turn all off' : 'turn all on'}.`}
           >
             <span className="graph-pill-dot" style={{ background: hex(g.color) }} />
             <span className="graph-pill-id">{g.id}</span>
