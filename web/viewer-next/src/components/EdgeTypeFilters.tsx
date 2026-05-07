@@ -35,6 +35,42 @@ function hex(n: number): string {
   return '#' + n.toString(16).padStart(6, '0');
 }
 
+// GraphPillStrip is a compact, always-visible row of six group toggles
+// pinned to the top of the panel. Each pill toggles its entire group
+// (delegating to setEdgeTypeWhitelistBulk). Visual state encodes
+// "all on" (full opacity) / "some on" (mid) / "all off" (dim) so the
+// user can read the current 6-graph state at a glance without
+// expanding any sublist.
+function GraphPillStrip() {
+  const whitelist = useStore(s => s.edgeTypeWhitelist);
+  const setBulk = useStore(s => s.setEdgeTypeWhitelistBulk);
+
+  return (
+    <div className="graph-pills" role="group" aria-label="6-graph axis toggles">
+      {GRAPH_GROUPS.map(g => {
+        const allOn = groupHasAllEdges(g, whitelist);
+        const anyOn = groupHasAnyEdge(g, whitelist);
+        const cls = allOn ? 'pill-on' : (anyOn ? 'pill-partial' : 'pill-off');
+        const onClick = () => setBulk(g.edges, !anyOn);
+        return (
+          <button
+            key={g.id}
+            type="button"
+            className={`graph-pill ${cls}`}
+            style={{ borderColor: hex(g.color) }}
+            onClick={onClick}
+            title={`${g.id} ${g.label} — ${g.description}\nClick to ${anyOn ? 'turn all off' : 'turn all on'}.`}
+          >
+            <span className="graph-pill-dot" style={{ background: hex(g.color) }} />
+            <span className="graph-pill-id">{g.id}</span>
+            <span className="graph-pill-label">{g.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 interface GroupSectionProps {
   group: GraphGroupSpec;
   collapsed: boolean;
@@ -104,6 +140,7 @@ export default function EdgeTypeFilters() {
   return (
     <div className="edge-filters">
       <h4>Edge Types (6-graph axis)</h4>
+      <GraphPillStrip />
       {GRAPH_GROUPS.map(g => (
         <GroupSection
           key={g.id}

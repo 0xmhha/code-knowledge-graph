@@ -7,7 +7,15 @@ const MAX_TRACE_VISIBLE = 500;
 export interface TraceOpts {
   direction: TraceDirection;
   depth: number;
-  edgeTypes: Set<string>;
+  // edgeTypes is retained for API compatibility but NO LONGER gates BFS
+  // expansion. The renderer (linkVisibility / nodeVisibility in
+  // GraphCanvas) already filters edges by whitelist on draw, so toggling
+  // a graph filter on after a trace immediately reveals the structure
+  // that was already loaded — no re-trace required. Keeping the BFS gate
+  // here meant clicking a Package node with the default whitelist
+  // returned only the click target (because `contains` is off), which
+  // looked broken.
+  edgeTypes?: Set<string>;
 }
 
 // traceFromNode walks the graph in the requested direction and depth,
@@ -21,12 +29,16 @@ export interface TraceOpts {
 //    call paths usually need a deeper view to reach the entrypoint, while
 //    callees within 2 hops is usually enough to spot the next decision.
 //
-// edgeTypes filter is applied on each hop — only edges of types in the
-// whitelist are followed AND surfaced in the result.
+// Edge-type filtering is purely a DISPLAY concern now: BFS walks every
+// incident edge in the requested direction. This gives the user a
+// meaningful neighbour set on first click; flipping a filter pill on
+// reveals already-loaded structure without a re-fetch. The semantic
+// `direction` choice (callers / callees / both) is preserved because
+// it changes WHICH neighbours are interesting, not which edge types.
 export async function traceFromNode(
   api: IAPI, startId: NodeId, opts: TraceOpts,
 ): Promise<CommitGraph> {
-  const { direction, edgeTypes } = opts;
+  const { direction } = opts;
   const effectiveDepth = direction === 'callers' ? opts.depth + 2 : opts.depth;
 
   // Ensure edges for the start node are loaded.
@@ -46,13 +58,11 @@ export async function traceFromNode(
 
       if (direction === 'callees' || direction === 'both') {
         for (const e of cur.edgesBySrc.get(id) ?? []) {
-          if (!edgeTypes.has(e.type)) continue;
           candidates.push(e.dst);
         }
       }
       if (direction === 'callers' || direction === 'both') {
         for (const e of cur.edgesByDst.get(id) ?? []) {
-          if (!edgeTypes.has(e.type)) continue;
           candidates.push(e.src);
         }
       }

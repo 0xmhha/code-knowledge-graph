@@ -72,6 +72,14 @@ html, body {
   font-size: 11px;
 }
 .topbar button:hover, .bottombar button:hover { background: #2a2c30; }
+.topbar button.topbar-home {
+  border-color: #44aaff;
+  color: #44aaff;
+  font-weight: 600;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.topbar button.topbar-home:hover { background: #1d2a3a; color: #7ab8ff; }
 .topbar .src-info {
   font-size: 11px;
   color: #888;
@@ -194,6 +202,41 @@ html, body {
   cursor: pointer;
   font-family: ui-monospace, monospace;
 }
+
+/* ── 6-graph pill strip (V2-2): always-visible group toggles ────────── */
+.edge-filters .graph-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0 8px 0;
+}
+.edge-filters .graph-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border: 1px solid #2a2c30;
+  border-radius: 999px;
+  background: #1a1c1f;
+  color: #cfd0d3;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  transition: opacity 100ms ease, background 100ms ease;
+}
+.edge-filters .graph-pill:hover { background: #232529; }
+.edge-filters .graph-pill.pill-on { opacity: 1; }
+.edge-filters .graph-pill.pill-partial { opacity: 0.65; }
+.edge-filters .graph-pill.pill-off { opacity: 0.35; }
+.edge-filters .graph-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.edge-filters .graph-pill-id { color: #7ab8ff; font-weight: 600; }
+.edge-filters .graph-pill-label { color: #cfd0d3; }
 
 /* ── 6-graph group filter UI (E5) ────────────────────────────────────── */
 .edge-filters .graph-group {

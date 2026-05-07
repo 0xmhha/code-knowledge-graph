@@ -90,10 +90,13 @@ export default function App() {
     const s = useStore.getState();
     setSelected(id);
     await navigate(async () => {
+      // edgeTypes intentionally omitted: trace walks all incident edges
+      // (V2-3). The renderer filters by edgeTypeWhitelist at draw time,
+      // so a user can flip a graph pill on after the trace and instantly
+      // see the relevant edges without re-fetching.
       const g = await traceFromNode(api, id, {
         direction: s.traceDirection,
         depth: s.traceDepth,
-        edgeTypes: s.edgeTypeWhitelist,
       });
       // Trace also sets the anchor so depth-in/out from here makes sense.
       setAnchor(id, s.traceDepth);
@@ -132,6 +135,12 @@ export default function App() {
     if (!api) return;
     setAnchor(null, 0);
     setSelected(null);
+    // Clear the user's search state too — the spec for the prominent
+    // Home button is "return to root view", which means dropping any
+    // active query/results so the canvas isn't still tinted by hits
+    // from the previous search.
+    useStore.getState().setSearchQuery('');
+    useStore.getState().setSearchResults([]);
     await navigate(async () => {
       const g = await recomputeVisible(api);
       commit(g);
@@ -243,6 +252,7 @@ export default function App() {
           api={apiBox}
           srcInfo={srcInfo}
           onTogglePanel={() => setPanelHidden(p => !p)}
+          onHome={onHome}
         />
       )}
       <div className="canvas-host">
@@ -255,7 +265,7 @@ export default function App() {
         <ControlLayer onHelpClick={() => setHelpOpen(true)} />
       </div>
       <div className="panel">
-        <NodeList onPick={onListPick} />
+        <NodeList onPick={onListPick} apiReady={apiBox !== null} />
         {apiBox && <NodeDetail api={apiBox} />}
         <TraceControls />
         <EdgeTypeFilters />

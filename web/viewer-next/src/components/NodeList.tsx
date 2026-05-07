@@ -4,11 +4,20 @@ import { memo, useMemo } from 'react';
 import { useStore } from '@/store/store';
 import type { GraphNode, NodeId } from '@/types';
 
-interface Props { onPick: (id: NodeId) => void; }
+interface Props {
+  onPick: (id: NodeId) => void;
+  // apiReady is false during the brief window between mount and the
+  // detectMode() / first commit completing. Without it the empty
+  // state read "No visible nodes — bootstrap may still be running."
+  // for both the loading case AND the legitimately-empty case, which
+  // confused users on small graphs.
+  apiReady: boolean;
+}
 
-function NodeListImpl({ onPick }: Props) {
+function NodeListImpl({ onPick, apiReady }: Props) {
   const isSearch = useStore(s => s.searchResults.length > 0);
   const searchResults = useStore(s => s.searchResults);
+  const searchQuery = useStore(s => s.searchQuery);
   const visibleIds = useStore(s => s.visibleIds);
   const nodes = useStore(s => s.nodes);
   const selectedId = useStore(s => s.selectedId);
@@ -39,6 +48,22 @@ function NodeListImpl({ onPick }: Props) {
     }
   }
 
+  // Three real empty states:
+  //   1. API not ready → bootstrap genuinely in flight
+  //   2. User typed a query but server returned nothing
+  //   3. Bootstrap done but visibleIds is empty (rare; small graphs,
+  //      or a filter dropping everything visible)
+  let emptyMessage = '';
+  if (items.length === 0) {
+    if (!apiReady) {
+      emptyMessage = 'Loading graph…';
+    } else if (searchQuery.trim()) {
+      emptyMessage = `No matches for «${searchQuery.trim()}». Try a partial identifier.`;
+    } else {
+      emptyMessage = 'Graph empty — try a search or click the home button.';
+    }
+  }
+
   return (
     <div className="node-list">
       <div className="listmeta">
@@ -47,7 +72,7 @@ function NodeListImpl({ onPick }: Props) {
       </div>
       {items.length === 0 ? (
         <div style={{ padding: 12, color: '#666', fontSize: 11 }}>
-          {isSearch ? 'No results.' : 'No visible nodes — bootstrap may still be running.'}
+          {emptyMessage}
         </div>
       ) : items.map(n => (
         <div
