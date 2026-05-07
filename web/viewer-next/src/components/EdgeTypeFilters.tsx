@@ -18,13 +18,36 @@ const DEFAULT_COLLAPSED: ReadonlyArray<GraphID> = ['G1', 'G2', 'G3', 'G4', 'G5',
 const STORAGE_KEY = 'ckg.edgeFiltersCollapsed';
 const GRAPH_MODE_KEY = 'ckg.graphMode';
 
+// Versioned migration sentinel for the collapsed-state default. Earlier
+// builds shipped DEFAULT_COLLAPSED = ['G1','G2'] which left G3..G6 expanded
+// and consumed ~520px of panel height — pushing NodeList / NodeDetail off
+// the visible area. Returning users keep that stale value forever because
+// loadCollapsed() short-circuits on the stored array; the new
+// all-six-collapsed default never reaches them. Bumping MIGRATION_VAL
+// forces exactly one reset, then we honour the user's saved choices again.
+const MIGRATION_KEY = 'ckg.edgeFiltersV';
+const MIGRATION_VAL = 'v2';
+
 function loadCollapsed(): Set<GraphID> {
   try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) return new Set(arr.filter((x): x is GraphID =>
-        typeof x === 'string' && /^G[1-6]$/.test(x)));
+    if (typeof localStorage !== 'undefined') {
+      const ver = localStorage.getItem(MIGRATION_KEY);
+      if (ver !== MIGRATION_VAL) {
+        // First load on v2 (or returning user with stale v1 default).
+        // Reset to the new all-six-collapsed default exactly once and
+        // mirror it to STORAGE_KEY so the persisted value matches the
+        // in-memory Set on first paint (avoids a transient mismatch
+        // between what the UI shows and what reload would restore).
+        localStorage.setItem(MIGRATION_KEY, MIGRATION_VAL);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...DEFAULT_COLLAPSED]));
+        return new Set(DEFAULT_COLLAPSED);
+      }
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return new Set(arr.filter((x): x is GraphID =>
+          typeof x === 'string' && /^G[1-6]$/.test(x)));
+      }
     }
   } catch { /* localStorage may be blocked */ }
   return new Set(DEFAULT_COLLAPSED);

@@ -15,7 +15,14 @@ html, body {
      is absent the row collapses to 0px (no children). Without this row the
      banner shoves TopBar into the 1fr canvas row, breaking the layout. */
   grid-template-rows: auto 32px 1fr 28px;
-  grid-template-columns: 1fr 280px;
+  /* Panel column = 360px (was 280px). 280 was too cramped for a 5-section
+     stack: NodeList items truncated, EdgeFilters pill labels wrapped to a
+     second row, and the search field in NodeList lost its trailing chrome.
+     360 fits all of the above without truncation while still leaving
+     ≥800px (1280 viewport) / ≥1080px (1440 viewport) for the canvas — the
+     canvas is the primary surface, so we deliberately stay below half-width
+     even on a 1280 laptop. */
+  grid-template-columns: 1fr 360px;
   height: 100vh;
   width: 100vw;
   /* No grid-template-columns transition. Animating a layout property
@@ -178,6 +185,42 @@ html, body {
 .node-detail h4 { font-size: 11px; margin: 8px 0 3px 0; }
 .node-detail pre { font-size: 10.5px; max-height: 200px; }
 
+/* Empty state — shown when no node is selected. Centered flex column with
+   a large glyph so the panel never reads as blank on first paint. The
+   glyph is text (no external image) so it survives offline mode and the
+   embedded-binary build with zero asset plumbing. */
+.node-detail-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  color: #cfd0d3;
+  /* Take the full vertical slice of the .node-detail flex item so the
+     empty state visually fills the section instead of hugging the top. */
+  min-height: 180px;
+}
+.node-detail-empty-glyph {
+  font-size: 36px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.node-detail-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cfd0d3;
+  margin: 0;
+}
+.node-detail-empty-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #888;
+  max-width: 280px;
+}
+
 /* Impact panel — surfaces /api/impact result inline so users don't need
    to leave the canvas to see who depends on the selected node. */
 .node-detail .impact-actions { margin-top: 8px; }
@@ -334,7 +377,7 @@ html, body {
 .edge-filters h4 { font-size: 11px; margin: 0 0 4px 0; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
 
 /* Header row hosts the section heading + the Solo-mode toggle so they
-   share one line on the 280px panel without forcing a second row. */
+   share one line on the 360px panel without forcing a second row. */
 .edge-filters .edge-filters-header {
   display: flex;
   align-items: center;

@@ -101,7 +101,29 @@ export default function NodeDetail({ api }: Props) {
   }, [api, setSelected, setAnchor, commit]);
 
   if (!node) {
-    return <div className="node-detail">Select a node to inspect.</div>;
+    // Strong empty-state placeholder. The earlier single muted line read
+    // as "panel is broken" on first paint because NodeDetail is the
+    // tallest section in the panel and starts unselected. Centered
+    // glyph + heading + hint gives the empty state unmistakable
+    // presence, and role="status" + aria-live="polite" lets screen
+    // readers announce the absence rather than silently skip past.
+    return (
+      <div className="node-detail">
+        <div
+          className="node-detail-empty"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="node-detail-empty-glyph" aria-hidden="true">🔍</div>
+          <h3 className="node-detail-empty-title">No node selected</h3>
+          <p className="node-detail-empty-hint">
+            Click a node in the canvas, or pick one from the Visible Nodes
+            list above, to inspect its qualified name, source, edges, and
+            reverse-dependency impact.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const inN = edges.filter(e => e.dst === node.id).length;
