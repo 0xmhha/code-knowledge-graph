@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/store/store';
+import { traceFromNode } from '@/lib/trace';
 import type { IAPI, ImpactResult, ImpactNode, ImpactBuckets } from '@/lib/api';
 import type { NodeId } from '@/types';
 
@@ -32,6 +33,8 @@ export default function NodeDetail({ api }: Props) {
   const edgesBySrc = useStore(s => s.edgesBySrc);
   const edgesByDst = useStore(s => s.edgesByDst);
   const setSelected = useStore(s => s.setSelected);
+  const setAnchor = useStore(s => s.setAnchor);
+  const commit = useStore(s => s.commit);
   // Derive via useMemo: returning a fresh array literal from a useStore
   // selector defeats Object.is equality and causes a render loop
   // (React error #185). Same pitfall as GraphCanvas.graphData.
@@ -92,9 +95,28 @@ export default function NodeDetail({ api }: Props) {
     }
   };
 
-  const onImpactItemClick = (id: NodeId) => {
+  // Mirrors App.traceAndCommit semantics so the canvas actually shows
+  // the clicked impact node and its 1-hop neighbours — without this the
+  // detail panel updated but the canvas stayed on the original seed,
+  // confusing the user. Depth=1 because the impact list already supplied
+  // multi-hop context; a deeper trace would just clutter the view.
+  const onImpactItemClick = useCallback(async (id: NodeId) => {
     setSelected(id);
-  };
+    const target = useStore.getState().nodes.get(id);
+    if (!target?.qualified_name) {
+      // Node lacks qname, trace would yield 0 results — fall back to
+      // selection-only so the detail pane still updates.
+      return;
+    }
+    const s = useStore.getState();
+    const g = await traceFromNode(api, id, {
+      direction: s.traceDirection,
+      depth: 1,
+      edgeTypes: s.edgeTypeWhitelist,
+    });
+    setAnchor(id, 1);
+    commit(g);
+  }, [api, setSelected, setAnchor, commit]);
 
   return (
     <div className="node-detail">

@@ -97,6 +97,24 @@ interface State {
 let pending: CommitGraph | null = null;
 let raf: number | null = null;
 
+// Initialise the two persisted boolean flags synchronously at store
+// creation so the first paint matches the user's last session. Reading
+// in a useEffect (the previous approach) caused a one-frame flash where
+// e.g. solo mode rendered OFF, then flipped ON. SSR safety: the
+// `typeof localStorage` guard means static export (Next `output: 'export'`)
+// still builds — the HTML is generated with localStorage undefined and
+// the client hydrates from storage on first import.
+const initGraphMode = (): boolean => {
+  if (typeof localStorage === 'undefined') return false;
+  try { return localStorage.getItem('ckg.graphMode') === '1'; }
+  catch { return false; }
+};
+const initFirstTimeSeen = (): boolean => {
+  if (typeof localStorage === 'undefined') return false;
+  try { return localStorage.getItem('ckg.firstTimeSeen') === '1'; }
+  catch { return false; }
+};
+
 export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   nodes: new Map(),
   edges: [],
@@ -115,8 +133,8 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   colorMode: 'lang',
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
-  graphModeIsolation: false,
-  firstTimeSeen: false,
+  graphModeIsolation: initGraphMode(),
+  firstTimeSeen: initFirstTimeSeen(),
   dimmedCommunities: new Set(),
   isolatedCommunity: null,
   traceDirection: 'both',

@@ -176,6 +176,14 @@ func (s *Server) handleImpact(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "seed_qname or seed_file required", http.StatusBadRequest)
 		return
 	}
+	// Defensive cap — these come from URL query and stream into DB
+	// queries / impact computation; 4096 is comfortably above any real
+	// qname or file path.
+	const maxSeedLen = 4096
+	if len(seedQ) > maxSeedLen || len(seedF) > maxSeedLen {
+		http.Error(w, "seed_qname/seed_file exceeds 4096 bytes", http.StatusBadRequest)
+		return
+	}
 	depth, _ := strconv.Atoi(q.Get("depth"))
 	if depth <= 0 {
 		depth = 2

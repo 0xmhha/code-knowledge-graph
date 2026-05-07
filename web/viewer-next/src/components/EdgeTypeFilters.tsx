@@ -187,21 +187,12 @@ function GroupSection({ group, collapsed, onToggleCollapse }: GroupSectionProps)
 
 export default function EdgeTypeFilters() {
   const [collapsed, setCollapsed] = useState<Set<GraphID>>(() => loadCollapsed());
-  const setIsolation = useStore(s => s.setGraphModeIsolation);
 
   useEffect(() => { saveCollapsed(collapsed); }, [collapsed]);
 
-  // Hydrate graphModeIsolation from localStorage on mount. We do this
-  // here (not in the store initialiser) because the store also runs on
-  // the SSR pass where `localStorage` is undefined; reading it during
-  // initial render would throw.
-  useEffect(() => {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      const raw = localStorage.getItem(GRAPH_MODE_KEY);
-      if (raw === '1') setIsolation(true);
-    } catch { /* localStorage may be blocked */ }
-  }, [setIsolation]);
+  // graphModeIsolation hydrates synchronously from localStorage in
+  // store.ts (initGraphMode), so no useEffect is needed here. Setter
+  // writes still happen in GraphModeToggle below.
 
   const onToggle = useCallback((id: GraphID) => {
     setCollapsed(prev => {

@@ -87,6 +87,42 @@ func TestHandleImpact_BadRequest(t *testing.T) {
 	}
 }
 
+// TestHandleImpact_SeedTooLong verifies the 4096-byte defensive cap on
+// seed_qname / seed_file so an unbounded URL query can't stream into DB
+// queries / impact computation. Either field above the cap returns 400.
+func TestHandleImpact_SeedTooLong(t *testing.T) {
+	store := buildFixture(t)
+	srv := server.New(store, nil)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	huge := strings.Repeat("a", 4097)
+
+	// seed_qname over the cap.
+	q := url.Values{}
+	q.Set("seed_qname", huge)
+	resp, err := http.Get(ts.URL + "/api/impact?" + q.Encode())
+	if err != nil {
+		t.Fatalf("GET /api/impact (qname): %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized seed_qname status = %d, want 400", resp.StatusCode)
+	}
+
+	// seed_file over the cap (independent path).
+	q = url.Values{}
+	q.Set("seed_file", huge)
+	resp, err = http.Get(ts.URL + "/api/impact?" + q.Encode())
+	if err != nil {
+		t.Fatalf("GET /api/impact (file): %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("oversized seed_file status = %d, want 400", resp.StatusCode)
+	}
+}
+
 // TestHandleImpact_NotFound asserts an unresolved seed surfaces
 // not_found=true (rather than 500) so the viewer can render an empty
 // state without parsing error bodies.

@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useStore } from '@/store/store';
 
 const STORAGE_KEY = 'ckg.firstTimeSeen';
@@ -19,21 +18,12 @@ const HINTS: Array<[string, string]> = [
 // FirstTimeOverlay is the lightweight onboarding card shown once per
 // browser. The user dismisses it by clicking anywhere (the backdrop OR
 // the panel itself); we persist firstTimeSeen=true so the overlay never
-// reappears on the same machine. The overlay hydrates from localStorage
-// in a useEffect (not the store initialiser) so SSR doesn't crash on
-// `localStorage` access.
+// reappears on the same machine. firstTimeSeen hydrates synchronously
+// from localStorage in store.ts (initFirstTimeSeen), so no useEffect is
+// needed here — first paint already reflects the persisted state.
 export default function FirstTimeOverlay() {
   const seen = useStore(s => s.firstTimeSeen);
   const setSeen = useStore(s => s.setFirstTimeSeen);
-
-  useEffect(() => {
-    try {
-      if (typeof localStorage === 'undefined') return;
-      if (localStorage.getItem(STORAGE_KEY) === '1') {
-        setSeen(true);
-      }
-    } catch { /* localStorage may be blocked */ }
-  }, [setSeen]);
 
   if (seen) return null;
 
