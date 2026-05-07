@@ -1,4 +1,4 @@
-.PHONY: all build viewer test test-race lint audit clean
+.PHONY: all build viewer test test-race lint lint-viewer audit clean
 
 GO ?= go
 
@@ -41,8 +41,20 @@ test:
 test-race:
 	$(GO) test -race -coverprofile=coverage.out ./...
 
-lint:
+lint: lint-viewer
 	$(GO) vet ./...
+
+# lint-viewer: ESLint over web/viewer-next/. The primary concern is
+# react-hooks/rules-of-hooks — viewer once shipped a regression where a
+# useCallback was placed below an early return, producing React error
+# #310 ("Rendered fewer hooks than expected") on the first node click
+# (commit 50ee9f7). Enforcing the hooks rule in lint catches the same
+# class of bug at PR time instead of at runtime in the user's browser.
+#
+# Requires `npm install` to have been run in web/viewer-next once;
+# the rule depends on eslint-plugin-react-hooks being present.
+lint-viewer:
+	cd web/viewer-next && npm run lint
 
 # audit: dependency-tree vulnerability scan for both languages.
 #

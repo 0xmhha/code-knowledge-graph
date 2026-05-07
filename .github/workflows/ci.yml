@@ -40,6 +40,27 @@ jobs:
           cp -R web/viewer-next/out/. internal/server/web_assets/
       - run: go build -o bin/ckg ./cmd/ckg
 
+  lint:
+    # ESLint (viewer) + go vet. Parallel with test/audit so it never
+    # blocks fast feedback. The viewer-side rule that earns this job
+    # its keep is react-hooks/rules-of-hooks: a useCallback below an
+    # early return slipped into main once and crashed the viewer on
+    # first node click (commit 50ee9f7). Enforcing it at PR time means
+    # the same class of regression cannot reach a user again.
+    #
+    # All `run:` steps below are static commands with no untrusted
+    # github.event.* interpolation, so workflow-injection guidance
+    # does not apply here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: cd web/viewer-next && npm ci
+      - run: make lint
+
   audit:
     # Dependency-tree vulnerability scan over both languages. Runs in
     # parallel with `test` so it never blocks fast feedback on code

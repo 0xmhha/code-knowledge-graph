@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'rea
 import dynamic from 'next/dynamic';
 import { useStore } from '@/store/store';
 import { useShallow } from 'zustand/react/shallow';
-import type { GraphEdge, GraphNode, NodeId, ColorMode, ViewMode } from '@/types';
+import type { GraphEdge, GraphNode, NodeId, ViewMode } from '@/types';
 import {
   ALPHA_BY_CONF, nodeColorCss, nodeColorHex, nodeMesh,
 } from '@/lib/encoding';
