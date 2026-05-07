@@ -9,10 +9,11 @@ interface Props {
   srcInfo: string;
   onTogglePanel: () => void;
   onHome: () => void;
+  onHelpClick: () => void;
   panelOpen: boolean;
 }
 
-export default function TopBar({ api, srcInfo, onTogglePanel, onHome, panelOpen }: Props) {
+export default function TopBar({ api, srcInfo, onTogglePanel, onHome, onHelpClick, panelOpen }: Props) {
   const viewMode = useStore(s => s.viewMode);
   const colorMode = useStore(s => s.colorMode);
   const setViewMode = useStore(s => s.setViewMode);
@@ -63,6 +64,13 @@ export default function TopBar({ api, srcInfo, onTogglePanel, onHome, panelOpen 
         onClick={onTogglePanel}
       >
         📋 Detail {panelOpen ? '▸' : '◂'}
+      </button>
+      <button
+        type="button"
+        title="Keyboard shortcuts (?)"
+        onClick={onHelpClick}
+      >
+        ?
       </button>
       <span className="src-info">{srcInfo}</span>
     </div>

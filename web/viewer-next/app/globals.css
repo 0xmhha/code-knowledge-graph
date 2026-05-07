@@ -127,15 +127,19 @@ html, body {
 }
 
 .canvas-host { position: relative; min-width: 0; }
-/* Target only the ForceGraph wrapper (the first child div), not the
-   absolutely-positioned ControlLayer that's also a direct child. Without
-   the :not, ControlLayer gets width: 100% which combined with its
-   right: 12px pushes it off-screen left. */
-.canvas-host > div:not(.control-layer) { width: 100%; height: 100%; min-width: 0; }
+.canvas-host > div { width: 100%; height: 100%; min-width: 0; }
 
+/* Panel — deliberately stronger visual treatment because the canvas
+   (#0d0e10) and the previous panel bg (#1a1c1f) sat ~6% lightness
+   apart, and the 1px #2a2c30 left border was nearly invisible against
+   either. Users read the panel as "absent" even when its DOM column
+   was correctly sized. The 2px blue border is the primary affordance;
+   the lifted bg (#1f2329) and inset shadow are reinforcement so the
+   panel reads as a physically distinct surface from the canvas. */
 .panel {
-  background: #1a1c1f;
-  border-left: 1px solid #2a2c30;
+  background: #1f2329;
+  border-left: 2px solid #44aaff;
+  box-shadow: -8px 0 16px rgba(0, 0, 0, 0.4) inset;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -216,7 +220,7 @@ html, body {
 .node-detail .node-detail-empty-title {
   font-size: 13px;
   font-weight: 600;
-  color: #cfd0d3;
+  color: #7ab8ff;
   margin: 0;
 }
 .node-detail-empty-hint {
@@ -441,7 +445,14 @@ html, body {
 .edge-filters .graph-pill:hover { background: #232529; }
 .edge-filters .graph-pill.pill-on { opacity: 1; }
 .edge-filters .graph-pill.pill-partial { opacity: 0.65; }
-.edge-filters .graph-pill.pill-off { opacity: 0.35; }
+/* pill-off was 0.35 which became illegible on the lifted panel bg;
+   0.55 keeps the "off" state distinguishable from "on" while remaining
+   visibly present. Border lifted to #3a3c40 because the prior #2a2c30
+   inherited from .graph-pill blends into the new panel surface. */
+.edge-filters .graph-pill.pill-off {
+  opacity: 0.55;
+  border-color: #3a3c40;
+}
 /* In Solo mode the active group's pill gets a stronger ring so the
    user always sees which axis is isolated even at a glance. */
 .edge-filters .graph-pill.pill-active {
@@ -519,79 +530,6 @@ html, body {
   align-items: center;
 }
 .stale-banner { background: #5a4a00; color: #fff; padding: 4px 8px; font-size: 11px; }
-
-/* ── ControlLayer ────────────────────────────────────────────────────────── */
-.control-layer {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 10;
-  width: 180px;
-  background: rgba(26, 28, 31, 0.85);
-  border: 1px solid #2a2c30;
-  border-radius: 4px;
-  color: #e6e7e9;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  user-select: none;
-}
-
-.cl-section {
-  padding: 6px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.cl-divider {
-  height: 1px;
-  background: #2a2c30;
-}
-
-.cl-label {
-  color: #888;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 2px;
-}
-
-.cl-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.cl-muted {
-  color: #888;
-  font-size: 10px;
-  min-width: 36px;
-}
-
-.cl-btn {
-  background: #232529;
-  color: #e6e7e9;
-  border: 1px solid #2a2c30;
-  padding: 2px 6px;
-  cursor: pointer;
-  font-family: ui-monospace, monospace;
-  font-size: 11px;
-  border-radius: 2px;
-  line-height: 1.4;
-}
-
-.cl-btn:hover { background: #2a2c30; }
-.cl-btn.active { background: #2a3140; border-color: #7ab8ff; color: #7ab8ff; }
-
-.cl-toggle { min-width: 44px; text-align: center; }
-
-.cl-help-btn {
-  width: 100%;
-  text-align: left;
-  padding: 3px 6px;
-}
 
 /* ── HelpOverlay ─────────────────────────────────────────────────────────── */
 .help-overlay-backdrop {

@@ -8,7 +8,6 @@ import { recomputeVisible } from '@/lib/depth';
 import { traceFromNode } from '@/lib/trace';
 import GraphCanvas from './GraphCanvas';
 import type { GraphCanvasHandle } from './GraphCanvas';
-import ControlLayer from './ControlLayer';
 import HelpOverlay from './HelpOverlay';
 import FirstTimeOverlay from './FirstTimeOverlay';
 import TopBar from './TopBar';
@@ -306,6 +305,7 @@ export default function App() {
             });
           }}
           onHome={onHome}
+          onHelpClick={() => setHelpOpen(true)}
         />
       )}
       <div className="canvas-host">
@@ -315,7 +315,6 @@ export default function App() {
             onNodeClick={traceAndCommit}
           />
         )}
-        <ControlLayer onHelpClick={() => setHelpOpen(true)} />
       </div>
       <div className="panel">
         <NodeList onPick={onListPick} apiReady={apiBox !== null} />
