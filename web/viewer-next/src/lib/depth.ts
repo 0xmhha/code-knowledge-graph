@@ -4,6 +4,13 @@ import { useStore, computeFocusDistance } from '@/store/store';
 
 const MAX_VISIBLE = 500;
 
+// BOOT_VISIBLE caps the initial seed at 200 nodes — below MAX_VISIBLE so
+// after the user navigates (anchor-driven BFS) more nodes can join the
+// visible set. 200 keeps the canvas readable on first paint while still
+// surfacing enough hub symbols that 1-hop expansion shows real call/import
+// structure rather than disconnected packages.
+const BOOT_VISIBLE = 200;
+
 // recomputeVisible builds the next CommitGraph and returns it. It does NOT
 // commit — callers run store.commit() so the renderer sees one push.
 //
@@ -15,10 +22,24 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
   const { anchorId, depth } = s;
 
   if (!anchorId) {
-    const top = await api.nodes('', MAX_VISIBLE);
+    // Prefer top-by-pagerank: hub functions/methods/types surface naturally
+    // and 1-hop neighbours show real call/import structure. Fall back to
+    // nodes('') when the new endpoint is missing (older backends, or when
+    // the static export has no pagerank/usage_score values populated).
+    let top = await api.topNodes('pagerank', BOOT_VISIBLE);
+    if (top.length === 0) top = await api.nodes('', BOOT_VISIBLE);
     s.loadNodes(top);
+
+    // Fetch edges for the seed in one batch — without this the canvas
+    // shows the seed nodes but zero edges between them (V1-1 bug).
+    const ids = top.map(n => n.id);
+    if (ids.length) {
+      const fresh = await api.edges(ids);
+      if (fresh.length) s.addEdges(fresh);
+    }
+
     return {
-      visibleIds: new Set(top.map(n => n.id)),
+      visibleIds: new Set(ids),
       focusDistance: new Map(),
       reason: 'boot',
     };

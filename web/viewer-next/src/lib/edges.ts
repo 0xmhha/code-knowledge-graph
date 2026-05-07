@@ -6,7 +6,9 @@ export interface EdgeStyle {
 }
 
 // Per-edge-type rendering style. Keys MUST match the backend EdgeType
-// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (30 edges).
+// literals — keep in sync with pkg/types/enums.go AllEdgeTypes() (32 edges
+// after schema 1.6 — timeout_path / cancellation_path appended for G3
+// control-flow context propagation).
 //
 // `contains` is intentionally hidden in the viewer: it's the structural
 // parent-child edge that would otherwise dominate the layout.
@@ -34,6 +36,15 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   // call / invoke
   calls:           { color: 0xffffff, width: 1 },
   invokes:         { color: 0xffaa00, width: 1 },
+
+  // G3 schema 1.6 — Go context.With* propagation. Both are self-loop
+  // property markers (function/method → itself), so dashed dispels the
+  // "flow" reading and matches the uses_type / accessed_under_lock idiom.
+  // Color: amber for timeout (deadline budget) and red-orange for
+  // cancellation (event-driven abort) — warm hues group them visually
+  // with calls/invokes (the broader G3 family) without competing.
+  timeout_path:      { color: 0xffcc44, width: 1, dash: true },
+  cancellation_path: { color: 0xff5544, width: 1, dash: true },
 
   // type relations
   uses_type:       { color: 0xaaaaaa, width: 1, dash: true },
@@ -91,11 +102,34 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   binds_to:        { color: 0xffd700, width: 3 },
 };
 
-// Default edge-type whitelist for trace + general view. Call-flow oriented:
-// the graph stays readable while preserving cross-language bindings and
-// inheritance edges that are semantically structural, not just data-flow.
+// Default edge-type whitelist for trace + general view. The whitelist
+// covers at least one representative edge from every CKS graph (G1..G6)
+// so the user's first paint shows real structure across all axes — the
+// previous defaults (G2/G3 only) left G1/G4/G5/G6 invisible until the
+// user manually toggled their filters on, which made the boot view
+// look broken on real graphs.
+//
+// Excluded by design (toggle on via filter UI):
+//   - exports: rarely emitted by current parsers; would just clutter
+//   - changed_in: ~46K edges on real repos — opt-in only
+//
+// G3 schema 1.6 timeout_path / cancellation_path are on by default
+// because they are sparse self-loops that highlight time-budgeted /
+// cancellable functions (a useful reading aid, not noise).
 export const DEFAULT_EDGE_TYPES: ReadonlyArray<string> = [
-  'calls', 'invokes', 'binds_to', 'extends', 'implements',
+  // G1 Structural
+  'defines', 'imports',
+  // G2 Semantic
+  'extends', 'implements',
+  // G3 Execution
+  'calls', 'invokes', 'timeout_path', 'cancellation_path',
+  // G4 Concurrency
+  'spawns', 'sends_to', 'recvs_from',
+  'acquires_lock', 'releases_lock', 'accessed_under_lock',
+  // G5 Distributed
+  'listens_on', 'handles_message', 'rpc_calls', 'binds_to',
+  // G6 Temporal
+  'blame',
 ];
 
 // All known types — used by the EdgeTypeFilters component to render checkboxes.
@@ -142,8 +176,8 @@ export const GRAPH_GROUPS: ReadonlyArray<GraphGroupSpec> = [
   },
   {
     id: 'G3', label: 'Execution', color: 0xffffff,
-    description: 'Call and invocation flow',
-    edges: ['calls', 'invokes'],
+    description: 'Call and invocation flow; context.With* timeout/cancellation markers',
+    edges: ['calls', 'invokes', 'timeout_path', 'cancellation_path'],
   },
   {
     id: 'G4', label: 'Concurrency', color: 0xff66cc,
@@ -189,9 +223,9 @@ export function groupHasAnyEdge(group: GraphGroupSpec, whitelist: ReadonlySet<st
 // EDGE_STYLE entry AND assign it to a GRAPH_GROUPS bucket — otherwise
 // it silently disappears from the filter UI.
 //
-// Current state (schema 1.4):
-//   29 non-hidden edges in EDGE_STYLE (30 total - `contains` hidden)
-//   29 edges across GRAPH_GROUPS (G1=3, G2=12, G3=2, G4=6, G5=4, G6=2)
+// Current state (schema 1.6):
+//   31 non-hidden edges in EDGE_STYLE (32 total - `contains` hidden)
+//   31 edges across GRAPH_GROUPS (G1=3, G2=12, G3=4, G4=6, G5=4, G6=2)
 //
 // To verify after editing this file, eyeball the output of:
 //   node -e "const {ALL_EDGE_TYPES, GRAPH_GROUPS} = require('./edges'); \

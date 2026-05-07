@@ -281,6 +281,58 @@ func TestHandlersExtended(t *testing.T) {
 	})
 }
 
+// TestHandleTopNodes exercises GET /api/nodes/top end-to-end. The metric=
+// pagerank path returns 200 + a JSON array; an unknown metric yields 400.
+func TestHandleTopNodes(t *testing.T) {
+	store := buildFixture(t)
+	srv := server.New(store, nil)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	t.Run("default_metric_is_pagerank", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/nodes/top?limit=5")
+		if err != nil {
+			t.Fatalf("GET /api/nodes/top: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+		}
+		var out []any
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		// Result may have fewer than 5 nodes on a tiny fixture; just verify
+		// the route is wired and shape is an array.
+		if len(out) > 5 {
+			t.Errorf("limit=5 returned %d", len(out))
+		}
+	})
+
+	t.Run("usage_metric_ok", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/nodes/top?metric=usage&limit=5")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status=%d, want 200", resp.StatusCode)
+		}
+	})
+
+	t.Run("invalid_metric_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/nodes/top?metric=bogus")
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status=%d, want 400", resp.StatusCode)
+		}
+	})
+}
+
 // TestCopyViewerAssetsTo verifies that CopyViewerAssetsTo materialises the
 // embedded viewer onto disk. index.html and assets/viewer.js must both appear.
 func TestCopyViewerAssetsTo(t *testing.T) {

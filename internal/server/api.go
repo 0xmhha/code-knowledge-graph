@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -66,6 +67,34 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := s.store.QueryNodes(parent, limit)
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.decorateNodes(nodes))
+}
+
+// handleTopNodes returns the top-N nodes by a ranking metric (pagerank /
+// usage), descending. Used by the viewer boot path so the initial canvas
+// shows hub functions/types rather than disconnected Package nodes.
+//
+// metric defaults to "pagerank" when missing — the viewer's primary boot
+// metric. limit is bounded to 1000 to keep the JSON response size sane;
+// the viewer caps its initial visible set at 200 anyway.
+func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
+	metric := r.URL.Query().Get("metric")
+	if metric == "" {
+		metric = "pagerank"
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	nodes, err := s.store.TopNodes(metric, limit)
+	if err != nil {
+		if errors.Is(err, persist.ErrInvalidMetric) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

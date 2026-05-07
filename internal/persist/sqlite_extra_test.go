@@ -2,6 +2,7 @@ package persist_test
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -304,6 +305,97 @@ func TestQueryNodes_LimitRespected(t *testing.T) {
 	}
 	if len(nodes) > 2 {
 		t.Errorf("limit=2 returned %d nodes", len(nodes))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestTopNodes
+// ---------------------------------------------------------------------------
+
+func TestTopNodes_PageRankDescOrder(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "top.db")
+	s, err := persist.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	mk := func(id string, pr, us float64) types.Node {
+		n := makeNode(id, types.NodeFunction, id, "pkg."+id)
+		n.PageRank = pr
+		n.UsageScore = us
+		return n
+	}
+	if err := s.InsertNodes([]types.Node{
+		mk("aa00000000000001", 0.10, 5),
+		mk("bb00000000000001", 0.50, 1),
+		mk("cc00000000000001", 0.30, 9),
+	}); err != nil {
+		t.Fatalf("InsertNodes: %v", err)
+	}
+
+	got, err := s.TopNodes("pagerank", 10)
+	if err != nil {
+		t.Fatalf("TopNodes pagerank: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d nodes, want 3", len(got))
+	}
+	if got[0].ID != "bb00000000000001" || got[1].ID != "cc00000000000001" || got[2].ID != "aa00000000000001" {
+		t.Errorf("pagerank order = [%s,%s,%s], want [bb,cc,aa]",
+			got[0].ID, got[1].ID, got[2].ID)
+	}
+
+	got2, err := s.TopNodes("usage", 10)
+	if err != nil {
+		t.Fatalf("TopNodes usage: %v", err)
+	}
+	if got2[0].ID != "cc00000000000001" || got2[1].ID != "aa00000000000001" || got2[2].ID != "bb00000000000001" {
+		t.Errorf("usage order = [%s,%s,%s], want [cc,aa,bb]",
+			got2[0].ID, got2[1].ID, got2[2].ID)
+	}
+}
+
+func TestTopNodes_LimitRespected(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "top_limit.db")
+	s, err := persist.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	nodes := make([]types.Node, 5)
+	for i := range nodes {
+		n := makeNode("nn0000000000000"+string(rune('1'+i)),
+			types.NodeFunction, "n", "pkg.n")
+		n.PageRank = float64(i)
+		nodes[i] = n
+	}
+	if err := s.InsertNodes(nodes); err != nil {
+		t.Fatalf("InsertNodes: %v", err)
+	}
+	got, err := s.TopNodes("pagerank", 2)
+	if err != nil {
+		t.Fatalf("TopNodes: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("limit=2 returned %d nodes", len(got))
+	}
+}
+
+func TestTopNodes_InvalidMetric(t *testing.T) {
+	s := newFixtureStore(t)
+	_, err := s.TopNodes("bogus", 10)
+	if err == nil {
+		t.Fatalf("expected error for invalid metric, got nil")
+	}
+	if !errors.Is(err, persist.ErrInvalidMetric) {
+		t.Errorf("error = %v; want ErrInvalidMetric", err)
 	}
 }
 

@@ -15,9 +15,16 @@
 package persist
 
 import (
+	"errors"
+
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
+
+// ErrInvalidMetric is returned by StoreReader.TopNodes when the metric
+// argument is not one of the known column names. Sentinel rather than
+// a string-typed error so callers (HTTP handler) can map it to 400.
+var ErrInvalidMetric = errors.New("invalid metric: want pagerank|usage")
 
 // StoreReader is the read-only surface. serve, mcp, eval and audit all
 // depend on this — none of them write to the graph.
@@ -35,6 +42,17 @@ type StoreReader interface {
 	FindSymbol(name, lang string, exact bool) ([]types.Node, error)
 	NodesByIDs(ids []string) ([]types.Node, error)
 	QueryNodes(parent string, limit int) ([]types.Node, error)
+	// TopNodes returns the top-N nodes ranked by metric, regardless of type.
+	// Unlike QueryNodes (parent="") which returns only Package nodes, this is
+	// designed for the viewer's boot view: a meaningful initial seed where
+	// hub functions/methods/types appear naturally so 1-hop expansion shows
+	// real call/import structure rather than 37 disconnected packages.
+	//
+	// metric ∈ {"pagerank", "usage"} — values map to the nodes.pagerank and
+	// nodes.usage_score columns respectively. Unknown metric → ErrInvalidMetric.
+	// Result is sorted DESC by the chosen column, ties broken by id ASC for
+	// determinism. Limit ≤0 is normalised by callers (HTTP layer caps).
+	TopNodes(metric string, limit int) ([]types.Node, error)
 	DistinctFilePaths(language string) ([]string, error)
 
 	// Edge queries

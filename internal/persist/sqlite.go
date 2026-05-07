@@ -350,6 +350,45 @@ func (s *sqliteStore) QueryNodes(parent string, limit int) ([]types.Node, error)
 	return scanNodes(rows)
 }
 
+// TopNodes returns the top-N nodes by the chosen ranking metric, descending.
+// Used by the viewer boot path so the initial canvas shows hub symbols
+// (functions, methods, types) rather than disconnected Package nodes.
+//
+// Tie-break by id ASC keeps the result deterministic across calls — without
+// it equal-rank rows can swap positions on every query, which would make
+// the boot view jitter between page loads.
+func (s *sqliteStore) TopNodes(metric string, limit int) ([]types.Node, error) {
+	col, err := topMetricColumn(metric)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.db.Query(
+		`SELECT `+nodeColumns+` FROM nodes ORDER BY `+col+` DESC, id ASC LIMIT ?`,
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
+// topMetricColumn whitelists metric→column names. Whitelist (not f-string)
+// because the value reaches a SQL ORDER BY position where parameter binding
+// is not allowed — a bug here would be a SQL injection vector.
+func topMetricColumn(metric string) (string, error) {
+	switch metric {
+	case "pagerank":
+		return "pagerank", nil
+	case "usage":
+		return "usage_score", nil
+	default:
+		return "", ErrInvalidMetric
+	}
+}
+
 // queryEdgesChunk is the per-chunk size for QueryEdgesForNodes. SQLite's
 // SQLITE_MAX_VARIABLE_NUMBER caps single-statement parameters; default is 999
 // on older builds, 32766 on modernc.org/sqlite — but go-stablenet's 217 K

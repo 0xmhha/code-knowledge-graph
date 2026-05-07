@@ -601,6 +601,26 @@ func (s *pgStore) QueryNodes(parent string, limit int) ([]types.Node, error) {
 	return scanPGNodes(rows)
 }
 
+// TopNodes returns the top-N nodes by the chosen ranking metric, descending.
+// Mirrors the SQLite implementation — see sqlite.go TopNodes for rationale.
+func (s *pgStore) TopNodes(metric string, limit int) ([]types.Node, error) {
+	col, err := topMetricColumn(metric)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	rows, err := s.pool.Query(background,
+		`SELECT `+pgNodeColumns+` FROM nodes ORDER BY `+col+` DESC, id ASC LIMIT $1`,
+		limit)
+	if err != nil {
+		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
+	}
+	defer rows.Close()
+	return scanPGNodes(rows)
+}
+
 // DistinctFilePaths returns the unique file_path values for the given language.
 // Defensive empty-string filter mirrors the SQLite implementation.
 func (s *pgStore) DistinctFilePaths(language string) ([]string, error) {

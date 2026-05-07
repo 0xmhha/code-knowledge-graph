@@ -2,10 +2,20 @@ import type { GraphNode, GraphEdge, Manifest, HierarchyRow, NodeId } from '@/typ
 
 const asArray = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
+export type TopMetric = 'pagerank' | 'usage';
+
 export interface IAPI {
   manifest(): Promise<Manifest>;
   hierarchy(kind?: string): Promise<HierarchyRow[]>;
   nodes(parentId?: string, limit?: number): Promise<GraphNode[]>;
+  // topNodes returns top-N nodes ranked by metric, regardless of type.
+  // Used by the viewer boot path so the initial seed contains hub
+  // functions/methods/types and 1-hop expansion shows real call/import
+  // structure rather than 37 disconnected Package nodes (which is what
+  // /api/nodes returns when parent="" — see backend QueryNodes).
+  // Returns [] on older backends that don't expose /api/nodes/top — callers
+  // should fall back to nodes('') in that case.
+  topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]>;
   edges(nodeIds: NodeId[]): Promise<GraphEdge[]>;
   nodesByIds(ids: NodeId[]): Promise<GraphNode[]>;
   blob(nodeId: NodeId): Promise<string>;
@@ -27,6 +37,16 @@ export class API implements IAPI {
     const q = new URLSearchParams({ limit: String(limit) });
     if (parentId) q.set('parent', parentId);
     return fetch(`${this.base}/api/nodes?${q}`).then(r => r.json()).then(asArray<GraphNode>);
+  }
+
+  // topNodes hits the /api/nodes/top endpoint added in schema 1.6 wiring.
+  // Returns [] on 404 so callers can transparently fall back to nodes('')
+  // against older backends that only expose /api/nodes.
+  async topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]> {
+    const q = new URLSearchParams({ metric, limit: String(limit) });
+    const r = await fetch(`${this.base}/api/nodes/top?${q}`);
+    if (!r.ok) return [];
+    return asArray<GraphNode>(await r.json());
   }
 
   async edges(nodeIds: NodeId[]): Promise<GraphEdge[]> {
@@ -95,6 +115,22 @@ export class StaticAPI implements IAPI {
     const tree = await this.pkgTree();
     const childIds = new Set(tree.filter(r => r.parent_id === parentId).map(r => r.child_id));
     return all.filter(n => childIds.has(n.id)).slice(0, limit);
+  }
+
+  // topNodes sorts the static-export node set client-side. Mirrors the
+  // backend ORDER BY <metric> DESC, id ASC for cross-mode parity.
+  async topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]> {
+    const all = await this.allNodes();
+    const key = metric === 'usage' ? 'usage_score' : 'pagerank';
+    const score = (n: GraphNode) => {
+      const v = (n as unknown as Record<string, unknown>)[key];
+      return typeof v === 'number' ? v : 0;
+    };
+    return [...all].sort((a, b) => {
+      const d = score(b) - score(a);
+      if (d !== 0) return d;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    }).slice(0, limit);
   }
 
   async edges(nodeIds: NodeId[]): Promise<GraphEdge[]> {

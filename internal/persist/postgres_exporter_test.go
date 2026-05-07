@@ -32,6 +32,9 @@ func (m *mockStoreReader) NodesByIDs(_ []string) ([]types.Node, error) { return 
 func (m *mockStoreReader) QueryNodes(_ string, _ int) ([]types.Node, error) {
 	return nil, nil
 }
+func (m *mockStoreReader) TopNodes(_ string, _ int) ([]types.Node, error) {
+	return nil, nil
+}
 func (m *mockStoreReader) DistinctFilePaths(language string) ([]string, error) {
 	byFile, ok := m.nodesByLang[language]
 	if !ok {

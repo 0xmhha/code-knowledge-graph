@@ -66,6 +66,7 @@ func (s *Server) routes(opts Options) {
 	s.mux.HandleFunc("GET /api/manifest", s.handleManifest)
 	s.mux.HandleFunc("GET /api/hierarchy", s.handleHierarchy)
 	s.mux.HandleFunc("GET /api/nodes", s.handleNodes)
+	s.mux.HandleFunc("GET /api/nodes/top", s.handleTopNodes)
 	s.mux.HandleFunc("POST /api/nodes-by-ids", s.handleNodesByIDs)
 	s.mux.HandleFunc("POST /api/edges", s.handleEdges)
 	s.mux.HandleFunc("GET /api/blob/{id}", s.handleBlob)
