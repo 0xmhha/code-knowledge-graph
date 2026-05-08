@@ -26,7 +26,14 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
     // and 1-hop neighbours show real call/import structure. Fall back to
     // nodes('') when the new endpoint is missing (older backends, or when
     // the static export has no pagerank/usage_score values populated).
-    let top = await api.topNodes('pagerank', BOOT_VISIBLE);
+    // excludeTypes=['Commit']: git Commit nodes outrank real symbols by
+    // pagerank in many graphs, dominating the top-N seed (e.g. 104/200
+    // were Commits in the self-graph). Their only outgoing edge type is
+    // `changed_in` which is off in DEFAULT_EDGE_TYPES, producing the
+    // "node visible but no edges" symptom on click. Excluding Commit at
+    // boot keeps the canvas focused on hub functions/methods/types
+    // whose edges (calls/defines/imports/...) are all on by default.
+    let top = await api.topNodes('pagerank', BOOT_VISIBLE, ['Commit']);
     if (top.length === 0) top = await api.nodes('', BOOT_VISIBLE);
     s.loadNodes(top);
 

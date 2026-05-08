@@ -66,14 +66,17 @@ export interface IAPI {
   manifest(): Promise<Manifest>;
   hierarchy(kind?: string): Promise<HierarchyRow[]>;
   nodes(parentId?: string, limit?: number): Promise<GraphNode[]>;
-  // topNodes returns top-N nodes ranked by metric, regardless of type.
-  // Used by the viewer boot path so the initial seed contains hub
-  // functions/methods/types and 1-hop expansion shows real call/import
-  // structure rather than 37 disconnected Package nodes (which is what
-  // /api/nodes returns when parent="" — see backend QueryNodes).
-  // Returns [] on older backends that don't expose /api/nodes/top — callers
-  // should fall back to nodes('') in that case.
-  topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]>;
+  // topNodes returns top-N nodes ranked by metric, descending. Used by
+  // the viewer boot path so the initial seed contains hub functions/
+  // methods/types and 1-hop expansion shows real call/import structure
+  // rather than 37 disconnected Package nodes.
+  // excludeTypes filters out node kinds at the SQL layer — the viewer
+  // passes ['Commit'] so the boot seed isn't dominated by git Commit
+  // nodes (which outrank symbols by pagerank but only own `changed_in`
+  // edges off by default).
+  // Returns [] on older backends that don't expose /api/nodes/top —
+  // callers should fall back to nodes('') in that case.
+  topNodes(metric: TopMetric, limit: number, excludeTypes?: string[]): Promise<GraphNode[]>;
   edges(nodeIds: NodeId[]): Promise<GraphEdge[]>;
   nodesByIds(ids: NodeId[]): Promise<GraphNode[]>;
   blob(nodeId: NodeId): Promise<string>;
@@ -110,8 +113,11 @@ export class API implements IAPI {
   // other non-2xx (500, 502, …) is a real backend error and MUST surface
   // — silently mapping it to [] hid actual failures behind the "older
   // backend" fallback path and made debugging impossible.
-  async topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]> {
+  async topNodes(metric: TopMetric, limit: number, excludeTypes?: string[]): Promise<GraphNode[]> {
     const q = new URLSearchParams({ metric, limit: String(limit) });
+    if (excludeTypes && excludeTypes.length > 0) {
+      q.set('excludeTypes', excludeTypes.join(','));
+    }
     const r = await fetch(`${this.base}/api/nodes/top?${q}`);
     if (r.status === 404) return [];
     if (!r.ok) throw new Error(`/api/nodes/top ${r.status}`);
@@ -194,15 +200,24 @@ export class StaticAPI implements IAPI {
   }
 
   // topNodes sorts the static-export node set client-side. Mirrors the
-  // backend ORDER BY <metric> DESC, id ASC for cross-mode parity.
-  async topNodes(metric: TopMetric, limit: number): Promise<GraphNode[]> {
+  // backend ORDER BY <metric> DESC, id ASC for cross-mode parity, and
+  // applies the same excludeTypes filter at the JS layer so static and
+  // serve modes stay symmetrical.
+  async topNodes(metric: TopMetric, limit: number, excludeTypes?: string[]): Promise<GraphNode[]> {
     const all = await this.allNodes();
     const key = metric === 'usage' ? 'usage_score' : 'pagerank';
     const score = (n: GraphNode) => {
       const v = (n as unknown as Record<string, unknown>)[key];
       return typeof v === 'number' ? v : 0;
     };
-    return [...all].sort((a, b) => {
+    let filtered: GraphNode[] = all;
+    if (excludeTypes && excludeTypes.length > 0) {
+      const exclSet = new Set<string>(excludeTypes);
+      // GraphNode.type is optional in the static export shape; nodes
+      // missing a type are kept (they can't match any exclude entry).
+      filtered = all.filter(n => n.type === undefined || !exclSet.has(n.type));
+    }
+    return [...filtered].sort((a, b) => {
       const d = score(b) - score(a);
       if (d !== 0) return d;
       return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;

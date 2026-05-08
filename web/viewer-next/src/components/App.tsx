@@ -17,7 +17,7 @@ import NodeDetail from './NodeDetail';
 import Legend from './Legend';
 import EdgeTypeFilters from './EdgeTypeFilters';
 import TraceControls from './TraceControls';
-import { DEFAULT_EDGE_TYPES } from '@/lib/edges';
+import { DEFAULT_EDGE_TYPES, GRAPH_GROUPS, edgeToGroup } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
 
 const DEPTH_MAX = 6;
@@ -115,6 +115,49 @@ export default function App() {
       // Trace also sets the anchor so depth-in/out from here makes sense.
       setAnchor(id, s.traceDepth);
       commit(g);
+
+      // Plan B: empty-edge auto-recover. After committing the trace, we
+      // know the visible neighbours but the renderer may still hide every
+      // connecting line because the dominant edge type for those nodes
+      // is in a graph group the user hasn't enabled (e.g. clicking a
+      // Commit node whose only edges are `changed_in` ∈ G6 Temporal,
+      // off by default). Detect that case and silently turn on the
+      // dominant group's edges so the trace becomes visible.
+      const after = useStore.getState();
+      let visibleAllowedEdges = 0;
+      const typeFreq = new Map<string, number>();
+      for (const src of after.visibleIds) {
+        const outs = after.edgesBySrc.get(src);
+        if (!outs) continue;
+        for (const e of outs) {
+          if (!after.visibleIds.has(e.dst)) continue;
+          if (after.edgeTypeWhitelist.has(e.type)) visibleAllowedEdges++;
+          typeFreq.set(e.type, (typeFreq.get(e.type) ?? 0) + 1);
+        }
+      }
+      if (visibleAllowedEdges === 0 && typeFreq.size > 0) {
+        // Pick the most frequent edge type that maps to a known group.
+        let dominant: string | null = null;
+        let dominantCount = 0;
+        for (const [t, c] of typeFreq) {
+          if (c > dominantCount && edgeToGroup(t) !== null) {
+            dominant = t;
+            dominantCount = c;
+          }
+        }
+        if (dominant) {
+          const groupId = edgeToGroup(dominant);
+          const group = GRAPH_GROUPS.find(g => g.id === groupId);
+          if (group) {
+            useStore.getState().setEdgeTypeWhitelistBulk(group.edges, true);
+            // eslint-disable-next-line no-console
+            console.info(
+              `[ckg] auto-enabled ${group.id} ${group.label} ` +
+              `(${dominantCount} edges) — trace had hidden edges only.`,
+            );
+          }
+        }
+      }
     });
   }, [api, navigate, commit, setAnchor, setSelected]);
 

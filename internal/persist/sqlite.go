@@ -357,7 +357,7 @@ func (s *sqliteStore) QueryNodes(parent string, limit int) ([]types.Node, error)
 // Tie-break by id ASC keeps the result deterministic across calls — without
 // it equal-rank rows can swap positions on every query, which would make
 // the boot view jitter between page loads.
-func (s *sqliteStore) TopNodes(metric string, limit int) ([]types.Node, error) {
+func (s *sqliteStore) TopNodes(metric string, limit int, excludeTypes ...string) ([]types.Node, error) {
 	col, err := topMetricColumn(metric)
 	if err != nil {
 		return nil, err
@@ -365,9 +365,24 @@ func (s *sqliteStore) TopNodes(metric string, limit int) ([]types.Node, error) {
 	if limit <= 0 {
 		limit = 200
 	}
+	// excludeTypes builds a "type NOT IN (?,?,…)" clause. Building the
+	// placeholders by hand (rather than using a helper) is fine here —
+	// the values flow through ? binding so this is not an injection
+	// vector; we only interpolate the placeholder count itself.
+	whereClause := ""
+	args := []any{}
+	if len(excludeTypes) > 0 {
+		placeholders := make([]string, len(excludeTypes))
+		for i, t := range excludeTypes {
+			placeholders[i] = "?"
+			args = append(args, t)
+		}
+		whereClause = " WHERE type NOT IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	args = append(args, limit)
 	rows, err := s.db.Query(
-		`SELECT `+nodeColumns+` FROM nodes ORDER BY `+col+` DESC, id ASC LIMIT ?`,
-		limit)
+		`SELECT `+nodeColumns+` FROM nodes`+whereClause+` ORDER BY `+col+` DESC, id ASC LIMIT ?`,
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
 	}

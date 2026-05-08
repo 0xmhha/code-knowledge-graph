@@ -603,7 +603,7 @@ func (s *pgStore) QueryNodes(parent string, limit int) ([]types.Node, error) {
 
 // TopNodes returns the top-N nodes by the chosen ranking metric, descending.
 // Mirrors the SQLite implementation — see sqlite.go TopNodes for rationale.
-func (s *pgStore) TopNodes(metric string, limit int) ([]types.Node, error) {
+func (s *pgStore) TopNodes(metric string, limit int, excludeTypes ...string) ([]types.Node, error) {
 	col, err := topMetricColumn(metric)
 	if err != nil {
 		return nil, err
@@ -611,9 +611,23 @@ func (s *pgStore) TopNodes(metric string, limit int) ([]types.Node, error) {
 	if limit <= 0 {
 		limit = 200
 	}
+	// Postgres uses $N positional placeholders, not '?'. We start at $1 for
+	// each excluded type, and the LIMIT placeholder gets $(len+1).
+	whereClause := ""
+	args := []any{}
+	if len(excludeTypes) > 0 {
+		placeholders := make([]string, len(excludeTypes))
+		for i, t := range excludeTypes {
+			placeholders[i] = fmt.Sprintf("$%d", i+1)
+			args = append(args, t)
+		}
+		whereClause = " WHERE type NOT IN (" + strings.Join(placeholders, ",") + ")"
+	}
+	limitPos := fmt.Sprintf("$%d", len(args)+1)
+	args = append(args, limit)
 	rows, err := s.pool.Query(background,
-		`SELECT `+pgNodeColumns+` FROM nodes ORDER BY `+col+` DESC, id ASC LIMIT $1`,
-		limit)
+		`SELECT `+pgNodeColumns+` FROM nodes`+whereClause+` ORDER BY `+col+` DESC, id ASC LIMIT `+limitPos,
+		args...)
 	if err != nil {
 		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
 	}

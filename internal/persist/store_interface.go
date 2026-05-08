@@ -42,9 +42,8 @@ type StoreReader interface {
 	FindSymbol(name, lang string, exact bool) ([]types.Node, error)
 	NodesByIDs(ids []string) ([]types.Node, error)
 	QueryNodes(parent string, limit int) ([]types.Node, error)
-	// TopNodes returns the top-N nodes ranked by metric, regardless of type.
-	// Unlike QueryNodes (parent="") which returns only Package nodes, this is
-	// designed for the viewer's boot view: a meaningful initial seed where
+	// TopNodes returns the top-N nodes ranked by metric, descending.
+	// Designed for the viewer's boot view: a meaningful initial seed where
 	// hub functions/methods/types appear naturally so 1-hop expansion shows
 	// real call/import structure rather than 37 disconnected packages.
 	//
@@ -52,7 +51,15 @@ type StoreReader interface {
 	// nodes.usage_score columns respectively. Unknown metric → ErrInvalidMetric.
 	// Result is sorted DESC by the chosen column, ties broken by id ASC for
 	// determinism. Limit ≤0 is normalised by callers (HTTP layer caps).
-	TopNodes(metric string, limit int) ([]types.Node, error)
+	//
+	// excludeTypes (variadic) lets callers drop irrelevant node types from
+	// the boot seed without re-fetching client-side. The motivating case is
+	// the viewer: with 178 git Commit nodes outranking real symbols by
+	// pagerank, ~52% of the top-200 boot was Commit nodes, whose only
+	// outgoing edge type (`changed_in`) is off by default — so the canvas
+	// rendered Commit halos with no visible edges. Pass excludeTypes=
+	// []string{"Commit"} to keep boot focused on symbols. No-op when empty.
+	TopNodes(metric string, limit int, excludeTypes ...string) ([]types.Node, error)
 	DistinctFilePaths(language string) ([]string, error)
 
 	// Edge queries

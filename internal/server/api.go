@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/impact"
@@ -90,7 +91,23 @@ func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	nodes, err := s.store.TopNodes(metric, limit)
+	// excludeTypes is a comma-separated list ("Commit,Hunk"). Empty entries
+	// (e.g. trailing comma) are skipped so the SQL builder never sees an
+	// empty type string. Cap at 16 entries to keep an unbounded query
+	// string from blowing up the SQL placeholder list.
+	var excludeTypes []string
+	if raw := r.URL.Query().Get("excludeTypes"); raw != "" {
+		for _, t := range strings.Split(raw, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				excludeTypes = append(excludeTypes, t)
+			}
+			if len(excludeTypes) >= 16 {
+				break
+			}
+		}
+	}
+	nodes, err := s.store.TopNodes(metric, limit, excludeTypes...)
 	if err != nil {
 		if errors.Is(err, persist.ErrInvalidMetric) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
