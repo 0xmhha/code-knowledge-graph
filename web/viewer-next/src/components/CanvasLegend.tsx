@@ -1,18 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { GRAPH_GROUPS } from '@/lib/edges';
 
-// Per-shape entries for the Node Shapes section. The kind label maps
-// 1:1 with the switch in GraphCanvas.drawNode2D so users can read off
-// what each polygon represents without consulting the source.
-//
-// 3D parity: deferred. The 3D path uses lib/encoding.nodeMesh whose
-// PRIMITIVE table is richer (per-type Three.js geometry). This legend
-// is a reading aid for the 2D mode; in 3D the existing geometry table
-// already encodes types via mesh kind. The legend stays mounted in
-// either mode because the symbols (circle, square, triangle) are
-// intuitive enough to remain useful as a colour-shape cross-reference.
 interface ShapeEntry {
   shape: 'circle' | 'hex' | 'square' | 'triangle' | 'diamond' | 'star' | 'micro' | 'tri-up' | 'chevron' | 'lock' | 'asterisk';
   label: string;
@@ -32,9 +22,6 @@ const SHAPES: ReadonlyArray<ShapeEntry> = [
   { shape: 'asterisk', label: 'Endpoint' },
 ];
 
-// Edge-style entries. The dash array MUST match GraphCanvas.linkLineDash
-// so the swatch is a literal preview of what the canvas draws. null
-// dash → solid line.
 interface EdgeStyleEntry {
   groupId: 'G1' | 'G2' | 'G3' | 'G4' | 'G5' | 'G6';
   label: string;
@@ -52,7 +39,6 @@ const EDGE_STYLES: ReadonlyArray<EdgeStyleEntry> = [
 ];
 
 function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
-  // 18×14 viewBox; geometry centred so shapes line up vertically.
   const cx = 9, cy = 7;
   switch (shape) {
     case 'circle':
@@ -87,8 +73,6 @@ function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
     case 'micro':
       return <svg width={18} height={14}><circle cx={cx} cy={cy} r={1.6} fill="#888" /></svg>;
     case 'tri-up': {
-      // Slightly fatter / taller upward triangle to read distinct from
-      // generic 'triangle'.
       const pts = `${cx},${cy - 5} ${cx - 4.5},${cy + 4} ${cx + 4.5},${cy + 4}`;
       return <svg width={18} height={14}><polygon points={pts} fill="#ff66cc" /></svg>;
     }
@@ -102,8 +86,6 @@ function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
         </svg>
       );
     case 'lock':
-      // Outer filled square with hollow centre — proxies a mutex glyph
-      // without an external icon font.
       return (
         <svg width={18} height={14}>
           <rect x={cx - 4} y={cy - 4} width={8} height={8} rx={1} fill="#ff5577" />
@@ -144,52 +126,108 @@ function EdgeIcon({ entry }: { entry: EdgeStyleEntry }) {
   );
 }
 
-// CanvasLegend persists open/closed across reloads under
-// `ckg.canvasLegend.open`. Default OPEN on first paint so the symbols
-// show up without the user having to hunt for them.
+// Persistence keys for legend state. Three pieces survive reloads: open
+// flag, panel width, panel height. Default size 220×220 picks a corner
+// footprint smaller than NodeList's 240px clamp floor — the legend is a
+// reading aid, not a primary surface.
+const LS_OPEN = 'ckg.canvasLegend.open';
+const LS_W = 'ckg.canvasLegend.w';
+const LS_H = 'ckg.canvasLegend.h';
+const MIN_W = 160, MAX_W = 480;
+const MIN_H = 120, MAX_H = 520;
+
+// CanvasLegend renders in the bottom-right corner of the canvas-host as
+// a tip overlay — small enough to leave the graph visible, draggable
+// from its top-left corner to expand. Closed state collapses to a tiny
+// "ℹ Legend" affordance pinned in the same corner.
+//
+// Bottom-right placement is intentional: top-right would compete with
+// the (now-removed) ControlLayer slot some users still expect; bottom-
+// right is empty real estate on most graph canvases. The top-left
+// corner of the box hosts the resize grip — diagonally opposite the
+// box's anchor (bottom-right) so dragging it grows toward the canvas
+// centre, the natural expansion direction.
 export default function CanvasLegend() {
   const [open, setOpen] = useState<boolean>(() => {
     if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem('ckg.canvasLegend.open') !== '0';
+    return localStorage.getItem(LS_OPEN) !== '0';
   });
+  const [width, setWidth] = useState<number>(() => {
+    if (typeof localStorage === 'undefined') return 220;
+    const v = parseInt(localStorage.getItem(LS_W) ?? '', 10);
+    return Number.isFinite(v) ? Math.min(MAX_W, Math.max(MIN_W, v)) : 220;
+  });
+  const [height, setHeight] = useState<number>(() => {
+    if (typeof localStorage === 'undefined') return 220;
+    const v = parseInt(localStorage.getItem(LS_H) ?? '', 10);
+    return Number.isFinite(v) ? Math.min(MAX_H, Math.max(MIN_H, v)) : 220;
+  });
+  const wRef = useRef(width); wRef.current = width;
+  const hRef = useRef(height); hRef.current = height;
+
   const toggle = () => setOpen(v => {
     const next = !v;
-    try { localStorage.setItem('ckg.canvasLegend.open', next ? '1' : '0'); } catch { /* ignore */ }
+    try { localStorage.setItem(LS_OPEN, next ? '1' : '0'); } catch { /* ignore */ }
     return next;
   });
 
+  // Resize handle drag — anchored at the bottom-right, the grip is at
+  // the top-left of the box. Dragging the grip up/left grows the box
+  // toward the canvas centre. dx/dy are inverted because the box's
+  // origin is bottom-right.
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX, startY = e.clientY;
+    const startW = wRef.current, startH = hRef.current;
+    const onMove = (ev: MouseEvent) => {
+      const dx = startX - ev.clientX;
+      const dy = startY - ev.clientY;
+      const nextW = Math.min(MAX_W, Math.max(MIN_W, startW + dx));
+      const nextH = Math.min(MAX_H, Math.max(MIN_H, startH + dy));
+      setWidth(nextW);
+      setHeight(nextH);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      try {
+        localStorage.setItem(LS_W, String(wRef.current));
+        localStorage.setItem(LS_H, String(hRef.current));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
   if (!open) {
     return (
-      <div className="canvas-legend collapsed">
-        <div className="canvas-legend-header">
-          <span
-            className="canvas-legend-title"
-            onClick={toggle}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }}
-            title="Show legend"
-          >
-            ▶ Legend
-          </span>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="canvas-legend-trigger"
+        onClick={toggle}
+        title="Show node/edge legend"
+        aria-label="Show legend"
+      >
+        ℹ Legend
+      </button>
     );
   }
 
   return (
-    <div className="canvas-legend">
+    <div
+      className="canvas-legend"
+      style={{ width: `${width}px`, height: `${height}px` }}
+    >
+      <div
+        className="canvas-legend-resizer"
+        onMouseDown={onResizeStart}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize legend"
+        title="Drag to resize"
+      />
       <div className="canvas-legend-header">
-        <span
-          className="canvas-legend-title"
-          onClick={toggle}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggle(); }}
-          title="Collapse legend"
-        >
-          ▼ Legend
-        </span>
+        <span className="canvas-legend-title">Legend</span>
         <button
           type="button"
           className="canvas-legend-close"
@@ -200,21 +238,23 @@ export default function CanvasLegend() {
           ✕
         </button>
       </div>
-      <h5>Node Shapes</h5>
-      {SHAPES.map(s => (
-        <div key={s.shape} className="legend-row">
-          <span className="legend-icon"><ShapeIcon shape={s.shape} /></span>
-          <span className="legend-label">{s.label}</span>
-        </div>
-      ))}
-      <h5>Edge Styles</h5>
-      {EDGE_STYLES.map(e => (
-        <div key={e.groupId} className="legend-row">
-          <span className="legend-icon"><EdgeIcon entry={e} /></span>
-          <span className="legend-label">{e.label}</span>
-          <span className="legend-tag">{e.groupId}</span>
-        </div>
-      ))}
+      <div className="canvas-legend-body">
+        <h5>Node Shapes</h5>
+        {SHAPES.map(s => (
+          <div key={s.shape} className="legend-row">
+            <span className="legend-icon"><ShapeIcon shape={s.shape} /></span>
+            <span className="legend-label">{s.label}</span>
+          </div>
+        ))}
+        <h5>Edge Styles</h5>
+        {EDGE_STYLES.map(e => (
+          <div key={e.groupId} className="legend-row">
+            <span className="legend-icon"><EdgeIcon entry={e} /></span>
+            <span className="legend-label">{e.label}</span>
+            <span className="legend-tag">{e.groupId}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
