@@ -342,7 +342,7 @@ export default function App() {
           briefly on top of an empty canvas during boot. */}
       {apiBox && <FirstTimeOverlay />}
       {stale && (
-        <div className="stale-banner" style={{ gridColumn: '1 / span 2' }}>
+        <div className="stale-banner">
           ⚠️ Graph built from {stale.src} but src is now at {stale.cur}. Run `ckg build` to refresh.
         </div>
       )}

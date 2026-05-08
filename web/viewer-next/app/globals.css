@@ -59,6 +59,7 @@ html, body {
 
 .topbar {
   grid-column: 1 / span 2;
+  grid-row: 2;
   padding: 4px 8px;
   background: #1a1c1f;
   display: flex;
@@ -133,7 +134,14 @@ html, body {
    canvas got promoted above the panel siblings even though grid put
    them in adjacent columns. z-index:0 keeps it below the explicit
    z-index:1 on .panel below. */
-.canvas-host { position: relative; min-width: 0; isolation: isolate; z-index: 0; }
+.canvas-host {
+  grid-column: 1;
+  grid-row: 3;
+  position: relative;
+  min-width: 0;
+  isolation: isolate;
+  z-index: 0;
+}
 .canvas-host > div { width: 100%; height: 100%; min-width: 0; }
 
 /* Panel — deliberately stronger visual treatment because the canvas
@@ -150,6 +158,8 @@ html, body {
    formed a stacking context (transforms, will-change) and locally
    raised the canvas above sibling grid cells in some browsers. */
 .panel {
+  grid-column: 2;
+  grid-row: 3;
   position: relative;
   z-index: 1;
   background: #1f2329;
@@ -537,6 +547,7 @@ html, body {
 
 .bottombar {
   grid-column: 1 / span 2;
+  grid-row: 4;
   background: #1a1c1f;
   padding: 3px 8px;
   font-size: 11px;
@@ -544,7 +555,21 @@ html, body {
   gap: 12px;
   align-items: center;
 }
-.stale-banner { background: #5a4a00; color: #fff; padding: 4px 8px; font-size: 11px; }
+/* Stale-banner sits in grid row 1 (auto). When the graph isn't stale
+   the banner doesn't render and row 1 collapses to 0 — but the other
+   grid items must still know their explicit row, otherwise auto-
+   placement pulls topbar into row 1 and shifts every subsequent item
+   one row up, leaving canvas+panel in the 32px topbar slot and
+   bottombar in the 1fr canvas slot. Hence the explicit grid-row on
+   .topbar/.canvas-host/.panel/.bottombar above. */
+.stale-banner {
+  grid-column: 1 / span 2;
+  grid-row: 1;
+  background: #5a4a00;
+  color: #fff;
+  padding: 4px 8px;
+  font-size: 11px;
+}
 
 /* ── HelpOverlay ─────────────────────────────────────────────────────────── */
 .help-overlay-backdrop {
