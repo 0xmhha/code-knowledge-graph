@@ -449,7 +449,7 @@ $ ls /tmp/ckg
 $ ckg audit --src=/path/to/go-project --graph=/tmp/ckg
   exit 0  (PARITY — go/packages.Load 와 DB 파일 set 일치)
 
-$ ckg serve --graph=/tmp/ckg --port=8787 --open
+$ ckg serve --graph=/tmp/ckg --port=8080 --open
   → 브라우저에서 3D viewer 확인
 
 $ ckg mcp --graph=/tmp/ckg

@@ -24,7 +24,7 @@ go build -o bin/ckg ./cmd/ckg
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth   # cold build
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth   # partial (short-circuit)
 ./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth # exit 0 = parity
-./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open       # viewer
+./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open       # viewer
 ```
 
 이어서: 본 문서 §4 Wave 9 진입 포인트 참조.
@@ -61,7 +61,7 @@ go build -o bin/ckg ./cmd/ckg
 ```bash
 make build
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
-./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open
+./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open
 ./bin/ckg serve --graph=/tmp/ckg-synth --no-viewer --port=8788   # API-only
 ./bin/ckg mcp --graph=/tmp/ckg-synth
 ./bin/ckg export-static --graph=/tmp/ckg-synth --out=/tmp/ckg-static
@@ -71,7 +71,7 @@ ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \
 
 # PostgreSQL backend (선택)
 ./bin/ckg build --src=testdata/synthetic --db=postgres://user:pass@localhost/ckg
-./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8787
+./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8080
 ```
 
 ---

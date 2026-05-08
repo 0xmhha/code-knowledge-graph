@@ -27,7 +27,7 @@ make build
 ./bin/ckg build --src=/path/to/repo --out=/tmp/ckg
 
 # 2. Query via HTTP + 3D viewer
-./bin/ckg serve --graph=/tmp/ckg --open      # http://localhost:8787
+./bin/ckg serve --graph=/tmp/ckg --open      # http://localhost:8080
 
 # 3. Query from Claude Code via MCP
 claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/tmp/ckg"
@@ -54,10 +54,10 @@ deployments, split the static viewer from the API:
 
 ```bash
 ./bin/ckg export-static --graph=/tmp/ckg --out=/srv/ckg/static
-./bin/ckg serve --graph=/tmp/ckg --port=8787 --no-viewer
+./bin/ckg serve --graph=/tmp/ckg --port=8080 --no-viewer
 ```
 
-Front both with a reverse proxy: `/api/* → :8787`, `/* → /srv/ckg/static`.
+Front both with a reverse proxy: `/api/* → :8080`, `/* → /srv/ckg/static`.
 
 ## Documentation
 

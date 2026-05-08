@@ -33,7 +33,7 @@ git log --oneline -10
 go test ./...                                 # 17 packages PASS (cmd/ckg + 16 internal/*)
 make build                                    # full build incl. Next.js viewer
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
-./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open
+./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open
 ./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity
 
 # Wave 7 (Group F) 검증
@@ -57,7 +57,7 @@ make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 
 7 subcommand:
 - `build` — graph build (cold + short-circuit + incremental). `--db postgres://...` 로 PG backend 선택 (C2).
-- `serve` — embedded Next.js viewer + REST API (127.0.0.1:8787 default). `--db postgres://...` 지원.
+- `serve` — embedded Next.js viewer + REST API (127.0.0.1:8080 default). `--db postgres://...` 지원.
 - `mcp` — stdio MCP server, 6 tools (find_symbol/callers/callees/get_subgraph/search_text/get_context_for_task)
 - `export-static` — chunked JSON + viewer를 정적 호스팅용으로 export
 - `export-postgres` — SQLite → PostgreSQL one-shot push (B2 — 4fc69ff~13317f7)
@@ -117,7 +117,7 @@ make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 ```bash
 make build
 ./bin/ckg build --src=$STABLENET_PATH --out=$GRAPH
-./bin/ckg serve --graph=$GRAPH --port=8787 --open
+./bin/ckg serve --graph=$GRAPH --port=8080 --open
 ./bin/ckg mcp --graph=$GRAPH
 ./bin/ckg export-static --graph=$GRAPH --out=$STATIC
 ANTHROPIC_API_KEY=… ./bin/ckg eval --tasks='eval/tasks/synthetic-*.yaml' \

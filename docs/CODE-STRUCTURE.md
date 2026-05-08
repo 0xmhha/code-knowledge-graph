@@ -480,7 +480,7 @@ pkg/types  ←  공통 enum/struct (NodeType, EdgeType, Confidence, Node, Edge)
 | Subcommand | 용도 | 입력 | 출력 |
 |---|---|---|---|
 | `build` | 그래프 생성 | `--src` | `graph.db` + `manifest.json` |
-| `serve` | HTTP API + viewer | `--graph` (or `--db`) | `:8787` |
+| `serve` | HTTP API + viewer | `--graph` (or `--db`) | `:8080` |
 | `mcp` | stdio MCP server | `--graph` | 6 tools |
 | `export-static` | 정적 호스팅용 chunked JSON | `--graph` | `out/*.json` + viewer |
 | `export-postgres` | SQLite → PG one-shot | `--dsn`, `--source` | PG schema |
@@ -624,7 +624,7 @@ git log --oneline -10
 go test ./...                               # 18 packages PASS
 make build                                  # Next.js viewer + ckg binary
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
-./bin/ckg serve --graph=/tmp/ckg-synth --port=8787 --open
+./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open
 ./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity
 
 # Wave 7 (Group F) 검증
@@ -634,7 +634,7 @@ make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
 
 # PostgreSQL backend (선택)
 ./bin/ckg build --src=testdata/synthetic --db=postgres://user:pass@localhost/ckg
-./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8787
+./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8080
 ```
 
 ---

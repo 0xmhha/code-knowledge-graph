@@ -105,6 +105,6 @@ jobs:
           cp -R web/viewer-next/out/. internal/server/web_assets/
           go build -o bin/ckg ./cmd/ckg
           ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-smoke
-          ./bin/ckg serve --graph=/tmp/ckg-smoke --port=8787 &
+          ./bin/ckg serve --graph=/tmp/ckg-smoke --port=8080 &
           sleep 3
           cd web/viewer-next && npx playwright test

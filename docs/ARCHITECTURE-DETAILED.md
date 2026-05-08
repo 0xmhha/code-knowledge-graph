@@ -26,7 +26,7 @@ Input (source code) → CLI build pipeline → SQLite graph.db → Multiple quer
 | Subcommand | Purpose | Output | Key Package |
 |---|---|---|---|
 | `build` | Parse all files → graph.db | SQLite database + manifest.json | `internal/buildpipe` |
-| `serve` | HTTP server + embedded viewer | localhost:8787 (default) | `internal/server` |
+| `serve` | HTTP server + embedded viewer | localhost:8080 (default) | `internal/server` |
 | `mcp` | Model Context Protocol stdio server | 6 MCP tools | `internal/mcp` |
 | `export-static` | Chunked JSON export for static hosting | /out/*.json + viewer assets | `internal/persist` |
 | `eval` | Run baseline comparisons on task YAML | CSV + report.md | `internal/eval` |
@@ -864,7 +864,7 @@ store.Search(query, limit=10)
 ```bash
 make build
 ckg build --src=<repo> --out=/tmp/ckg
-ckg serve --graph=/tmp/ckg --port=8787 --open
+ckg serve --graph=/tmp/ckg --port=8080 --open
 ```
 
 **Typical cycle**: edit code → `make build` → `ckg build` (1-2 min) → reload browser.
@@ -872,10 +872,10 @@ ckg serve --graph=/tmp/ckg --port=8787 --open
 ### 15.2 Local Single-User
 
 ```bash
-ckg serve --graph=/path/to/graph.db --port=8787 --open
+ckg serve --graph=/path/to/graph.db --port=8080 --open
 ```
 
-**Embedded viewer** at localhost:8787, API at localhost:8787/api/*.
+**Embedded viewer** at localhost:8080, API at localhost:8080/api/*.
 
 ### 15.3 Production (Recommended: Production Split)
 
@@ -887,9 +887,9 @@ ckg export-static --graph=/path/to/graph.db --out=/srv/ckg/static
 # serve /srv/ckg/static/* as static files
 
 # 3. Deploy API separately (autoscale, cache layer)
-ckg serve --graph=/path/to/graph.db --port=8787 --no-viewer
+ckg serve --graph=/path/to/graph.db --port=8080 --no-viewer
 # front with reverse proxy:
-#   /api/* → localhost:8787
+#   /api/* → localhost:8080
 #   /* → https://cdn.example.com/ckg/static/
 ```
 
@@ -921,7 +921,7 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 | `--src` | — | (required) | Source root path |
 | `--out` | — | (required for build) | Output directory |
 | `--graph` | — | (required for serve/mcp) | Graph directory (contains graph.db) |
-| `--port` | — | `8787` | HTTP server port |
+| `--port` | — | `8080` | HTTP server port |
 | `--open` | — | `false` | Auto-open browser on serve |
 | `--no-cache` | — | `false` | Force full rebuild (ignore manifest) |
 | `--no-viewer` | — | `false` | Serve API only (no static mount) |
