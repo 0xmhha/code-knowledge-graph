@@ -6,12 +6,18 @@ import (
 
 // PendingRef is an unresolved cross-file reference produced in Pass 1
 // and resolved (or marked AMBIGUOUS) in Pass 2.
+//
+// DispatchKind (Track C P1b, schema 1.7): optional metadata for `invokes`
+// edges. Empty for static `calls`. Carried through Pass 2 Resolve so the
+// final edge row preserves the dispatch classification decided at AST time
+// (when types.Info is still in scope).
 type PendingRef struct {
-	SrcID       string
-	EdgeType    types.EdgeType
-	TargetQName string
-	HintFile    string
-	Line        int
+	SrcID        string
+	EdgeType     types.EdgeType
+	TargetQName  string
+	HintFile     string
+	Line         int
+	DispatchKind string
 }
 
 // ParseResult is the per-file output of Pass 1.

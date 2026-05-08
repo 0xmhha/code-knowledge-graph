@@ -55,10 +55,69 @@ func OpenReadOnly(path string) (*sqliteStore, error) {
 // Close releases the underlying database handle.
 func (s *sqliteStore) Close() error { return s.db.Close() }
 
-// Migrate creates tables if they don't already exist.
+// Migrate creates tables if they don't already exist, then applies any
+// schema 1.6 → 1.7 column additions (dispatch_kind on edges + pending_refs)
+// idempotently.
+//
+// Why not bake every additive change into schema.sql alone: SQLite executes
+// CREATE TABLE IF NOT EXISTS as a no-op when the table already exists,
+// even if the existing definition is missing newer columns. Pre-1.7 DBs
+// that already have an `edges` table without `dispatch_kind` would silently
+// keep the old shape; explicit ALTER TABLE here brings them up to current.
 func (s *sqliteStore) Migrate() error {
 	if _, err := s.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
+	}
+	if err := ensureDispatchKindColumn(s.db, "edges"); err != nil {
+		return fmt.Errorf("migrate dispatch_kind on edges: %w", err)
+	}
+	if err := ensureDispatchKindColumn(s.db, "pending_refs"); err != nil {
+		return fmt.Errorf("migrate dispatch_kind on pending_refs: %w", err)
+	}
+	return nil
+}
+
+// ensureDispatchKindColumn ALTER-adds <table>.dispatch_kind on schema-1.6
+// DBs. Idempotent: detects the column via PRAGMA table_info and no-ops when
+// already present. Used by Migrate() to bring forward both the edges and
+// pending_refs tables.
+//
+// table is interpolated directly because PRAGMA / ALTER TABLE forbid
+// parameter binding on identifiers; callers MUST pass a hard-coded literal
+// (validated by the switch below as a defence-in-depth measure).
+func ensureDispatchKindColumn(db *sql.DB, table string) error {
+	switch table {
+	case "edges", "pending_refs":
+		// allowed
+	default:
+		return fmt.Errorf("ensureDispatchKindColumn: unknown table %q", table)
+	}
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return fmt.Errorf("table_info(%s): %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "dispatch_kind" {
+			return nil // already present
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN dispatch_kind TEXT`); err != nil {
+		return fmt.Errorf("alter %s add dispatch_kind: %w", table, err)
 	}
 	return nil
 }
@@ -247,8 +306,12 @@ func (s *sqliteStore) DistinctFilePaths(language string) ([]string, error) {
 // QueryEdgesByType returns all edges whose type matches t. Used by tests
 // and downstream consumers (eval/MCP) that want to pull edges by relation
 // kind without scanning the full table.
+//
+// dispatch_kind (schema 1.7) is COALESCE'd to the empty string so pre-1.7
+// DBs (where the column doesn't exist post-ALTER, or the row was inserted
+// before the migration ran) still scan cleanly.
 func (s *sqliteStore) QueryEdgesByType(t string) ([]types.Edge, error) {
-	rows, err := s.db.Query(`SELECT id, src, dst, type, file_path, line, count, confidence
+	rows, err := s.db.Query(`SELECT id, src, dst, type, file_path, line, count, confidence, COALESCE(dispatch_kind,'')
 		FROM edges WHERE type = ?`, t)
 	if err != nil {
 		return nil, fmt.Errorf("query edges by type %q: %w", t, err)
@@ -260,7 +323,7 @@ func (s *sqliteStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 		var fp sql.NullString
 		var line sql.NullInt64
 		var conf string
-		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf); err != nil {
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf, &e.DispatchKind); err != nil {
 			return nil, fmt.Errorf("scan edge row: %w", err)
 		}
 		if fp.Valid {
@@ -434,7 +497,7 @@ func (s *sqliteStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 		}
 		chunk := ids[start:end]
 		ph := placeholders(len(chunk))
-		q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
 		      FROM edges WHERE src IN (` + ph + `) OR dst IN (` + ph + `)`
 		args := make([]any, 0, 2*len(chunk))
 		for _, id := range chunk {
@@ -631,13 +694,15 @@ func scanNodes(rows *sql.Rows) ([]types.Node, error) {
 }
 
 // scanEdges drains rows produced by QueryEdgesForNodes (file_path/line are
-// COALESCE'd in the SELECT, so direct scan is safe here too).
+// COALESCE'd in the SELECT, so direct scan is safe here too). dispatch_kind
+// is the trailing column added in schema 1.7 (Track C P1b) — empty string
+// for every non-`invokes` edge.
 func scanEdges(rows *sql.Rows) ([]types.Edge, error) {
 	var out []types.Edge
 	for rows.Next() {
 		var e types.Edge
 		var conf string
-		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &e.FilePath, &e.Line, &e.Count, &conf); err != nil {
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &e.FilePath, &e.Line, &e.Count, &conf, &e.DispatchKind); err != nil {
 			return nil, fmt.Errorf("scan edge row: %w", err)
 		}
 		e.Confidence = types.Confidence(conf)
@@ -770,7 +835,7 @@ func (s *sqliteStore) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge,
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
 		FROM edges WHERE src IN (` + placeholders(len(ids)) + `)`
 	args := anys(ids)
 	if len(edgeTypes) > 0 {
@@ -791,7 +856,7 @@ func (s *sqliteStore) edgesPointingTo(ids []string, edgeTypes []string) ([]types
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+	q := `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
 		FROM edges WHERE dst IN (` + placeholders(len(ids)) + `)`
 	args := anys(ids)
 	if len(edgeTypes) > 0 {
@@ -833,9 +898,10 @@ func (s *sqliteStore) AllNodes() ([]types.Node, error) {
 }
 
 // AllEdges returns every edge in the graph. Pair with AllNodes for full
-// graph reconstruction in `ckg validate`.
+// graph reconstruction in `ckg validate`. dispatch_kind (schema 1.7) is the
+// trailing column; COALESCE'd so pre-1.7 rows scan as empty string.
 func (s *sqliteStore) AllEdges() ([]types.Edge, error) {
-	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'') FROM edges`)
 	if err != nil {
 		return nil, fmt.Errorf("all edges: %w", err)
 	}
@@ -846,7 +912,7 @@ func (s *sqliteStore) AllEdges() ([]types.Edge, error) {
 		var fp string
 		var line int
 		var conf string
-		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf); err != nil {
+		if err := rows.Scan(&e.ID, &e.Src, &e.Dst, &e.Type, &fp, &line, &e.Count, &conf, &e.DispatchKind); err != nil {
 			return nil, fmt.Errorf("scan edge row: %w", err)
 		}
 		e.FilePath = fp
@@ -902,7 +968,7 @@ func (s *sqliteStore) EdgesByFilePath(path string) ([]types.Edge, error) {
 	if path == "" {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+	rows, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
 		FROM edges WHERE file_path = ?`, path)
 	if err != nil {
 		return nil, fmt.Errorf("edges by file_path %q: %w", path, err)
@@ -976,13 +1042,18 @@ func (s *sqliteStore) DeleteEdgesByType(t string) error {
 // Pass 2 over the merged dirty + cached input set without re-parsing cached
 // files. Without this table the cached-side pending refs were silently
 // dropped (the v1/v2 cross-file edge regression).
+//
+// DispatchKind (Track C P1b, schema 1.7): mirrors the edges table column —
+// preserves the AST-time dispatch classification across the cache boundary.
+// Empty for static `calls`.
 type PendingRefRow struct {
-	FilePath    string
-	SrcID       string
-	TargetQName string
-	EdgeType    string
-	Line        int
-	HintFile    string
+	FilePath     string
+	SrcID        string
+	TargetQName  string
+	EdgeType     string
+	Line         int
+	HintFile     string
+	DispatchKind string
 }
 
 // InsertPendingRefs bulk-inserts pending_refs rows. INSERT OR IGNORE is used
@@ -1003,15 +1074,15 @@ func (s *sqliteStore) InsertPendingRefs(refs []PendingRefRow) error {
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO pending_refs
-		(file_path, src_id, target_qname, edge_type, line, hint_file)
-		VALUES (?, ?, ?, ?, ?, ?)`)
+		(file_path, src_id, target_qname, edge_type, line, hint_file, dispatch_kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, r := range refs {
 		if _, err := stmt.Exec(r.FilePath, r.SrcID, r.TargetQName,
-			r.EdgeType, r.Line, r.HintFile); err != nil {
+			r.EdgeType, r.Line, r.HintFile, r.DispatchKind); err != nil {
 			return fmt.Errorf("insert pending_ref %s→%s: %w", r.SrcID, r.TargetQName, err)
 		}
 	}
@@ -1027,7 +1098,7 @@ func (s *sqliteStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error
 		return nil, nil
 	}
 	rows, err := s.db.Query(`SELECT file_path, src_id, target_qname, edge_type, line,
-		COALESCE(hint_file,'') FROM pending_refs WHERE file_path = ?`, path)
+		COALESCE(hint_file,''), COALESCE(dispatch_kind,'') FROM pending_refs WHERE file_path = ?`, path)
 	if err != nil {
 		return nil, fmt.Errorf("pending_refs by file_path %q: %w", path, err)
 	}
@@ -1036,7 +1107,7 @@ func (s *sqliteStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error
 	for rows.Next() {
 		var r PendingRefRow
 		if err := rows.Scan(&r.FilePath, &r.SrcID, &r.TargetQName,
-			&r.EdgeType, &r.Line, &r.HintFile); err != nil {
+			&r.EdgeType, &r.Line, &r.HintFile, &r.DispatchKind); err != nil {
 			return nil, fmt.Errorf("scan pending_ref: %w", err)
 		}
 		out = append(out, r)
@@ -1090,7 +1161,9 @@ func (s *sqliteStore) ReverseDepsForFiles(dirtyPaths []string) ([]string, error)
 	return out, rows.Err()
 }
 
-// InsertEdges bulk-inserts edges (transactional).
+// InsertEdges bulk-inserts edges (transactional). dispatch_kind (schema 1.7,
+// Track C P1b) is written as the empty string for non-`invokes` edges; SQLite
+// stores it as a regular TEXT value either way.
 func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -1098,15 +1171,15 @@ func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	}
 	defer tx.Rollback()
 	stmt, err := tx.Prepare(`INSERT INTO edges
-		(src, dst, type, file_path, line, count, confidence)
-		VALUES (?,?,?,?,?,?,?)`)
+		(src, dst, type, file_path, line, count, confidence, dispatch_kind)
+		VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, e := range edges {
 		if _, err := stmt.Exec(e.Src, e.Dst, string(e.Type), e.FilePath, e.Line,
-			e.Count, string(e.Confidence)); err != nil {
+			e.Count, string(e.Confidence), e.DispatchKind); err != nil {
 			return fmt.Errorf("insert edge %s->%s: %w", e.Src, e.Dst, err)
 		}
 	}

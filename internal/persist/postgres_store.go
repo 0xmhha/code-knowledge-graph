@@ -74,14 +74,15 @@ CREATE INDEX IF NOT EXISTS idx_nodes_type  ON nodes(type);
 CREATE INDEX IF NOT EXISTS idx_nodes_fts   ON nodes USING GIN(search_vector);
 
 CREATE TABLE IF NOT EXISTS edges (
-    id         BIGSERIAL PRIMARY KEY,
-    src        TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    dst        TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    type       TEXT NOT NULL,
-    file_path  TEXT,
-    line       INTEGER,
-    count      INTEGER NOT NULL DEFAULT 1,
-    confidence TEXT NOT NULL DEFAULT 'EXTRACTED'
+    id            BIGSERIAL PRIMARY KEY,
+    src           TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    dst           TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    type          TEXT NOT NULL,
+    file_path     TEXT,
+    line          INTEGER,
+    count         INTEGER NOT NULL DEFAULT 1,
+    confidence    TEXT NOT NULL DEFAULT 'EXTRACTED',
+    dispatch_kind TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src  ON edges(src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst  ON edges(dst);
@@ -114,12 +115,13 @@ CREATE TABLE IF NOT EXISTS manifest (
 );
 
 CREATE TABLE IF NOT EXISTS pending_refs (
-    file_path    TEXT NOT NULL,
-    src_id       TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-    target_qname TEXT NOT NULL,
-    edge_type    TEXT NOT NULL,
-    line         INTEGER NOT NULL,
-    hint_file    TEXT,
+    file_path     TEXT NOT NULL,
+    src_id        TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    target_qname  TEXT NOT NULL,
+    edge_type     TEXT NOT NULL,
+    line          INTEGER NOT NULL,
+    hint_file     TEXT,
+    dispatch_kind TEXT,
     PRIMARY KEY (file_path, src_id, target_qname, edge_type, line)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_refs_file ON pending_refs(file_path);
@@ -325,8 +327,8 @@ func (s *pgStore) InsertEdges(edges []types.Edge) error {
 		return nil
 	}
 	batch := &pgx.Batch{}
-	const q = `INSERT INTO edges (src, dst, type, file_path, line, count, confidence)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)`
+	const q = `INSERT INTO edges (src, dst, type, file_path, line, count, confidence, dispatch_kind)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`
 	for _, e := range edges {
 		var fp *string
 		if e.FilePath != "" {
@@ -336,7 +338,7 @@ func (s *pgStore) InsertEdges(edges []types.Edge) error {
 		if e.Line != 0 {
 			line = &e.Line
 		}
-		batch.Queue(q, e.Src, e.Dst, string(e.Type), fp, line, e.Count, string(e.Confidence))
+		batch.Queue(q, e.Src, e.Dst, string(e.Type), fp, line, e.Count, string(e.Confidence), e.DispatchKind)
 	}
 	br := s.pool.SendBatch(background, batch)
 	defer br.Close()
@@ -458,15 +460,19 @@ func (s *pgStore) InsertPendingRefs(refs []PendingRefRow) error {
 	}
 	batch := &pgx.Batch{}
 	const q = `INSERT INTO pending_refs
-        (file_path, src_id, target_qname, edge_type, line, hint_file)
-        VALUES ($1,$2,$3,$4,$5,$6)
+        (file_path, src_id, target_qname, edge_type, line, hint_file, dispatch_kind)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
         ON CONFLICT (file_path, src_id, target_qname, edge_type, line) DO NOTHING`
 	for _, r := range refs {
 		var hf *string
 		if r.HintFile != "" {
 			hf = &r.HintFile
 		}
-		batch.Queue(q, r.FilePath, r.SrcID, r.TargetQName, r.EdgeType, r.Line, hf)
+		var dk *string
+		if r.DispatchKind != "" {
+			dk = &r.DispatchKind
+		}
+		batch.Queue(q, r.FilePath, r.SrcID, r.TargetQName, r.EdgeType, r.Line, hf, dk)
 	}
 	br := s.pool.SendBatch(background, batch)
 	defer br.Close()
@@ -666,7 +672,7 @@ func (s *pgStore) DistinctFilePaths(language string) ([]string, error) {
 // QueryEdgesByType returns all edges whose type matches t.
 func (s *pgStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	rows, err := s.pool.Query(background,
-		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
         FROM edges WHERE type = $1`, t)
 	if err != nil {
 		return nil, fmt.Errorf("query edges by type %q: %w", t, err)
@@ -690,7 +696,7 @@ func (s *pgStore) AllNodes() ([]types.Node, error) {
 // graph reconstruction in `ckg validate`.
 func (s *pgStore) AllEdges() ([]types.Edge, error) {
 	rows, err := s.pool.Query(background,
-		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'') FROM edges`)
 	if err != nil {
 		return nil, fmt.Errorf("all edges: %w", err)
 	}
@@ -714,7 +720,7 @@ func (s *pgStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 		}
 		chunk := ids[start:end]
 		rows, err := s.pool.Query(background,
-			`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+			`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
             FROM edges WHERE src = ANY($1) OR dst = ANY($1)`,
 			chunk)
 		if err != nil {
@@ -824,11 +830,11 @@ func (s *pgStore) pgEdgesFrom(ids []string, edgeTypes []string) ([]types.Edge, e
 	var q string
 	var args []any
 	if len(edgeTypes) == 0 {
-		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
             FROM edges WHERE src = ANY($1)`
 		args = []any{ids}
 	} else {
-		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
             FROM edges WHERE src = ANY($1) AND type = ANY($2)`
 		args = []any{ids, edgeTypes}
 	}
@@ -848,11 +854,11 @@ func (s *pgStore) pgEdgesPointingTo(ids []string, edgeTypes []string) ([]types.E
 	var q string
 	var args []any
 	if len(edgeTypes) == 0 {
-		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
             FROM edges WHERE dst = ANY($1)`
 		args = []any{ids}
 	} else {
-		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		q = `SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
             FROM edges WHERE dst = ANY($1) AND type = ANY($2)`
 		args = []any{ids, edgeTypes}
 	}
@@ -960,7 +966,7 @@ func (s *pgStore) EdgesByFilePath(path string) ([]types.Edge, error) {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(background,
-		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence
+		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'')
         FROM edges WHERE file_path = $1`, path)
 	if err != nil {
 		return nil, fmt.Errorf("edges by file_path %q: %w", path, err)
@@ -998,13 +1004,15 @@ func (s *pgStore) BlobsByFilePath(path string) (map[string][]byte, error) {
 }
 
 // PendingRefsByFilePath returns pending_refs rows for the given file_path.
+// dispatch_kind (schema 1.7) is COALESCE'd to '' so pre-1.7 NULL rows scan
+// cleanly when an older PG dump is replayed against this binary.
 func (s *pgStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error) {
 	if path == "" {
 		return nil, nil
 	}
 	rows, err := s.pool.Query(background,
 		`SELECT file_path, src_id, target_qname, edge_type, line,
-        COALESCE(hint_file,'') FROM pending_refs WHERE file_path = $1`, path)
+        COALESCE(hint_file,''), COALESCE(dispatch_kind,'') FROM pending_refs WHERE file_path = $1`, path)
 	if err != nil {
 		return nil, fmt.Errorf("pending_refs by file_path %q: %w", path, err)
 	}
@@ -1013,7 +1021,7 @@ func (s *pgStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error) {
 	for rows.Next() {
 		var r PendingRefRow
 		if err := rows.Scan(&r.FilePath, &r.SrcID, &r.TargetQName,
-			&r.EdgeType, &r.Line, &r.HintFile); err != nil {
+			&r.EdgeType, &r.Line, &r.HintFile, &r.DispatchKind); err != nil {
 			return nil, fmt.Errorf("scan pending_ref: %w", err)
 		}
 		out = append(out, r)
@@ -1161,7 +1169,7 @@ func (s *pgStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int)
 
 	// Edges — load all, then chunk
 	erows, err := s.pool.Query(background,
-		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+		`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'') FROM edges`)
 	if err != nil {
 		return err
 	}
@@ -1231,14 +1239,16 @@ func scanPGNodes(rows pgx.Rows) ([]types.Node, error) {
 }
 
 // scanPGEdges drains pgx.Rows for edge queries (file_path/line are COALESCE'd
-// in the SELECT, so direct scan into value types is safe).
+// in the SELECT, so direct scan into value types is safe). dispatch_kind
+// (schema 1.7) is the trailing column; COALESCE'd to '' in callers so
+// pre-1.7 NULL rows scan cleanly.
 func scanPGEdges(rows pgx.Rows) ([]types.Edge, error) {
 	var out []types.Edge
 	for rows.Next() {
 		var e types.Edge
 		var conf string
 		if err := rows.Scan(
-			&e.ID, &e.Src, &e.Dst, &e.Type, &e.FilePath, &e.Line, &e.Count, &conf,
+			&e.ID, &e.Src, &e.Dst, &e.Type, &e.FilePath, &e.Line, &e.Count, &conf, &e.DispatchKind,
 		); err != nil {
 			return nil, fmt.Errorf("scan edge row: %w", err)
 		}

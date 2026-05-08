@@ -35,15 +35,22 @@ CREATE INDEX IF NOT EXISTS idx_nodes_type  ON nodes(type);
 -- bump 1.1 → 1.2 marks this; pre-1.2 DBs are not retroactively migrated —
 -- callers detect the missing CASCADE via foreign_key_check at Open() time
 -- and a warning steers operators to --no-cache or a clean rebuild.
+-- dispatch_kind (schema 1.7, Track C P1b) is an optional metadata column on
+-- the edges row. Populated only for the `invokes` edge type — empty string
+-- otherwise. Migrate() ALTER-ADDs this column when opening a pre-1.7 DB
+-- (sqlite.go's ensureDispatchKindColumn). The CREATE TABLE here describes
+-- the post-migration shape; pre-1.7 readers tolerate the column because
+-- SELECT projections enumerate columns explicitly (no SELECT *).
 CREATE TABLE IF NOT EXISTS edges (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  src         TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  dst         TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  type        TEXT NOT NULL,
-  file_path   TEXT,
-  line        INTEGER,
-  count       INTEGER NOT NULL DEFAULT 1,
-  confidence  TEXT NOT NULL DEFAULT 'EXTRACTED'
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  src           TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  dst           TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  type          TEXT NOT NULL,
+  file_path     TEXT,
+  line          INTEGER,
+  count         INTEGER NOT NULL DEFAULT 1,
+  confidence    TEXT NOT NULL DEFAULT 'EXTRACTED',
+  dispatch_kind TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_edges_src  ON edges(src);
 CREATE INDEX IF NOT EXISTS idx_edges_dst  ON edges(dst);
@@ -89,12 +96,13 @@ CREATE TABLE IF NOT EXISTS manifest (
 -- dirty/removed file's nodes are dropped via DeleteNodesByFilePath, its
 -- pending refs follow automatically — no separate cleanup statement needed.
 CREATE TABLE IF NOT EXISTS pending_refs (
-  file_path    TEXT NOT NULL,
-  src_id       TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  target_qname TEXT NOT NULL,
-  edge_type    TEXT NOT NULL,
-  line         INTEGER NOT NULL,
-  hint_file    TEXT,
+  file_path     TEXT NOT NULL,
+  src_id        TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  target_qname  TEXT NOT NULL,
+  edge_type     TEXT NOT NULL,
+  line          INTEGER NOT NULL,
+  hint_file     TEXT,
+  dispatch_kind TEXT,
   PRIMARY KEY (file_path, src_id, target_qname, edge_type, line)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_refs_file ON pending_refs(file_path);

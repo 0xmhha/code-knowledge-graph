@@ -52,14 +52,15 @@ CREATE TABLE IF NOT EXISTS nodes (
 );
 
 CREATE TABLE IF NOT EXISTS edges (
-    id         TEXT    PRIMARY KEY,
-    type       TEXT    NOT NULL,
-    src        TEXT    NOT NULL,
-    dst        TEXT    NOT NULL,
-    file_path  TEXT    NOT NULL DEFAULT '',
-    line       INTEGER NOT NULL DEFAULT 0,
-    count      INTEGER NOT NULL DEFAULT 1,
-    confidence TEXT    NOT NULL DEFAULT 'EXTRACTED'
+    id            TEXT    PRIMARY KEY,
+    type          TEXT    NOT NULL,
+    src           TEXT    NOT NULL,
+    dst           TEXT    NOT NULL,
+    file_path     TEXT    NOT NULL DEFAULT '',
+    line          INTEGER NOT NULL DEFAULT 0,
+    count         INTEGER NOT NULL DEFAULT 1,
+    confidence    TEXT    NOT NULL DEFAULT 'EXTRACTED',
+    dispatch_kind TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS blobs (
@@ -316,10 +317,11 @@ func insertEdges(ctx context.Context, pool *pgxpool.Pool, edges []types.Edge, lo
 			e.Line,
 			e.Count,
 			string(e.Confidence),
+			e.DispatchKind,
 		})
 	}
 
-	cols := []string{"id", "type", "src", "dst", "file_path", "line", "count", "confidence"}
+	cols := []string{"id", "type", "src", "dst", "file_path", "line", "count", "confidence", "dispatch_kind"}
 	n, err := pool.CopyFrom(
 		ctx,
 		pgx.Identifier{"edges"},

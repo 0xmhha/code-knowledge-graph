@@ -37,9 +37,18 @@ import (
 // (CKS G3 control-flow context propagation): timeout_path /
 // cancellation_path self-loop edges are emitted from Go context.With* call
 // sites; pre-1.6 DBs are missing those rows so the first 1.6 build must run
-// cold. Kept here (not in pkg/types) because only the cache key needs it;
+// cold. Bumped from "1.6" to "1.7" by Track C (detector gap fill): the
+// edges row gains an optional `dispatch_kind` TEXT column populated for
+// `invokes` edges (P1b), plus three new emit sites — `uses_type` (P0),
+// `instantiates` (P1c), and the lock-edge fix inside goroutine bodies
+// (P1a). Pre-1.7 DBs are missing the column AND the new edges; opening
+// such a DB triggers an idempotent ALTER ADD COLUMN via Migrate(), and
+// ManifestUsable's version check forces a cold rebuild on first 1.7 run
+// so the new edges land in their natural emission order.
+//
+// Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.6"
+const SchemaVersion = "1.7"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

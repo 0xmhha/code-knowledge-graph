@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	gotypes "go/types"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -62,8 +63,21 @@ func (v *declVisitor) emitFunctionBodyPos(parentQname, parentID string, body *as
 			}
 		case *ast.CallExpr:
 			id := v.appendLogicBlockPos(parentID, parentQname, types.NodeCallSite, "", s.Pos(), s.End())
-			// Pending edge: CallSite -calls-> callee — resolved in Pass 2.
-			v.pending = append(v.pending, parsePendingFromCall(id, s, v.fset))
+			// Pending edge: CallSite -(calls|invokes)-> callee — resolved in Pass 2.
+			// Track C P1b: classify dispatch kind so non-static dispatches
+			// surface as `invokes` with a populated dispatch_kind metadata
+			// column instead of being conflated with static `calls`.
+			v.pending = append(v.pending, v.parsePendingFromCall(id, s))
+			// Track C P1b: for dispatch kinds whose target is unresolvable
+			// (closure literal, func value, method value) — Resolve would
+			// drop the PendingRef because TargetQName has no matching
+			// Function/Method node — we emit a direct self-loop on the
+			// parent function so the edge isn't lost. Self-loop semantics
+			// mirror timeout_path / cancellation_path: marker edges that
+			// say "this function performs <kind> dispatch" without naming
+			// a runtime target. interface_method dispatch resolves cleanly
+			// to a Method node so we leave it in the PendingRef path.
+			v.maybeEmitInvokesSelfLoop(parentID, s)
 			// Concurrency phase 2: lock/unlock edges. Receiver resolution
 			// uses types.Info when available; falls back to AST-only INFERRED
 			// matching otherwise. No-op for non-mutex calls.
@@ -170,15 +184,164 @@ func (v *declVisitor) appendLogicBlockPos(parentID, parentQname string, t types.
 }
 
 // parsePendingFromCall extracts a best-effort callee qname from a *ast.CallExpr.
-// The result is consumed in Pass 2 (Resolve) to materialize a `calls` edge.
-func parsePendingFromCall(srcID string, c *ast.CallExpr, fset *token.FileSet) parse.PendingRef {
+// The result is consumed in Pass 2 (Resolve) to materialize a `calls` (static)
+// or `invokes` (non-static dispatch) edge.
+//
+// Track C P1b: classifies dispatch kind via types.Info when available and
+// stamps the result on PendingRef.DispatchKind. The five outcomes:
+//
+//	dispatch_kind == ""                  → static call (EdgeCalls)
+//	dispatch_kind == "interface_method"  → callee.Recv() is *types.Interface
+//	dispatch_kind == "func_value"        → CallExpr.Fun is *ast.Ident bound to
+//	                                       a var/param of *types.Signature type
+//	dispatch_kind == "method_value"      → CallExpr.Fun is *ast.SelectorExpr
+//	                                       whose Sel is a Field of *types.Signature
+//	dispatch_kind == "closure"           → CallExpr.Fun is an *ast.FuncLit
+//
+// AST-only fallback (typesInfo == nil): only the closure case is detectable
+// without type info; everything else falls back to EdgeCalls. Real graphs
+// run the typed path, so the AST-only mode is mainly a test convenience.
+func (v *declVisitor) parsePendingFromCall(srcID string, c *ast.CallExpr) parse.PendingRef {
 	target := exprName(c.Fun)
-	pos := fset.Position(c.Pos())
-	return parse.PendingRef{
+	pos := v.fset.Position(c.Pos())
+	pr := parse.PendingRef{
 		SrcID:       srcID,
 		EdgeType:    types.EdgeCalls,
 		TargetQName: target,
 		HintFile:    pos.Filename,
 		Line:        pos.Line,
 	}
+	dispatchKind := v.classifyCallDispatch(c)
+	switch dispatchKind {
+	case "interface_method":
+		// Interface dispatch DOES resolve: the Method node for the
+		// interface declaration is in qIndex, so Pass 2 lifts this to
+		// CallSite → Method via the existing path. Mark it as invokes
+		// with the dispatch_kind tag.
+		pr.EdgeType = types.EdgeInvokes
+		pr.DispatchKind = dispatchKind
+	case "closure", "func_value", "method_value":
+		// Target is unresolvable (closure literal / runtime func value /
+		// stored callback). The direct self-loop emission in
+		// maybeEmitInvokesSelfLoop covers this case. Leave the PendingRef
+		// here as a `calls` so it stays out of the way (Resolve will
+		// drop it because the TargetQName won't match).
+	}
+	return pr
+}
+
+// maybeEmitInvokesSelfLoop emits a self-loop `invokes` edge on the parent
+// function for dispatch kinds whose runtime target cannot be resolved at
+// AST time. Dst == Src by design — self-loop semantics signal "this
+// function performs <dispatch_kind> dispatch" without claiming a callee.
+//
+// The parentID passed by the caller is a CallSite ID (appendLogicBlockPos
+// returns the call-site, not the enclosing function). We climb to the
+// enclosing function via the same callSiteParent map Resolve uses — but
+// inline at AST time, by deriving the parent function's qname from the
+// call-site qname suffix construction "<parentQname>#<Kind>@<offset>".
+//
+// Implementation note: at this AST visitor call site we already know the
+// enclosing function's ID (the v.declVisitor's currently-walked function),
+// but the existing emitFunctionBodyPos signature accepts a parentID that
+// happens to be the function ID (not the call-site ID — the call-site is
+// minted inside the case body and assigned to local var `id`). So we use
+// parentID directly. Reading emitFunctionBodyPos confirms parentID is the
+// function ID (visitFuncDecl passes `id` from MakeID(funcQname, ...)).
+func (v *declVisitor) maybeEmitInvokesSelfLoop(parentFuncID string, c *ast.CallExpr) {
+	if c == nil || parentFuncID == "" {
+		return
+	}
+	dispatchKind := v.classifyCallDispatch(c)
+	switch dispatchKind {
+	case "closure", "func_value", "method_value":
+		// fall through
+	default:
+		return
+	}
+	pos := v.fset.Position(c.Pos())
+	conf := types.ConfExtracted
+	if v.typesInfo == nil {
+		conf = types.ConfInferred
+	}
+	v.edges = append(v.edges, types.Edge{
+		Src: parentFuncID, Dst: parentFuncID,
+		Type:         types.EdgeInvokes,
+		Line:         pos.Line,
+		Count:        1,
+		Confidence:   conf,
+		FilePath:     v.relPath,
+		DispatchKind: dispatchKind,
+	})
+}
+
+// classifyCallDispatch returns the dispatch_kind tag for c, or "" when c is
+// a static call. Uses types.Info when available; falls back to AST-only
+// closure detection otherwise (the only kind unambiguously visible at the
+// syntactic layer).
+//
+// Order matters: closure literal beats SelectorExpr beats Ident, because a
+// `func(){...}()` call's Fun is *ast.FuncLit (no Selector / no Ident path).
+func (v *declVisitor) classifyCallDispatch(c *ast.CallExpr) string {
+	if c == nil {
+		return ""
+	}
+	// Closure literal call: `func() { ... }()`. Detectable at AST layer alone.
+	if _, ok := c.Fun.(*ast.FuncLit); ok {
+		return "closure"
+	}
+	if v.typesInfo == nil {
+		return ""
+	}
+	switch fun := c.Fun.(type) {
+	case *ast.SelectorExpr:
+		// Try Selections first — gives precise interface-vs-concrete answer.
+		if sel, ok := v.typesInfo.Selections[fun]; ok {
+			recv := sel.Recv()
+			if recv == nil {
+				return ""
+			}
+			// Strip pointer to find the underlying type.
+			if ptr, ok := recv.(*gotypes.Pointer); ok {
+				recv = ptr.Elem()
+			}
+			if _, isIface := recv.Underlying().(*gotypes.Interface); isIface {
+				return "interface_method"
+			}
+			// A field of function type whose Sel resolves to a *types.Var
+			// (struct field) carrying *types.Signature is a "method_value"
+			// dispatch (the field is a stored function pointer). Distinguish
+			// from a real method by checking the Sel's object kind.
+			if obj := v.typesInfo.ObjectOf(fun.Sel); obj != nil {
+				if vobj, ok := obj.(*gotypes.Var); ok {
+					if _, isSig := vobj.Type().Underlying().(*gotypes.Signature); isSig {
+						return "method_value"
+					}
+				}
+			}
+			return ""
+		}
+		// No Selection: Sel might still resolve to a Var-of-Signature
+		// (package-level func value referenced via package selector).
+		if obj := v.typesInfo.ObjectOf(fun.Sel); obj != nil {
+			if vobj, ok := obj.(*gotypes.Var); ok {
+				if _, isSig := vobj.Type().Underlying().(*gotypes.Signature); isSig {
+					return "func_value"
+				}
+			}
+		}
+	case *ast.Ident:
+		// Bare identifier call: `cb(arg)` where cb is a func-typed var/param.
+		// Distinguish from a regular function call by checking the object
+		// kind — *types.Func means static dispatch, *types.Var of signature
+		// type means func value.
+		if obj := v.typesInfo.ObjectOf(fun); obj != nil {
+			if vobj, ok := obj.(*gotypes.Var); ok {
+				if _, isSig := vobj.Type().Underlying().(*gotypes.Signature); isSig {
+					return "func_value"
+				}
+			}
+		}
+	}
+	return ""
 }

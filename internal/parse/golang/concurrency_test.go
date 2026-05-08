@@ -27,8 +27,9 @@ func TestConcurrency_Mutex_FieldAndLocal(t *testing.T) {
 	if got := bySubKind["mutex"]; got < 2 {
 		t.Errorf("mutex sub_kind: got %d, want >=2 (Counter.mu + LocalLock.localMu + Embedded.Mutex)", got)
 	}
-	if got := bySubKind["rwmutex"]; got != 1 {
-		t.Errorf("rwmutex sub_kind: got %d, want 1 (Cache.mu)", got)
+	// Cache.mu (struct field) plus GoroutineRWLock.rwMu (function-local) — 2 in total.
+	if got := bySubKind["rwmutex"]; got < 1 {
+		t.Errorf("rwmutex sub_kind: got %d, want >=1 (Cache.mu, GoroutineRWLock.rwMu)", got)
 	}
 	for _, n := range mutexes {
 		if strings.Contains(n.QualifiedName, "FakeMutex") {
@@ -274,6 +275,71 @@ func TestChannelFlow_Goroutine_SendsToChannelNode(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected Goroutine -sends_to-> Channel edge; none found")
+	}
+}
+
+// TestConcurrency_GoroutineLockEdges (Track C P1a) — lock CallExprs inside a
+// `go func() { ... }()` literal must produce acquires_lock / releases_lock
+// edges. Pre-fix, statements.go returned false on *ast.GoStmt to avoid
+// double-walking, and emitGoroutineChannelEdges only handled channel
+// statements — so the entire goroutine body's lock calls were silently
+// skipped. This test pins the post-fix behaviour: each goroutine fixture
+// in goroutine_lock.go contributes 1 acquires_lock + 1 releases_lock.
+func TestConcurrency_GoroutineLockEdges(t *testing.T) {
+	root := "testdata/concurrency"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	// Find the function-local Mutex IDs for GoroutineLock + GoroutineRWLock.
+	var goroutineLockMu, goroutineRWLockMu string
+	for _, n := range g.Nodes {
+		if n.Type != types.NodeMutex {
+			continue
+		}
+		switch {
+		case strings.HasSuffix(n.QualifiedName, ".GoroutineLock.errMu"):
+			goroutineLockMu = n.ID
+		case strings.HasSuffix(n.QualifiedName, ".GoroutineRWLock.rwMu"):
+			goroutineRWLockMu = n.ID
+		}
+	}
+	if goroutineLockMu == "" {
+		t.Fatal("expected Mutex node for GoroutineLock.errMu (function-local var)")
+	}
+	if goroutineRWLockMu == "" {
+		t.Fatal("expected Mutex node for GoroutineRWLock.rwMu (function-local var)")
+	}
+	acquires := edgesByType(g.Edges, types.EdgeAcquiresLock)
+	releases := edgesByType(g.Edges, types.EdgeReleasesLock)
+	var lockAcq, lockRel, rwlockAcq, rwlockRel int
+	for _, e := range acquires {
+		switch e.Dst {
+		case goroutineLockMu:
+			lockAcq++
+		case goroutineRWLockMu:
+			rwlockAcq++
+		}
+	}
+	for _, e := range releases {
+		switch e.Dst {
+		case goroutineLockMu:
+			lockRel++
+		case goroutineRWLockMu:
+			rwlockRel++
+		}
+	}
+	if lockAcq < 1 {
+		t.Errorf("acquires_lock(GoroutineLock -> errMu): got %d, want >=1", lockAcq)
+	}
+	if lockRel < 1 {
+		t.Errorf("releases_lock(GoroutineLock -> errMu): got %d, want >=1", lockRel)
+	}
+	if rwlockAcq < 1 {
+		t.Errorf("acquires_lock(GoroutineRWLock -> rwMu): got %d, want >=1 (RLock)", rwlockAcq)
+	}
+	if rwlockRel < 1 {
+		t.Errorf("releases_lock(GoroutineRWLock -> rwMu): got %d, want >=1 (RUnlock)", rwlockRel)
 	}
 }
 

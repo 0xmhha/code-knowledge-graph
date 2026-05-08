@@ -76,8 +76,9 @@ func (s *sqliteStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize 
 		}
 	}
 
-	// Edges — chunked
-	er, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence FROM edges`)
+	// Edges — chunked. dispatch_kind (schema 1.7) is the trailing column;
+	// COALESCE'd so pre-1.7 NULL rows scan as empty string.
+	er, err := s.db.Query(`SELECT id, src, dst, type, COALESCE(file_path,''), COALESCE(line,0), count, confidence, COALESCE(dispatch_kind,'') FROM edges`)
 	if err != nil {
 		return err
 	}

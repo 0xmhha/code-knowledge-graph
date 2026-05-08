@@ -85,6 +85,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			out.Edges = append(out.Edges, types.Edge{
 				Src: finalSrc, Dst: finalDst, Type: pr.EdgeType,
 				Line: pr.Line, Count: 1, Confidence: conf,
+				DispatchKind: pr.DispatchKind,
 			})
 		}
 	}
@@ -138,6 +139,16 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 	// scopes (go/types satisfaction queries). Wired here so tests using
 	// LoadAndResolve exercise the same code path as production buildpipe.
 	rg.Edges = append(rg.Edges, EmitImplementsEdges(p.Pkgs(), rg.Nodes)...)
+	// Track C P0: uses_type edges (Function/Method/Struct → Type). Same
+	// post-Resolve location for the same reasons. Cross-package types that
+	// don't have a node in this graph become PendingRefs (q4=A); LoadAndResolve
+	// drops the pending side because tests don't replay them, but the
+	// production buildpipe path persists them via runGoPipeline.
+	usesEdges, _ := EmitUsesTypeEdges(p.Pkgs(), rg.Nodes)
+	rg.Edges = append(rg.Edges, usesEdges...)
+	// Track C P1c: instantiates edges (Function/Method → Type). Walks each
+	// function body for composite literals and `new(T)` calls.
+	rg.Edges = append(rg.Edges, EmitInstantiatesEdges(p.Pkgs(), rg.Nodes)...)
 	return rg, nil
 }
 

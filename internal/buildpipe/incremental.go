@@ -506,15 +506,58 @@ func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		})
 	}
 	rg, err := p.Resolve(results)
-	// Mirror cold path: implements/extends edges need the union of nodes
-	// across the whole module to resolve cross-package satisfaction. Without
-	// this re-emission, dirty files lose their implements rows on every
+	// Mirror cold path: implements/extends + uses_type + instantiates edges
+	// need the union of nodes across the whole module to resolve cross-package
+	// satisfaction. Without re-emission, dirty files lose those rows on every
 	// incremental build (those edges were dropped by DeleteEdgesByType in
 	// runIncremental step (1) and nothing repopulates them).
 	if err == nil && rg != nil {
 		implEdges := gop.EmitImplementsEdges(p.Pkgs(), rg.Nodes)
 		rg.Edges = append(rg.Edges, implEdges...)
 		log.Debug("implements emitted (incremental)", "count", len(implEdges))
+		// Track C P0 (uses_type) — same wiring as cold path. Pending refs
+		// for dirty files surface as additional dirtyPending rows so the
+		// next partial build picks them up; cached files' uses_type pending
+		// refs already live in DB and get reloaded above.
+		usesEdges, usesPending := gop.EmitUsesTypeEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, usesEdges...)
+		log.Debug("uses_type emitted (incremental)", "edges", len(usesEdges), "pending", len(usesPending))
+		if len(usesPending) > 0 {
+			// Anchor pending refs to the file owning each SRC node; only
+			// dirtyFiles' rows are persisted (cached files were already
+			// resolved in the cold build that produced this graph).
+			dirtySet := make(map[string]bool, len(dirtyFiles))
+			for _, p := range dirtyFiles {
+				dirtySet[p] = true
+			}
+			srcFile := make(map[string]string, len(rg.Nodes))
+			for _, n := range rg.Nodes {
+				switch n.Type {
+				case types.NodeFunction, types.NodeMethod, types.NodeStruct:
+					if _, exists := srcFile[n.ID]; !exists {
+						srcFile[n.ID] = n.FilePath
+					}
+				}
+			}
+			for _, pr := range usesPending {
+				rel := srcFile[pr.SrcID]
+				if rel == "" || !dirtySet[rel] {
+					continue
+				}
+				dirtyPending = append(dirtyPending, persist.PendingRefRow{
+					FilePath:    rel,
+					SrcID:       pr.SrcID,
+					TargetQName: pr.TargetQName,
+					EdgeType:    string(pr.EdgeType),
+					Line:        pr.Line,
+					HintFile:    pr.HintFile,
+				})
+			}
+		}
+		// Track C P1c (instantiates) — same wiring as cold path.
+		instEdges := gop.EmitInstantiatesEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, instEdges...)
+		log.Debug("instantiates emitted (incremental)", "count", len(instEdges))
 	}
 	return rg, dirtyPending, errs, err
 }
@@ -530,11 +573,12 @@ func pendingRefsFromRows(rows []persist.PendingRefRow) []parse.PendingRef {
 	out := make([]parse.PendingRef, len(rows))
 	for i, r := range rows {
 		out[i] = parse.PendingRef{
-			SrcID:       r.SrcID,
-			EdgeType:    types.EdgeType(r.EdgeType),
-			TargetQName: r.TargetQName,
-			HintFile:    r.HintFile,
-			Line:        r.Line,
+			SrcID:        r.SrcID,
+			EdgeType:     types.EdgeType(r.EdgeType),
+			TargetQName:  r.TargetQName,
+			HintFile:     r.HintFile,
+			Line:         r.Line,
+			DispatchKind: r.DispatchKind,
 		}
 	}
 	return out

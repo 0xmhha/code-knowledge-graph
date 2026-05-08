@@ -223,6 +223,68 @@ func TestPendingRefs_PrimaryKeyDeduplicates(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// TestMigrate_DispatchKindIdempotent (Track C P1b, schema 1.7)
+// ---------------------------------------------------------------------------
+
+// TestMigrate_DispatchKindIdempotent verifies that calling Migrate() against
+// a freshly-created DB (which already has dispatch_kind via the schema.sql
+// CREATE TABLE) is a no-op — the ALTER ADD COLUMN inside ensureDispatchKindColumn
+// must detect the column and return without error.
+//
+// Also verifies that dispatch_kind round-trips: writing an `invokes` edge
+// with a non-empty dispatch_kind and reading it back via QueryEdgesByType
+// preserves the value.
+func TestMigrate_DispatchKindIdempotent(t *testing.T) {
+	s := newFixtureStore(t)
+	// Re-run Migrate — must be idempotent. ensureDispatchKindColumn detects
+	// the existing column via PRAGMA table_info and returns without error.
+	type migrator interface{ Migrate() error }
+	m, ok := s.(migrator)
+	if !ok {
+		t.Fatalf("store does not implement Migrate()")
+	}
+	if err := m.Migrate(); err != nil {
+		t.Fatalf("re-Migrate (idempotency): %v", err)
+	}
+	// Insert one invokes edge with each dispatch_kind value, plus a static
+	// `calls` edge with empty dispatch_kind.
+	edges := []types.Edge{
+		{Src: "funcA00000000000", Dst: "funcB00000000000",
+			Type: types.EdgeCalls, Count: 1, Confidence: types.ConfExtracted},
+		{Src: "funcA00000000000", Dst: "funcB00000000000",
+			Type: types.EdgeInvokes, Count: 1, Confidence: types.ConfExtracted,
+			DispatchKind: "interface_method"},
+		{Src: "funcA00000000000", Dst: "funcA00000000000",
+			Type: types.EdgeInvokes, Count: 1, Confidence: types.ConfExtracted,
+			DispatchKind: "closure"},
+	}
+	if err := s.InsertEdges(edges); err != nil {
+		t.Fatalf("InsertEdges: %v", err)
+	}
+	got, err := s.QueryEdgesByType(string(types.EdgeInvokes))
+	if err != nil {
+		t.Fatalf("QueryEdgesByType: %v", err)
+	}
+	byKind := map[string]int{}
+	for _, e := range got {
+		byKind[e.DispatchKind]++
+	}
+	if byKind["interface_method"] != 1 {
+		t.Errorf("interface_method invokes: got %d, want 1", byKind["interface_method"])
+	}
+	if byKind["closure"] != 1 {
+		t.Errorf("closure invokes: got %d, want 1", byKind["closure"])
+	}
+	// Static `calls` edges must have empty dispatch_kind on read-back.
+	calls, _ := s.QueryEdgesByType(string(types.EdgeCalls))
+	for _, e := range calls {
+		if e.DispatchKind != "" {
+			t.Errorf("calls edge has dispatch_kind=%q, want empty", e.DispatchKind)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // TestDistinctFilePaths
 // ---------------------------------------------------------------------------
 

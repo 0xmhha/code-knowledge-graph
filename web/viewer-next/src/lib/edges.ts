@@ -132,6 +132,12 @@ export const DEFAULT_EDGE_TYPES: ReadonlyArray<string> = [
   'blame',
 ];
 
+// Track C P0/P1c (uses_type / instantiates) are intentionally OFF by default:
+// they fire densely on symbol-rich graphs (~500 + ~300 on the self-graph),
+// which would dominate the boot view's edge count and obscure the call-flow
+// signal that's the primary reading aid. Users opt in via the G2 group toggle
+// in the filter UI.
+
 // All known types — used by the EdgeTypeFilters component to render checkboxes.
 // Derived from EDGE_STYLE so there is a single source of truth for the key set.
 export const ALL_EDGE_TYPES: ReadonlyArray<string> =

@@ -20,6 +20,7 @@ import (
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // parseWorkers caps the parallel parser goroutine count. Capped at 8 to keep
@@ -132,12 +133,13 @@ func collectPendingRefs(results []*parse.ParseResult) []persist.PendingRefRow {
 		}
 		for _, pr := range r.Pending {
 			out = append(out, persist.PendingRefRow{
-				FilePath:    rel,
-				SrcID:       pr.SrcID,
-				TargetQName: pr.TargetQName,
-				EdgeType:    string(pr.EdgeType),
-				Line:        pr.Line,
-				HintFile:    pr.HintFile,
+				FilePath:     rel,
+				SrcID:        pr.SrcID,
+				TargetQName:  pr.TargetQName,
+				EdgeType:     string(pr.EdgeType),
+				Line:         pr.Line,
+				HintFile:     pr.HintFile,
+				DispatchKind: pr.DispatchKind,
 			})
 		}
 	}
@@ -177,6 +179,47 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		implEdges := gop.EmitImplementsEdges(p.Pkgs(), rg.Nodes)
 		rg.Edges = append(rg.Edges, implEdges...)
 		log.Debug("implements emitted", "count", len(implEdges))
+		// Track C P0: uses_type post-pass. Same wiring rationale as
+		// implements above. Cross-package types without a node (stdlib,
+		// vendored deps) become PendingRefs — appended to the pending
+		// slice so the cold path persists them via InsertPendingRefs (q4=A).
+		usesEdges, usesPending := gop.EmitUsesTypeEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, usesEdges...)
+		log.Debug("uses_type emitted", "edges", len(usesEdges), "pending", len(usesPending))
+		// Anchor the pending refs to the file the SRC node was defined in,
+		// so the partial-rebuild path's PendingRefsByFilePath query reaches
+		// them. Build the SRC-ID → file_path lookup once.
+		if len(usesPending) > 0 {
+			srcFile := make(map[string]string, len(rg.Nodes))
+			for _, n := range rg.Nodes {
+				switch n.Type {
+				case types.NodeFunction, types.NodeMethod, types.NodeStruct:
+					if _, exists := srcFile[n.ID]; !exists {
+						srcFile[n.ID] = n.FilePath
+					}
+				}
+			}
+			for _, pr := range usesPending {
+				rel := srcFile[pr.SrcID]
+				if rel == "" {
+					continue // SRC outside this build — skip
+				}
+				pending = append(pending, persist.PendingRefRow{
+					FilePath:    rel,
+					SrcID:       pr.SrcID,
+					TargetQName: pr.TargetQName,
+					EdgeType:    string(pr.EdgeType),
+					Line:        pr.Line,
+					HintFile:    pr.HintFile,
+				})
+			}
+		}
+		// Track C P1c: instantiates post-pass. No pending_refs path —
+		// composite-literal targets without a node in the graph are silently
+		// dropped (the noise floor would be higher than the value).
+		instEdges := gop.EmitInstantiatesEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, instEdges...)
+		log.Debug("instantiates emitted", "count", len(instEdges))
 	}
 	return rg, pending, errs, err
 }

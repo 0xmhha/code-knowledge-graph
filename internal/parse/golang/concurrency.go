@@ -513,6 +513,15 @@ func (v *declVisitor) emitChannelFromMake(parentID string, call *ast.CallExpr) s
 // for any channel sends/recvs whose channel variable is in chanVarIDs.
 // Only handles inline `go func() { ... }()` literals; named-function goroutines
 // require cross-file resolution and are silently skipped.
+//
+// Track C P1a: also emits acquires_lock / releases_lock edges for Lock /
+// Unlock / RLock / RUnlock CallExprs nested inside the goroutine body. The
+// outer body walker (emitFunctionBodyPos) returns false on *ast.GoStmt to
+// avoid double-walking, which previously dropped every lock call inside a
+// goroutine literal (the canonical "spawn worker, lock counter" pattern).
+// Lock edges are anchored at the *enclosing function* (parentFuncID) — same
+// semantics as the non-goroutine path — because that's the symbol that
+// owns the critical section's start/end pair.
 func (v *declVisitor) emitGoroutineChannelEdges(goroutineID string, call *ast.CallExpr) {
 	if call == nil {
 		return
@@ -520,6 +529,19 @@ func (v *declVisitor) emitGoroutineChannelEdges(goroutineID string, call *ast.Ca
 	fn, ok := call.Fun.(*ast.FuncLit)
 	if !ok {
 		return // named-function goroutines: cross-file resolution needed
+	}
+	// parentFuncID is the function that contains this goroutine. We don't
+	// have it threaded as a parameter (refactor-cost vs. value), so derive
+	// it from the goroutine node's edge: every Goroutine has a `spawns`
+	// edge from its parent. Linear scan is fine here — emits per goroutine
+	// are bounded by the body's call density. We recover the parent by
+	// looking up the most-recent `spawns` edge whose Dst is goroutineID.
+	parentFuncID := ""
+	for i := len(v.edges) - 1; i >= 0; i-- {
+		if v.edges[i].Type == types.EdgeSpawns && v.edges[i].Dst == goroutineID {
+			parentFuncID = v.edges[i].Src
+			break
+		}
 	}
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
 		switch s := n.(type) {
@@ -546,6 +568,14 @@ func (v *declVisitor) emitGoroutineChannelEdges(goroutineID string, call *ast.Ca
 						})
 					}
 				}
+			}
+		case *ast.CallExpr:
+			// Track C P1a: lock edges inside goroutine bodies. Anchored on
+			// parentFuncID (the function that spawned the goroutine), which
+			// matches the non-goroutine path emitted by maybeEmitLockEdge.
+			// No-op when parentFuncID couldn't be recovered (defensive).
+			if parentFuncID != "" {
+				v.maybeEmitLockEdge(parentFuncID, s)
 			}
 		}
 		return true
