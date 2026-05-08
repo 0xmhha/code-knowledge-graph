@@ -11,7 +11,7 @@ import (
 func TestCKGIgnoreMatch(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".ckgignore"),
-		[]byte("vendor/\n*.generated.*\nbuild/\n"), 0o644); err != nil {
+		[]byte("vendor/\nnode_modules/\n*.generated.*\nbuild/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	c, err := detect.LoadCKGIgnore(dir)
@@ -28,6 +28,16 @@ func TestCKGIgnoreMatch(t *testing.T) {
 		{"build/main.js", true},
 		{"src/foo.go", false},
 		{"README.md", false},
+		// Nested directory patterns: a "dir/" entry must match the dir at
+		// any depth, not just the top level. Regression guard for the
+		// node_modules-not-ignored bug that polluted the self-graph with
+		// 270k vendor TS nodes.
+		{"web/viewer-next/node_modules/foo.ts", true},
+		{"web/viewer-next/node_modules", true},
+		{"a/b/c/vendor/lib.go", true},
+		// Pattern as a substring should NOT match (segment boundaries).
+		{"src/node_modulesx/foo.ts", false},
+		{"src/xnode_modules/foo.ts", false},
 	}
 	for _, tc := range cases {
 		if got := c.Match(tc.rel); got != tc.want {

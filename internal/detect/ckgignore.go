@@ -51,8 +51,19 @@ func matchPattern(pat, rel string) bool {
 	dirPat := strings.HasSuffix(pat, "/")
 	if dirPat {
 		pat = strings.TrimSuffix(pat, "/")
-		// match if any path component equals pat, or rel starts with pat/
-		if strings.HasPrefix(rel, pat+"/") || rel == pat {
+		// Match if any path component equals pat. Three cases:
+		//   - rel == pat                           (the dir itself, top-level)
+		//   - rel starts with pat+"/"              (top-level dir; child)
+		//   - rel contains "/"+pat+"/"             (nested dir at any depth)
+		//   - rel ends with "/"+pat                (the dir itself, nested)
+		// The nested cases matter because gitignore-style "node_modules/"
+		// must skip web/viewer-next/node_modules/, not just a top-level
+		// node_modules. Without the segment match the walker descends into
+		// every nested node_modules and floods the graph with vendor JS.
+		if rel == pat || strings.HasPrefix(rel, pat+"/") {
+			return true
+		}
+		if strings.Contains(rel, "/"+pat+"/") || strings.HasSuffix(rel, "/"+pat) {
 			return true
 		}
 		return false

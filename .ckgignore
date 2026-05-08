@@ -2,6 +2,8 @@ vendor/
 node_modules/
 dist/
 build/
+.next/
+out/
 *.generated.*
 tests/fixtures/
 # *_test.go  (uncomment to exclude Go test files)
