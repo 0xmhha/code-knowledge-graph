@@ -554,7 +554,36 @@ html, body {
   gap: 6px;
   align-items: center;
 }
-.trace-controls h4 { font-size: 11px; margin: 0 6px 0 0; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
+.trace-controls h4 {
+  font-size: 11px;
+  margin: 0 6px 0 0;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  /* When no anchor is active the heading carries the "click a node
+     first" hint; allow it to wrap rather than overflow the panel. */
+  flex: 1 1 100%;
+  min-width: 0;
+}
+/* Disabled state: anchor-less trace controls. Buttons are still
+   present (so the user sees what they will do once anchored) but
+   visibly inert + native disabled to block clicks. */
+.trace-controls.is-disabled button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.trace-controls.is-disabled h4 {
+  color: #888;
+  font-style: italic;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.trace-controls .trace-count {
+  margin-left: auto;
+  color: #7ab8ff;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
 .trace-controls button {
   background: #232529;
   color: #e6e7e9;
