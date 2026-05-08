@@ -157,6 +157,26 @@ html, body {
    relied on DOM order alone, which broke when the force-graph wrapper
    formed a stacking context (transforms, will-change) and locally
    raised the canvas above sibling grid cells in some browsers. */
+/* Panel resize handle — sits on the panel's left edge as a 6px
+   transparent strip; on hover it paints a faint cyan vertical line
+   matching the panel border-left so users see the affordance. The
+   actual drag logic lives in App.tsx (onResizeStart). */
+.panel-resizer {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background 100ms ease;
+}
+.panel-resizer:hover,
+.panel-resizer:active {
+  background: rgba(68, 170, 255, 0.45);
+}
+
 .panel {
   grid-column: 2;
   grid-row: 3;

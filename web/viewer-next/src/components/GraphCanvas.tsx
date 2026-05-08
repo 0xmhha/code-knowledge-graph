@@ -238,6 +238,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   const nodeVisibility = (node: GraphNode): boolean => {
     if (isolatedCommunity != null && node.community_id !== isolatedCommunity) return false;
+    // Community legend toggle = visibility off, not just dim. Earlier
+    // builds dropped the node opacity to 0.18 which read as "still
+    // there but quiet"; user feedback was that off should mean fully
+    // hidden until toggled back on. dimmedCommunities is the legend's
+    // toggle-off set. brightness/dim role is now redundant for nodes
+    // (still applies to edges connected to a hidden node, which won't
+    // render anyway because both endpoints fail nodeVisibility).
+    if (node.community_id != null && dimmedCommunities.has(node.community_id)) return false;
     return useStore.getState().visibleIds.has(node.id);
   };
 
@@ -266,9 +274,32 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     ctx.fill();
     const dist = focusDistance.get(node.id);
     if (dist === 0) {
+      // Anchor / selected node ring: cyan accent + double pass for
+      // visibility against any node fill colour. Earlier 2px white was
+      // washed out next to bright community palettes — users couldn't
+      // tell which node they'd just clicked. Cyan #00ddff is distinct
+      // from every entry in EDGE_STYLE / community palette.
       ctx.globalAlpha = 1;
+      const ringR = Math.max(2, r) + 4 / globalScale;
+      ctx.strokeStyle = '#00ddff';
+      ctx.lineWidth = 3 / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x ?? 0, node.y ?? 0, ringR, 0, 2 * Math.PI);
+      ctx.stroke();
+      // Inner thin white ring boosts contrast on dark backgrounds where
+      // cyan alone bleeds into nearby star-cluster glow.
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2 / globalScale;
+      ctx.lineWidth = 1 / globalScale;
+      ctx.beginPath();
+      ctx.arc(node.x ?? 0, node.y ?? 0, ringR - 2 / globalScale, 0, 2 * Math.PI);
+      ctx.stroke();
+    } else if (dist === 1) {
+      // 1-hop neighbour: subtle accent ring so the user can read the
+      // immediate neighbourhood at a glance. 2-hop+ stays unringed so
+      // the focus stays on dist=0 and dist=1.
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = '#7ab8ff';
+      ctx.lineWidth = 1.2 / globalScale;
       ctx.beginPath();
       ctx.arc(node.x ?? 0, node.y ?? 0, Math.max(2, r) + 2 / globalScale, 0, 2 * Math.PI);
       ctx.stroke();

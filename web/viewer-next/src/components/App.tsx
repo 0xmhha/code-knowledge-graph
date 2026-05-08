@@ -42,6 +42,19 @@ export default function App() {
     // it to '0'. Any other value (null, '1', leftover) → open.
     return localStorage.getItem('ckg.panelOpen') === '0';
   });
+  // Panel column width (px). Persisted across sessions. Bounds: 240
+  // (legibility floor, matches CSS clamp min) and 800 (cap so the
+  // canvas always retains a usable share). Default 360 mirrors the
+  // CSS clamp max so first paint is identical to the pre-resize
+  // experience.
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof localStorage === 'undefined') return 360;
+    const raw = parseInt(localStorage.getItem('ckg.panelWidth') ?? '', 10);
+    if (!Number.isFinite(raw)) return 360;
+    return Math.min(800, Math.max(240, raw));
+  });
+  const panelWidthRef = useRef(panelWidth);
+  panelWidthRef.current = panelWidth;
   const [helpOpen, setHelpOpen] = useState(false);
 
   const forceGraphRef = useRef<GraphCanvasHandle>(null);
@@ -160,6 +173,30 @@ export default function App() {
       }
     });
   }, [api, navigate, commit, setAnchor, setSelected]);
+
+  // Re-trace when traceDirection / traceDepth change while an anchor is
+  // active. Without this effect, the TraceControls buttons updated the
+  // store but the canvas only reflected the change at the next
+  // node-click — users perceived the controls as inert. Now flipping
+  // direction or depth on an anchored view immediately re-runs trace
+  // BFS and commits the new visible set.
+  const traceDirection = useStore(s => s.traceDirection);
+  const traceDepth = useStore(s => s.traceDepth);
+  useEffect(() => {
+    const s = useStore.getState();
+    if (!api || !s.anchorId) return;
+    let cancelled = false;
+    (async () => {
+      const g = await traceFromNode(api, s.anchorId!, {
+        direction: traceDirection,
+        depth: traceDepth,
+      });
+      if (cancelled) return;
+      setAnchor(s.anchorId!, traceDepth);
+      commit(g);
+    })();
+    return () => { cancelled = true; };
+  }, [api, traceDirection, traceDepth, commit, setAnchor]);
 
   const onDepthIn = useCallback(async () => {
     if (!api) return;
@@ -334,8 +371,43 @@ export default function App() {
 
   const apiBox = useMemo(() => api, [api]);
 
+  // Panel resize drag handler. Mouse-down on .panel-resizer captures the
+  // pointer; mousemove updates panelWidth in [240, 800] (matching the
+  // CSS clamp bounds); mouseup persists the final value to localStorage.
+  // useRef keeps the closure reading the live width without re-binding
+  // listeners on every state update.
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = panelWidthRef.current;
+    const onMove = (ev: MouseEvent) => {
+      // Panel is on the right; dragging the handle leftward grows it.
+      const dx = startX - ev.clientX;
+      const next = Math.min(800, Math.max(240, startWidth + dx));
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      try {
+        localStorage.setItem('ckg.panelWidth', String(panelWidthRef.current));
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, []);
+
+  // Inline grid-template-columns is applied only when the panel is
+  // open. With panelHidden, .no-panel CSS rule (1fr 0px) takes over —
+  // overriding it with inline style would defeat the hide.
+  const appStyle = panelHidden
+    ? undefined
+    : { gridTemplateColumns: `minmax(0, 1fr) ${panelWidth}px` };
+
   return (
-    <div id="app" className={panelHidden ? 'no-panel' : ''}>
+    <div id="app"
+         className={panelHidden ? 'no-panel' : ''}
+         style={appStyle}>
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* FirstTimeOverlay self-gates: renders nothing once dismissed.
           Mount only after api is ready so the overlay doesn't appear
@@ -373,6 +445,17 @@ export default function App() {
         )}
       </div>
       <div className="panel">
+        {/* Resize handle on the panel's left edge. Hover paints a
+            cyan strip; drag adjusts the column width. Hidden when the
+            panel itself is hidden (parent display:none cascades). */}
+        <div
+          className="panel-resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panel column"
+          onMouseDown={onResizeStart}
+          title="Drag to resize panel"
+        />
         <NodeList onPick={onListPick} apiReady={apiBox !== null} />
         {apiBox && <NodeDetail api={apiBox} />}
         <TraceControls />
