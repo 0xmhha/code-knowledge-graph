@@ -158,7 +158,7 @@ to ID composition (`parse.MakeID`), edge type enumeration
 - not change `nodes(id)` or `edges(id)` PK shape;
 - not change any existing Node row's columns;
 - not require a backfill of pre-existing rows;
-- still let an old graph.db open under a 1.7-aware binary (graceful
+- still let an old graph.db open under a 1.8-aware binary (graceful
   zero-Hunk read).
 
 The design therefore reuses `nodes`, `edges`, and `blobs` as-is and
@@ -252,13 +252,13 @@ UI, identical to `changed_in`'s policy.
 ### 2.6 Schema version bump
 
 `internal/buildpipe/cache.go:42` defines `const SchemaVersion = "1.6"`.
-Hunk graph bumps this to **"1.7"**. The doc comment around it
+Hunk graph bumps this to **"1.8"**. The doc comment around it
 (`internal/buildpipe/cache.go:23-42`) gets a new paragraph noting:
 
-> Bumped from "1.6" to "1.7" by Track F (Hunk graph): `Hunk` nodes plus
+> Bumped from "1.6" to "1.8" by Track F (Hunk graph) — coordinated with Track C which already bumped 1.6→1.7 for dispatch_kind: `Hunk` nodes plus
 > `has_hunk` / `modifies` / `adjacent` edges are emitted by the
-> post-Build temporal pass; pre-1.7 DBs are missing those rows so the
-> first 1.7 build must run cold. The unified-diff blobs use the existing
+> post-Build temporal pass; pre-1.8 DBs are missing those rows so the
+> first 1.8 build must run cold. The unified-diff blobs use the existing
 > `blobs` table, so no new SQL DDL is required — the bump exists only
 > to invalidate stale incremental caches.
 
@@ -273,7 +273,7 @@ shape already supports it without code changes.)
 
 ### 2.7 Read-side compatibility
 
-Pre-1.7 DBs opened under a 1.7-aware binary still serve API requests:
+Pre-1.7 DBs opened under a 1.8-aware binary still serve API requests:
 
 - `GET /api/nodes?parent=…`: Hunk nodes don't exist → response unchanged.
 - `POST /api/edges`: returns whatever edges exist; `has_hunk`/`modifies`/
@@ -374,7 +374,7 @@ sees the full CodeNode set in memory, no DB round-trip required.
 
 ### 3.5 Cache and incremental routing
 
-H1 piggy-backs on the existing 1.7 cache invalidation: the first 1.7
+H1 piggy-backs on the existing 1.7 cache invalidation: the first 1.8
 build is cold. After that, two regimes:
 
 - **Short-circuit (all files cached, no removals).** The cache key
@@ -637,7 +637,7 @@ shape just inherits the existing convention.
 
 The existing routes are registered in `internal/server/server.go:65-74`.
 H3 adds three new ones (the schema bump alone allows them — they would
-no-op against pre-1.7 DBs, returning `[]`):
+no-op against pre-1.8 DBs, returning `[]`):
 
 | route | purpose |
 |---|---|
@@ -786,7 +786,7 @@ for now the prefix scan is fine.
 ### 8.5 Build-time impact (re-cap)
 
 H1 adds ~1 second to self-graph build (§3.7). The cold-rebuild policy
-on schema bump (§2.6) means the *first* 1.7 build is full cold —
+on schema bump (§2.6) means the *first* 1.8 build is full cold —
 existing time budget already absorbs that.
 
 ---
@@ -839,7 +839,7 @@ The blob rows fall away via the existing `ON DELETE CASCADE` on
 
 - `docs/SCHEMA.md`: add "Node types (34)" entry for `Hunk`, "Edge types
   (35)" entries for `has_hunk` / `modifies` / `adjacent`, and bump the
-  schema-version header from 1.6 to 1.7.
+  schema-version header from 1.7 to 1.8.
 - `internal/persist/SCHEMA.md`: same bump.
 - `docs/G6-INCREMENTAL-REDESIGN.md`: append a "Hunk graph follow-up"
   section pointing here.
@@ -1132,7 +1132,7 @@ For the engineer who lands this:
    wire into `emitTemporalEdges`; `pkg/types/enums.go` `NodeHunk` +
    `EdgeHasHunk` + `EdgeAdjacent`; `web/viewer-next/src/lib/edges.ts`
    `EDGE_STYLE` + `GRAPH_GROUPS.G6` updates; `internal/buildpipe/cache.go`
-   `SchemaVersion = "1.7"`; unit + golden tests. NOT yet emitting
+   `SchemaVersion = "1.8"`; unit + golden tests. NOT yet emitting
    `modifies`.
 
 2. **PR 2 (H2).** `EdgeModifies`; `buildModifiesEdges` in `temporal.go`;
