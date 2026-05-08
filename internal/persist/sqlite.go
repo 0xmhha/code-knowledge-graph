@@ -467,6 +467,31 @@ func topMetricColumn(metric string) (string, error) {
 	}
 }
 
+// EdgeCountsByType returns total edge count per type across the whole
+// graph. Single GROUP BY query; cheap. Viewer (Track D) uses this to
+// render "G2 Semantic 758" badges so users can see axis weight without
+// a separate scan of the full edges table.
+func (s *sqliteStore) EdgeCountsByType() (map[string]int, error) {
+	rows, err := s.db.Query(`SELECT type, COUNT(*) FROM edges GROUP BY type`)
+	if err != nil {
+		return nil, fmt.Errorf("edge counts by type: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, fmt.Errorf("scan edge count row: %w", err)
+		}
+		out[t] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge count rows: %w", err)
+	}
+	return out, nil
+}
+
 // queryEdgesChunk is the per-chunk size for QueryEdgesForNodes. SQLite's
 // SQLITE_MAX_VARIABLE_NUMBER caps single-statement parameters; default is 999
 // on older builds, 32766 on modernc.org/sqlite — but go-stablenet's 217 K

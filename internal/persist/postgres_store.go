@@ -704,6 +704,29 @@ func (s *pgStore) AllEdges() ([]types.Edge, error) {
 	return scanPGEdges(rows)
 }
 
+// EdgeCountsByType returns total edge count per type across the whole
+// graph (PG mirror of sqlite.go EdgeCountsByType — see there for rationale).
+func (s *pgStore) EdgeCountsByType() (map[string]int, error) {
+	rows, err := s.pool.Query(background, `SELECT type, COUNT(*) FROM edges GROUP BY type`)
+	if err != nil {
+		return nil, fmt.Errorf("edge counts by type: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var t string
+		var n int
+		if err := rows.Scan(&t, &n); err != nil {
+			return nil, fmt.Errorf("scan edge count row: %w", err)
+		}
+		out[t] = n
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate edge count rows: %w", err)
+	}
+	return out, nil
+}
+
 // QueryEdgesForNodes returns every edge that has src OR dst in ids. Chunked
 // by queryEdgesChunk (400) for parity with the SQLite implementation;
 // PostgreSQL doesn't have a hard parameter limit but chunking bounds memory.

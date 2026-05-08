@@ -84,12 +84,29 @@ function GraphPillStrip() {
   const setBulk = useStore(s => s.setEdgeTypeWhitelistBulk);
   const setOnly = useStore(s => s.setEdgeTypeWhitelistOnlyGroup);
   const isolation = useStore(s => s.graphModeIsolation);
+  const edgeCounts = useStore(s => s.edgeCountsByType);
+
+  // groupTotal: sum of edge counts across all edge types in the group.
+  // Renders as the badge next to each pill so the user can read axis
+  // weight at a glance — Track D goal. 0-count groups get a 'g-empty'
+  // marker class so styling can warn (italic / dim / ⚠).
+  const groupTotal = (g: GraphGroupSpec): number => {
+    let n = 0;
+    for (const t of g.edges) n += edgeCounts[t] ?? 0;
+    return n;
+  };
+  // Format big numbers compactly: 13426 → "13.4k", 758 → "758".
+  const fmt = (n: number): string =>
+    n >= 10000 ? `${(n / 1000).toFixed(1)}k`
+    : n >= 1000 ? `${(n / 1000).toFixed(1)}k`
+    : String(n);
 
   return (
     <div className="graph-pills" role="group" aria-label="6-graph axis toggles">
       {GRAPH_GROUPS.map(g => {
         const allOn = groupHasAllEdges(g, whitelist);
         const anyOn = groupHasAnyEdge(g, whitelist);
+        const total = groupTotal(g);
         // In isolation mode "active" means this group's edges are the
         // ENTIRE whitelist — i.e. allOn AND no other group contributes.
         // We approximate "no other group" by checking whitelist size
@@ -111,14 +128,17 @@ function GraphPillStrip() {
             setBulk(g.edges, !allOn);
           }
         };
+        const countSuffix = total === 0
+          ? ' (no edges in this graph)'
+          : ` — ${total.toLocaleString()} edges total`;
         const title = isolation
-          ? `${g.id} ${g.label} — ${g.description}\nClick to focus this graph (replaces whitelist).`
-          : `${g.id} ${g.label} — ${g.description}\nClick to ${allOn ? 'turn all off' : 'turn all on'}.`;
+          ? `${g.id} ${g.label}${countSuffix} — ${g.description}\nClick to focus this graph (replaces whitelist).`
+          : `${g.id} ${g.label}${countSuffix} — ${g.description}\nClick to ${allOn ? 'turn all off' : 'turn all on'}.`;
         return (
           <button
             key={g.id}
             type="button"
-            className={`graph-pill ${cls}`}
+            className={`graph-pill ${cls}${total === 0 ? ' g-empty' : ''}`}
             style={{ borderColor: hex(g.color) }}
             onClick={onClick}
             title={title}
@@ -126,6 +146,9 @@ function GraphPillStrip() {
             <span className="graph-pill-dot" style={{ background: hex(g.color) }} />
             <span className="graph-pill-id">{g.id}</span>
             <span className="graph-pill-label">{g.label}</span>
+            <span className="graph-pill-count">
+              {total === 0 ? '⚠' : fmt(total)}
+            </span>
           </button>
         );
       })}

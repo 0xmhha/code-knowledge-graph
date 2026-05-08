@@ -65,6 +65,12 @@ type StoreReader interface {
 	// Edge queries
 	QueryEdgesByType(t string) ([]types.Edge, error)
 	QueryEdgesForNodes(ids []string) ([]types.Edge, error)
+	// EdgeCountsByType returns total edge count per edge type across the
+	// entire graph (no node filter). Used by viewer Track D to show G1..G6
+	// distribution next to each pill so users can read "G4 has 19 edges
+	// total" at a glance — without it, toggling a sparse axis looks dead
+	// because the canvas barely changes. Result is `map[edge_type] = count`.
+	EdgeCountsByType() (map[string]int, error)
 
 	// Traversal
 	NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error)

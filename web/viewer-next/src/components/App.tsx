@@ -96,6 +96,14 @@ export default function App() {
         }
       } catch (e) { console.warn('manifest fetch failed', e); }
 
+      // Boot-time edge count fetch — total count per edge type across the
+      // whole graph (NOT visibleIds-restricted). Powers EdgeFilters axis-
+      // weight badges. Fail-soft: empty object on error so the UI degrades
+      // to no badges rather than crashing on older backends.
+      a.edgeCounts().then(counts => {
+        if (!cancelled) useStore.getState().setEdgeCountsByType(counts);
+      }).catch((e) => console.warn('edgeCounts fetch failed', e));
+
       const t0 = performance.now();
       const g = await recomputeVisible(a);
       if (cancelled) return;

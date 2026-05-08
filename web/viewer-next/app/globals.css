@@ -512,6 +512,28 @@ html, body {
 }
 .edge-filters .graph-pill-id { color: #7ab8ff; font-weight: 600; }
 .edge-filters .graph-pill-label { color: #cfd0d3; }
+.edge-filters .graph-pill-count {
+  margin-left: 4px;
+  padding: 0 4px;
+  background: #2a2c30;
+  color: #aaa;
+  border-radius: 999px;
+  font-size: 9px;
+  font-family: ui-monospace, monospace;
+}
+/* Empty-axis warning state — rendered on pills whose group has zero
+   edges in the current graph. The ⚠ + amber tint communicates "this
+   axis exists in spec but isn't represented in the data" without
+   blocking the user from clicking (they can still toggle for parity). */
+.edge-filters .graph-pill.g-empty {
+  opacity: 0.5;
+  font-style: italic;
+}
+.edge-filters .graph-pill.g-empty .graph-pill-count {
+  background: #3a3025;
+  color: #f0c060;
+  font-style: normal;
+}
 
 /* ── 6-graph group filter UI (E5) ────────────────────────────────────── */
 .edge-filters .graph-group {

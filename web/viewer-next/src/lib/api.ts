@@ -78,6 +78,12 @@ export interface IAPI {
   // callers should fall back to nodes('') in that case.
   topNodes(metric: TopMetric, limit: number, excludeTypes?: string[]): Promise<GraphNode[]>;
   edges(nodeIds: NodeId[]): Promise<GraphEdge[]>;
+  // edgeCounts returns total edge count per edge type across the entire
+  // graph (no node filter). Powers the viewer's per-group axis weight
+  // badges (G1..G6 next to each pill). Returns {} on backends that
+  // don't expose /api/edges/counts (older serve) so callers can hide
+  // the badges gracefully.
+  edgeCounts(): Promise<Record<string, number>>;
   nodesByIds(ids: NodeId[]): Promise<GraphNode[]>;
   blob(nodeId: NodeId): Promise<string>;
   search(q: string): Promise<GraphNode[]>;
@@ -130,6 +136,14 @@ export class API implements IAPI {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ids: nodeIds }),
     }).then(r => r.json()).then(asArray<GraphEdge>);
+  }
+
+  async edgeCounts(): Promise<Record<string, number>> {
+    const r = await fetch(`${this.base}/api/edges/counts`);
+    if (r.status === 404) return {};
+    if (!r.ok) throw new Error(`/api/edges/counts ${r.status}`);
+    const v = await r.json();
+    return (v && typeof v === 'object') ? v as Record<string, number> : {};
   }
 
   async nodesByIds(ids: NodeId[]): Promise<GraphNode[]> {
@@ -228,6 +242,13 @@ export class StaticAPI implements IAPI {
     const ids = new Set(nodeIds);
     const all = await this.allEdges();
     return all.filter(e => ids.has(e.src) || ids.has(e.dst));
+  }
+
+  async edgeCounts(): Promise<Record<string, number>> {
+    const all = await this.allEdges();
+    const out: Record<string, number> = {};
+    for (const e of all) out[e.type] = (out[e.type] ?? 0) + 1;
+    return out;
   }
 
   async nodesByIds(ids: NodeId[]): Promise<GraphNode[]> {

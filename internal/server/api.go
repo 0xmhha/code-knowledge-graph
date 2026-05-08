@@ -119,6 +119,22 @@ func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.decorateNodes(nodes))
 }
 
+// handleEdgeCounts returns total edge count per type across the whole
+// graph. The viewer's EdgeFilters renders one count badge per CKS group
+// pill (G1..G6) so users see axis weight without manually toggling and
+// counting. Cheap single GROUP BY at the SQL layer; cached client-side.
+func (s *Server) handleEdgeCounts(w http.ResponseWriter, r *http.Request) {
+	counts, err := s.store.EdgeCountsByType()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if counts == nil {
+		counts = map[string]int{}
+	}
+	writeJSON(w, counts)
+}
+
 // handleEdges accepts a JSON body {"ids":[...]} and returns every edge
 // touching any of those IDs as src or dst. Used by the viewer to expand a
 // neighbourhood without preloading the full edge table.

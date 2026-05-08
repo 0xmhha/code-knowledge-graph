@@ -60,6 +60,13 @@ interface State {
   // Perf meter.
   lastRenderMs: number;
 
+  // Total edge count per edge type across the WHOLE graph (not just
+  // visibleIds). Boot fetches this once via /api/edges/counts. Powers
+  // the EdgeFilters per-pill axis-weight badges so users can see
+  // "G4 has 19 edges total" without manually toggling and counting.
+  // Empty object until boot completes (renderers must tolerate that).
+  edgeCountsByType: Record<string, number>;
+
   // ── actions ──────────────────────────────────────────────────────────
   loadNodes: (arr: GraphNode[]) => void;
   addEdges: (arr: GraphEdge[]) => number;
@@ -87,6 +94,7 @@ interface State {
   setEdgeTypeWhitelistOnlyGroup: (group: GraphGroupSpec) => void;
   setGraphModeIsolation: (on: boolean) => void;
   setFirstTimeSeen: (v: boolean) => void;
+  setEdgeCountsByType: (m: Record<string, number>) => void;
   toggleDimCommunity: (c: number) => void;
   setIsolatedCommunity: (c: number | null) => void;
   setTraceDirection: (d: TraceDirection) => void;
@@ -140,6 +148,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   traceDirection: 'both',
   traceDepth: 2,
   lastRenderMs: 0,
+  edgeCountsByType: {},
 
   loadNodes: (arr) => {
     if (!Array.isArray(arr) || arr.length === 0) return;
@@ -236,6 +245,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   },
   setGraphModeIsolation: (on) => set({ graphModeIsolation: on }),
   setFirstTimeSeen: (v) => set({ firstTimeSeen: v }),
+  setEdgeCountsByType: (m) => set({ edgeCountsByType: m }),
   toggleDimCommunity: (c) => {
     const next = new Set(get().dimmedCommunities);
     if (next.has(c)) next.delete(c); else next.add(c);
