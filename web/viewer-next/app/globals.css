@@ -220,6 +220,14 @@ html, body {
   z-index: 1;
 }
 .node-list .listmeta .title { font-size: 11.5px; color: #cfd0d3; font-weight: 600; }
+.node-list .listmeta:hover { background: #1f2329; }
+.node-list .section-arrow {
+  display: inline-block;
+  width: 10px;
+  font-size: 9px;
+  color: #888;
+  margin-right: 2px;
+}
 .node-list .listmeta .count { color: #7ab8ff; }
 .node-list .listmeta .ctx {
   font-size: 10px;

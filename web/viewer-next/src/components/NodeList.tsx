@@ -44,6 +44,28 @@ function NodeListImpl({ onPick, apiReady }: Props) {
   // and gives users a stable package picker independent of pagerank.
   const [packages, setPackages] = useState<GraphNode[]>([]);
   const [pkgExpanded, setPkgExpanded] = useState(false);
+  // Section-open toggles for the two NodeList sections (Packages and
+  // Visible Nodes). Persisted via localStorage so the user's collapse
+  // preference survives reloads. Default both open so first paint
+  // shows the data.
+  const [pkgSectionOpen, setPkgSectionOpen] = useState<boolean>(() => {
+    if (typeof localStorage === 'undefined') return true;
+    return localStorage.getItem('ckg.nodelist.pkgOpen') !== '0';
+  });
+  const [nodesSectionOpen, setNodesSectionOpen] = useState<boolean>(() => {
+    if (typeof localStorage === 'undefined') return true;
+    return localStorage.getItem('ckg.nodelist.nodesOpen') !== '0';
+  });
+  const togglePkg = () => setPkgSectionOpen(v => {
+    const next = !v;
+    try { localStorage.setItem('ckg.nodelist.pkgOpen', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
+  const toggleNodes = () => setNodesSectionOpen(v => {
+    const next = !v;
+    try { localStorage.setItem('ckg.nodelist.nodesOpen', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
 
   useEffect(() => {
     if (!apiReady) return;
@@ -124,17 +146,21 @@ function NodeListImpl({ onPick, apiReady }: Props) {
 
   return (
     <div className="node-list">
-      <div className="listmeta">
-        <div className="title">{titleText} <span className="count">({countText})</span></div>
-        {ctxText && <div className="ctx">{ctxText}</div>}
-      </div>
       {showPackages && (
-        <div className="pkg-section">
-          <div className="pkg-section-header">
+        <div className={`pkg-section${pkgSectionOpen ? '' : ' collapsed'}`}>
+          <div
+            className="pkg-section-header"
+            onClick={togglePkg}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') togglePkg(); }}
+            title={pkgSectionOpen ? 'Collapse Packages section' : 'Expand Packages section'}
+          >
+            <span className="section-arrow">{pkgSectionOpen ? '▼' : '▶'}</span>
             <span>📦 Packages</span>
             <span className="pkg-section-count">{packages.length}</span>
           </div>
-          {visiblePkgs.map(p => (
+          {pkgSectionOpen && visiblePkgs.map(p => (
             <div
               key={p.id}
               className={`pkg-item${p.id === selectedId ? ' selected' : ''}`}
@@ -148,7 +174,7 @@ function NodeListImpl({ onPick, apiReady }: Props) {
               )}
             </div>
           ))}
-          {hiddenPkgs > 0 && (
+          {pkgSectionOpen && hiddenPkgs > 0 && (
             <div
               className="pkg-section-more"
               onClick={() => setPkgExpanded(true)}
@@ -161,7 +187,7 @@ function NodeListImpl({ onPick, apiReady }: Props) {
               show all ({packages.length})
             </div>
           )}
-          {pkgExpanded && packages.length > PKG_PREVIEW && (
+          {pkgSectionOpen && pkgExpanded && packages.length > PKG_PREVIEW && (
             <div
               className="pkg-section-more"
               onClick={() => setPkgExpanded(false)}
@@ -176,22 +202,39 @@ function NodeListImpl({ onPick, apiReady }: Props) {
           )}
         </div>
       )}
-      {items.length === 0 ? (
-        <div style={{ padding: 12, color: '#666', fontSize: 11 }}>
-          {emptyMessage}
+      <div
+        className="listmeta"
+        onClick={toggleNodes}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') toggleNodes(); }}
+        title={nodesSectionOpen ? 'Collapse Visible Nodes section' : 'Expand Visible Nodes section'}
+        style={{ cursor: 'pointer' }}
+      >
+        <div className="title">
+          <span className="section-arrow">{nodesSectionOpen ? '▼' : '▶'}</span>
+          {' '}{titleText} <span className="count">({countText})</span>
         </div>
-      ) : items.map(n => (
-        <div
-          key={n.id}
-          className={`item${n.id === selectedId ? ' selected' : ''}`}
-          title={n.qualified_name ?? ''}
-          onClick={() => onPick(n.id)}
-        >
-          <div className="head"><span className="type">[{n.type}]</span> {n.name ?? n.id}</div>
-          <div className="qname">{n.qualified_name ?? ''}</div>
-          {n.file_path && <div className="file">{n.file_path}:{n.start_line ?? 0}</div>}
-        </div>
-      ))}
+        {ctxText && <div className="ctx">{ctxText}</div>}
+      </div>
+      {nodesSectionOpen && (
+        items.length === 0 ? (
+          <div style={{ padding: 12, color: '#666', fontSize: 11 }}>
+            {emptyMessage}
+          </div>
+        ) : items.map(n => (
+          <div
+            key={n.id}
+            className={`item${n.id === selectedId ? ' selected' : ''}`}
+            title={n.qualified_name ?? ''}
+            onClick={() => onPick(n.id)}
+          >
+            <div className="head"><span className="type">[{n.type}]</span> {n.name ?? n.id}</div>
+            <div className="qname">{n.qualified_name ?? ''}</div>
+            {n.file_path && <div className="file">{n.file_path}:{n.start_line ?? 0}</div>}
+          </div>
+        ))
+      )}
     </div>
   );
 }

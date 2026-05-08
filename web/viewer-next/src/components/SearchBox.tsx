@@ -61,18 +61,24 @@ export default function SearchBox({ api }: Props) {
   useEffect(() => { setSearchQuery(q); }, [q, setSearchQuery]);
 
   // External resets (Home button → store.setState({ searchQuery: '' }))
-  // must visibly clear the input. The store→local sync only fires when
-  // the store ends up at empty, so a user typing mid-search isn't
-  // disrupted (their local q already matches what they're typing). On
-  // empty, we also wipe results so a stale `Set<GraphNode>` doesn't
-  // leak through to NodeList between Home and the next render.
+  // must visibly clear the input. We watch storeQuery only — including
+  // `q` in deps caused a race: when the user typed 'S' both the q-sync
+  // effect (line 61, writes q→store) and this guard ran in the same
+  // render cycle. The guard captured a stale storeQuery (=='') from
+  // the prior render while q had already advanced to 'S', so the
+  // condition `storeQuery==='' && q!==''` fired and reset the input
+  // every keystroke. Reading q via a ref breaks that loop: the effect
+  // only fires on storeQuery transitions (true external resets), not
+  // on every keystroke.
   const storeQuery = useStore(s => s.searchQuery);
+  const qRef = useRef(q);
+  qRef.current = q;
   useEffect(() => {
-    if (storeQuery === '' && q !== '') {
+    if (storeQuery === '' && qRef.current !== '') {
       setQ('');
       setSearchResults([]);
     }
-  }, [storeQuery, q, setSearchResults]);
+  }, [storeQuery, setSearchResults]);
 
   useEffect(() => {
     if (!q.trim()) {
