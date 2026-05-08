@@ -1,12 +1,27 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useStore } from '@/store/store';
-import { traceFromNode } from '@/lib/trace';
+import { useStore, computeFocusDistance } from '@/store/store';
 import type { IAPI, ImpactResult, ImpactNode, ImpactBuckets } from '@/lib/api';
 import type { NodeId } from '@/types';
 
 interface Props { api: IAPI; }
+
+// collectImpactIds flattens an ImpactBuckets payload into a single Set
+// of node ids covering every bucket (callers, type users, distributed,
+// etc.). Used by onImpactItemClick to compute "everything outside this
+// impact subgraph" for dimming. The seed itself + the user-clicked
+// impact item are added too so they stay full-opacity.
+function collectImpactIds(buckets: ImpactBuckets | undefined): Set<NodeId> {
+  const out = new Set<NodeId>();
+  if (!buckets) return out;
+  for (const k of Object.keys(buckets) as Array<keyof ImpactBuckets>) {
+    for (const n of buckets[k] ?? []) {
+      if (n?.id) out.add(n.id);
+    }
+  }
+  return out;
+}
 
 // IMPACT_GROUPS is the canonical display order for the six buckets returned
 // by /api/impact. We keep it co-located with the rendering so a future
@@ -72,34 +87,62 @@ export default function NodeDetail({ api }: Props) {
     return () => { cancelled = true; };
   }, [selectedId, api]);
 
-  // Mirrors App.traceAndCommit semantics so the canvas actually shows
-  // the clicked impact node and its 1-hop neighbours — without this the
-  // detail panel updated but the canvas stayed on the original seed,
-  // confusing the user. Depth=1 because the impact list already supplied
-  // multi-hop context; a deeper trace would just clutter the view.
+  // onImpactItemClick: spotlight the clicked impact node + its
+  // sibling impact subgraph against the rest of the visible canvas.
+  // KEEPS the existing visibleIds intact (no traceFromNode replace) and
+  // sets dimmedNodes to "everything visible NOT in the impact result".
+  // The seed node and the clicked item stay full-opacity, the rest of
+  // the original visible set fades to 0.2 alpha. Impact subgraph
+  // members already in the visible set also stay highlighted.
+  //
+  // Push history first so ← Back can return to the pre-impact view.
   //
   // MUST be declared before the `if (!node) return ...` early-return below
   // — useCallback is a hook, and React requires the same hook order on
   // every render. Putting it after the early return triggered React error
   // #310 ("Rendered fewer hooks than expected") whenever the user clicked
   // a node, because the unselected-state render skipped this hook entirely.
-  const onImpactItemClick = useCallback(async (id: NodeId) => {
-    setSelected(id);
-    const target = useStore.getState().nodes.get(id);
-    if (!target?.qualified_name) {
-      // Node lacks qname, trace would yield 0 results — fall back to
-      // selection-only so the detail pane still updates.
-      return;
-    }
+  const onImpactItemClick = useCallback((id: NodeId) => {
     const s = useStore.getState();
-    const g = await traceFromNode(api, id, {
-      direction: s.traceDirection,
-      depth: 1,
-      edgeTypes: s.edgeTypeWhitelist,
+    // Snapshot current state for the back-button stack BEFORE mutating
+    // anything. Without this the user can't undo an impact-dim click.
+    s.pushHistory({
+      anchorId: s.anchorId,
+      depth: s.depth,
+      selectedId: s.selectedId,
+      visibleRootIds: new Set(s.visibleRootIds),
+      dimmedNodes: new Set(s.dimmedNodes),
+      searchQuery: s.searchQuery,
+      focusDistance: new Map(s.focusDistance),
     });
+
+    setSelected(id);
+
+    // Build the keep-set: every id in the impact result + the seed
+    // (which the user originally selected) + the clicked item itself.
+    // Anything else in visibleIds gets dimmed.
+    const impactIds = collectImpactIds(impact?.impact);
+    impactIds.add(id);
+    if (s.selectedId) impactIds.add(s.selectedId);
+
+    const dim = new Set<NodeId>();
+    for (const vid of s.visibleIds) {
+      if (!impactIds.has(vid)) dim.add(vid);
+    }
+    s.setDimmedNodes(dim);
+
+    // Update focusDistance so the clicked node gets the FOCUS ring on
+    // the canvas — without this the dim works but the user can't tell
+    // which impact item they just clicked. Anchor moves with selection
+    // so depth-in/out from here is meaningful.
     setAnchor(id, 1);
-    commit(g);
-  }, [api, setSelected, setAnchor, commit]);
+    const focus = computeFocusDistance(id, s.edgesBySrc, s.edgesByDst, 2);
+    commit({
+      visibleIds: s.visibleIds,
+      focusDistance: focus,
+      reason: 'list-pick',
+    });
+  }, [impact, setSelected, setAnchor, commit]);
 
   if (!node) {
     // Strong empty-state placeholder. The earlier single muted line read

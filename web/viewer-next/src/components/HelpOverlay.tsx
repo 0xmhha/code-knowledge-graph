@@ -13,6 +13,7 @@ const SECTIONS: Array<{ title: string; rows: Array<[string, string]> }> = [
     rows: [
       ['[', 'depth out'],
       [']', 'depth in'],
+      ['Backspace', 'go back to previous state'],
       ['Home', 'reset to root'],
       ['+  /  =', 'zoom in'],
       ['-', 'zoom out'],

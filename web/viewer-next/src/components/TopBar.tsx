@@ -9,11 +9,19 @@ interface Props {
   srcInfo: string;
   onTogglePanel: () => void;
   onHome: () => void;
+  onBack: () => void;
   onHelpClick: () => void;
   panelOpen: boolean;
+  // canGoBack mirrors store.historyStack.length > 0 — passed in by the
+  // parent so the disabled state is reactive without TopBar needing its
+  // own selector subscription. Same pattern as panelOpen.
+  canGoBack: boolean;
 }
 
-export default function TopBar({ api, srcInfo, onTogglePanel, onHome, onHelpClick, panelOpen }: Props) {
+export default function TopBar({
+  api, srcInfo, onTogglePanel, onHome, onBack, onHelpClick,
+  panelOpen, canGoBack,
+}: Props) {
   const viewMode = useStore(s => s.viewMode);
   const colorMode = useStore(s => s.colorMode);
   const setViewMode = useStore(s => s.setViewMode);
@@ -23,6 +31,22 @@ export default function TopBar({ api, srcInfo, onTogglePanel, onHome, onHelpClic
     <div className="topbar">
       <strong>ckg</strong>
       <SearchBox api={api} />
+      {/* ← Back is between SearchBox and Home. Disabled when no history
+          is captured. Amber accent distinguishes it from Home (blue):
+          Home resets EVERYTHING while Back unwinds the most recent
+          navigation only. Keyboard: Backspace (when no input focused)
+          fires the same handler. */}
+      <button
+        type="button"
+        className="topbar-back"
+        title={canGoBack
+          ? 'Go back to the previous navigation (Backspace)'
+          : 'No previous state — navigate the graph to populate history'}
+        onClick={onBack}
+        disabled={!canGoBack}
+      >
+        ← Back
+      </button>
       {/* Home is always visible. Click resets exploration/filter state
           to its initial form (anchor/selection/search/trace/whitelist
           /isolation/community-dim) while preserving display preferences.

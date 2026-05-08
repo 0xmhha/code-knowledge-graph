@@ -16,9 +16,11 @@ import NodeList from './NodeList';
 import NodeDetail from './NodeDetail';
 import Legend from './Legend';
 import EdgeTypeFilters from './EdgeTypeFilters';
+import NodeTypeFilters from './NodeTypeFilters';
 import TraceControls from './TraceControls';
 import { DEFAULT_EDGE_TYPES, GRAPH_GROUPS, edgeToGroup } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
+import type { HistorySnapshot } from '@/store/store';
 
 const DEPTH_MAX = 6;
 const FONT_SIZES: Record<string, number> = { S: 0.85, M: 1.0, L: 1.2 };
@@ -68,6 +70,27 @@ export default function App() {
   const setFontSize = useStore(s => s.setFontSize);
   const setTraceDirection = useStore(s => s.setTraceDirection);
   const setTraceDepth = useStore(s => s.setTraceDepth);
+  const pushHistory = useStore(s => s.pushHistory);
+  const popHistory = useStore(s => s.popHistory);
+  const clearDimmedNodes = useStore(s => s.clearDimmedNodes);
+  const historyDepth = useStore(s => s.historyStack.length);
+
+  // snapshotCurrent: build a HistorySnapshot from the live store. Called
+  // BEFORE each navigation that should be undoable. Captured by value
+  // (Set/Map copies) so the popped snapshot can't be mutated by later
+  // navigation that happens to share the same reference.
+  const snapshotCurrent = useCallback((): HistorySnapshot => {
+    const s = useStore.getState();
+    return {
+      anchorId: s.anchorId,
+      depth: s.depth,
+      selectedId: s.selectedId,
+      visibleRootIds: new Set(s.visibleRootIds),
+      dimmedNodes: new Set(s.dimmedNodes),
+      searchQuery: s.searchQuery,
+      focusDistance: new Map(s.focusDistance),
+    };
+  }, []);
 
   // Boot: detect mode, restore prefs, fetch manifest, push initial commit.
   useEffect(() => {
@@ -123,6 +146,12 @@ export default function App() {
   const traceAndCommit = useCallback(async (id: NodeId) => {
     if (!api) return;
     const s = useStore.getState();
+    // History push BEFORE the navigation mutates state, so ← Back can
+    // restore the pre-click view. Clicking a graph node also clears the
+    // dim set — the user is starting a new exploration arc and the
+    // previous Impact spotlight is no longer the relevant context.
+    pushHistory(snapshotCurrent());
+    clearDimmedNodes();
     setSelected(id);
     await navigate(async () => {
       // edgeTypes intentionally omitted: trace walks all incident edges
@@ -180,7 +209,7 @@ export default function App() {
         }
       }
     });
-  }, [api, navigate, commit, setAnchor, setSelected]);
+  }, [api, navigate, commit, setAnchor, setSelected, pushHistory, snapshotCurrent, clearDimmedNodes]);
 
   // Re-trace when traceDirection / traceDepth change while an anchor is
   // active. Without this effect, the TraceControls buttons updated the
@@ -235,13 +264,19 @@ export default function App() {
 
   const onHome = useCallback(async () => {
     if (!api) return;
+    // Push the current navigation slice so ← Back can return to it.
+    // Home is one of the most aggressive resets in the UI; without
+    // history capture the user has no recourse if they hit it by
+    // accident on a deep exploration.
+    pushHistory(snapshotCurrent());
     // Home = "reset to initial state". Wipe exploration + filter state
     // (anchor, selection, search, trace settings, edge-type whitelist,
-    // graph-isolation, community dim/isolate) but preserve the user's
-    // display preferences (viewMode, colorMode, fontSize, panel open
-    // state, edgeFiltersCollapsed) and one-shot flags (firstTimeSeen).
-    // Zustand setState merges partials atomically so subscribers
-    // re-render once instead of N times across individual setters.
+    // graph-isolation, community dim/isolate, dimmedNodes) but preserve
+    // the user's display preferences (viewMode, colorMode, fontSize,
+    // panel open state, edgeFiltersCollapsed) and one-shot flags
+    // (firstTimeSeen). Zustand setState merges partials atomically so
+    // subscribers re-render once instead of N times across individual
+    // setters.
     useStore.setState({
       anchorId: null,
       depth: 0,
@@ -252,6 +287,7 @@ export default function App() {
       graphModeIsolation: false,
       dimmedCommunities: new Set<number>(),
       isolatedCommunity: null,
+      dimmedNodes: new Set<NodeId>(),
       traceDirection: 'both',
       traceDepth: 2,
     });
@@ -259,7 +295,7 @@ export default function App() {
       const g = await recomputeVisible(api);
       commit(g);
     });
-  }, [api, navigate, commit]);
+  }, [api, navigate, commit, pushHistory, snapshotCurrent]);
 
   // Sidebar list pick — keep the anchor + visible set, but make the
   // canvas highlight the picked node so the user can actually see what
@@ -279,6 +315,9 @@ export default function App() {
   //      pulled into view; the focus halo alone wouldn't help if the
   //      picked dot is far outside the camera frustum.
   const onListPick = useCallback(async (id: NodeId) => {
+    // List-pick is undoable too: capture the pre-click slice so ← Back
+    // returns to whatever was selected (or root view) before this pick.
+    pushHistory(snapshotCurrent());
     setSelected(id);
     if (!api) return;
     const s = useStore.getState();
@@ -290,7 +329,36 @@ export default function App() {
     const focus = computeFocusDistance(id, after.edgesBySrc, after.edgesByDst, 2);
     commit({ visibleIds: after.visibleIds, focusDistance: focus, reason: 'list-pick' });
     forceGraphRef.current?.centerOnNode(id);
-  }, [api, setSelected, commit]);
+  }, [api, setSelected, commit, pushHistory, snapshotCurrent]);
+
+  // onBack: pop the last history snapshot and apply it. Disabled when
+  // the stack is empty (TopBar gates on historyStack.length). The
+  // navigate() wrapper ensures the bottom-bar render-time meter
+  // updates so users see latency feedback on Back too.
+  const onBack = useCallback(async () => {
+    const snap = popHistory();
+    if (!snap) return;
+    if (!api) return;
+    await navigate(async () => {
+      // Restore the captured slice atomically. We deliberately do NOT
+      // restore searchResults here — search results were a transient
+      // derived view; restoring them without re-querying would surface
+      // stale GraphNode entries. The searchQuery comes back so users
+      // can re-fire the search if they want.
+      useStore.setState({
+        anchorId: snap.anchorId,
+        depth: snap.depth,
+        selectedId: snap.selectedId,
+        visibleIds: new Set(snap.visibleRootIds),
+        visibleRootIds: new Set(snap.visibleRootIds),
+        focusDistance: new Map(snap.focusDistance),
+        dimmedNodes: new Set(snap.dimmedNodes),
+        searchQuery: snap.searchQuery,
+        searchResults: [],
+        lastCommitReason: 'navigate',
+      });
+    });
+  }, [api, navigate, popHistory]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -321,6 +389,17 @@ export default function App() {
       if (ev.key === ']') { onDepthIn(); return; }
       if (ev.key === '[') { onDepthOut(); return; }
       if (ev.key === 'Home') { onHome(); return; }
+
+      // Back navigation. Backspace is the natural fit (matches browser
+      // behaviour) and we already early-returned on input focus above
+      // so it can't intercept text editing. preventDefault() keeps
+      // some browsers from also navigating the embedding window's
+      // history stack on top of our own pop.
+      if (ev.key === 'Backspace') {
+        ev.preventDefault();
+        onBack();
+        return;
+      }
 
       // Cycle colour mode.
       if (ev.key === 'm') {
@@ -373,7 +452,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [
     helpOpen,
-    onDepthIn, onDepthOut, onHome,
+    onDepthIn, onDepthOut, onHome, onBack,
     setColorMode, setViewMode, setTraceDirection, setTraceDepth,
   ]);
 
@@ -431,6 +510,7 @@ export default function App() {
           api={apiBox}
           srcInfo={srcInfo}
           panelOpen={!panelHidden}
+          canGoBack={historyDepth > 0}
           onTogglePanel={() => {
             setPanelHidden(p => {
               const nextHidden = !p;
@@ -441,6 +521,7 @@ export default function App() {
             });
           }}
           onHome={onHome}
+          onBack={onBack}
           onHelpClick={() => setHelpOpen(true)}
         />
       )}
@@ -467,6 +548,7 @@ export default function App() {
         <NodeList onPick={onListPick} apiReady={apiBox !== null} />
         {apiBox && <NodeDetail api={apiBox} />}
         <TraceControls />
+        <NodeTypeFilters />
         <EdgeTypeFilters />
         <Legend />
       </div>

@@ -67,15 +67,20 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const viewModeRef = useRef<ViewMode>('3d');
 
   // Subscribe with shallow check so we re-render only when these change.
-  const { viewMode, colorMode, fontSize, edgeTypeWhitelist, dimmedCommunities, isolatedCommunity } =
-    useStore(useShallow(s => ({
-      viewMode: s.viewMode,
-      colorMode: s.colorMode,
-      fontSize: s.fontSize,
-      edgeTypeWhitelist: s.edgeTypeWhitelist,
-      dimmedCommunities: s.dimmedCommunities,
-      isolatedCommunity: s.isolatedCommunity,
-    })));
+  const {
+    viewMode, colorMode, fontSize,
+    edgeTypeWhitelist, nodeTypeWhitelist,
+    dimmedCommunities, isolatedCommunity, dimmedNodes,
+  } = useStore(useShallow(s => ({
+    viewMode: s.viewMode,
+    colorMode: s.colorMode,
+    fontSize: s.fontSize,
+    edgeTypeWhitelist: s.edgeTypeWhitelist,
+    nodeTypeWhitelist: s.nodeTypeWhitelist,
+    dimmedCommunities: s.dimmedCommunities,
+    isolatedCommunity: s.isolatedCommunity,
+    dimmedNodes: s.dimmedNodes,
+  })));
 
   // Keep a ref of current viewMode so imperative handle can read it without
   // re-creating the handle on every viewMode change.
@@ -213,7 +218,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // material.opacity directly on focus changes without rebuilding the scene.
   const meshIndex = useMemo(() => new Map<NodeId, import('three').Mesh>(), [viewMode]);
 
-  // Reapply focus halo to existing meshes whenever focusDistance changes.
+  // Reapply focus halo to existing meshes whenever focusDistance OR
+  // dimmedNodes changes. Without dimmedNodes in the deps array the 3D
+  // canvas wouldn't reflect Impact-item dimming until the user
+  // triggered another navigation that reset focusDistance.
   useEffect(() => {
     if (viewMode !== '3d') return;
     const focusActive = focusDistance.size > 0;
@@ -221,15 +229,21 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     for (const [id, mesh] of meshIndex) {
       const n = nodes.get(id);
       const conf = n?.confidence ?? '';
-      const op = focusActive
-        ? focusOpacity(id, focusDistance) * (ALPHA_BY_CONF[conf] ?? 1)
-        : (ALPHA_BY_CONF[conf] ?? 1);
+      const baseAlpha = ALPHA_BY_CONF[conf] ?? 1;
+      let op: number;
+      if (dimmedNodes.has(id)) {
+        op = 0.2 * baseAlpha;
+      } else if (focusActive) {
+        op = focusOpacity(id, focusDistance) * baseAlpha;
+      } else {
+        op = baseAlpha;
+      }
       const m = mesh.material as import('three').MeshStandardMaterial;
       m.opacity = op;
       m.transparent = op < 1;
       m.needsUpdate = true;
     }
-  }, [focusDistance, viewMode, meshIndex]);
+  }, [focusDistance, dimmedNodes, viewMode, meshIndex]);
 
   const linkVisibility = (link: GraphEdge): boolean => {
     if (EDGE_STYLE[link.type]?.hidden) return false;
@@ -246,16 +260,33 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // (still applies to edges connected to a hidden node, which won't
     // render anyway because both endpoints fail nodeVisibility).
     if (node.community_id != null && dimmedCommunities.has(node.community_id)) return false;
+    // Node-type whitelist gate. node.type undefined → always visible
+    // (no UI to gate it on, so we treat it as opted-in by default).
+    // Toggling the type off in NodeTypeFilters yields a hidden node
+    // without a refetch — the data stays cached, only render flips.
+    if (node.type && !nodeTypeWhitelist.has(node.type)) return false;
     return useStore.getState().visibleIds.has(node.id);
   };
 
   const linkColor = (e: GraphEdge): string => {
     const base = EDGE_STYLE[e.type]?.color ?? 0x999999;
-    return hexAtBrightness(base, edgeFocusBrightness(e, focusDistance));
+    // dimmedNodes-aware: edges with a dimmed endpoint render at the
+    // same low brightness used for far-focus edges so the impact
+    // subgraph spotlights cleanly against the rest of the graph.
+    const dimmed = dimmedNodes.size > 0 &&
+      (dimmedNodes.has(e.src) || dimmedNodes.has(e.dst));
+    const b = dimmed ? 0.2 : edgeFocusBrightness(e, focusDistance);
+    return hexAtBrightness(base, b);
   };
 
   const linkWidth = (e: GraphEdge): number => {
     const base = EDGE_STYLE[e.type]?.width ?? 1;
+    if (dimmedNodes.size > 0 &&
+        (dimmedNodes.has(e.src) || dimmedNodes.has(e.dst))) {
+      // Match the dimmed-far edge thickness so dimmed edges visually
+      // recede behind the impact subgraph without becoming invisible.
+      return 0.25;
+    }
     const brightness = edgeFocusBrightness(e, focusDistance);
     if (brightness >= 0.9) return base + 0.5;
     if (brightness >= 0.5) return Math.max(0.7, base);
@@ -264,9 +295,17 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   const drawNode2D = (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const r = 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5;
-    const dimmed = node.community_id != null && dimmedCommunities.has(node.community_id);
+    const dimmedByCommunity = node.community_id != null && dimmedCommunities.has(node.community_id);
+    // dimmedByImpact: Impact-item click pushed this node into the dim
+    // set so the rest of the visible graph stays visible but recedes
+    // behind the impact subgraph. 0.2 alpha matches the spec for this
+    // feature; lower than the 0.18 community-dim used to be (now
+    // hidden entirely) but visibly distinct from the FOCUS_OPACITY
+    // far-cells (0.18) so the user reads "deliberately backgrounded"
+    // rather than "out of focus".
+    const dimmedByImpact = dimmedNodes.has(node.id);
     const baseAlpha = focusOpacity(node.id, focusDistance) * (ALPHA_BY_CONF[node.confidence ?? ''] ?? 1);
-    const op = dimmed ? 0.18 : baseAlpha;
+    const op = dimmedByCommunity ? 0.18 : (dimmedByImpact ? 0.2 : baseAlpha);
     ctx.globalAlpha = op;
     ctx.fillStyle = nodeColorCss(node, colorMode);
     ctx.beginPath();

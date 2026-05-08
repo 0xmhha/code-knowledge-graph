@@ -567,6 +567,182 @@ html, body {
 .edge-filters .graph-group-toggle.all-off { color: #aaa; }
 .edge-filters .graph-group-edges { padding-left: 14px; padding-top: 2px; }
 
+/* ── NodeTypeFilters (#6) ──────────────────────────────────────────────
+   Mirrors .edge-filters look-and-feel. Five collapsible groups (Symbols,
+   Members, Containers, Statements, Concurrency / VCS) each contain the
+   per-type checkbox list. UPPERCASE heading "NODE TYPES" matches the
+   "EDGE TYPES" parity called out in the user request. */
+.node-type-filters {
+  padding: 6px 8px;
+  border-top: 1px solid #2a2c30;
+  font-size: 11px;
+}
+.node-type-filters h4 {
+  font-size: 11px;
+  margin: 0 0 4px 0;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.node-type-filters .node-type-filters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.node-type-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+}
+.node-type-filters .node-type-group {
+  border-bottom: 1px solid #2a2c30;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
+.node-type-filters .node-type-group:last-child { border-bottom: none; }
+.node-type-filters .node-type-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+}
+.node-type-filters .node-type-group-header:hover { background: #2a2c30; }
+.node-type-filters .node-type-group-arrow {
+  font-size: 9px;
+  color: #888;
+  width: 10px;
+  text-align: center;
+}
+.node-type-filters .node-type-group-label {
+  flex: 1;
+  color: #cfd0d3;
+  font-weight: 500;
+}
+.node-type-filters .node-type-group-count {
+  color: #7ab8ff;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+}
+.node-type-filters .node-type-group-toggle {
+  background: #232529;
+  color: #e6e7e9;
+  border: 1px solid #2a2c30;
+  padding: 1px 5px;
+  cursor: pointer;
+  font-size: 10px;
+  border-radius: 2px;
+  min-width: 36px;
+  text-align: center;
+}
+.node-type-filters .node-type-group-toggle:hover { background: #2a2c30; }
+.node-type-filters .node-type-group-toggle.partial { color: #ffaa00; }
+.node-type-filters .node-type-group-toggle.all-on  { color: #66cc77; }
+.node-type-filters .node-type-group-toggle.all-off { color: #aaa; }
+.node-type-filters .node-type-group-types {
+  padding-left: 14px;
+  padding-top: 2px;
+}
+
+/* ── Back button (#10) ────────────────────────────────────────────────
+   Sits between SearchBox and Home. Amber accent so users distinguish
+   it from the blue Home button — Home resets EVERYTHING, Back unwinds
+   the most recent navigation. Disabled state keeps the button visible
+   (so users always see the affordance) but clearly inert. */
+.topbar button.topbar-back {
+  border-color: #ff9800;
+  color: #ff9800;
+  font-weight: 600;
+  padding: 4px 12px;
+  min-height: 24px;
+  white-space: nowrap;
+}
+.topbar button.topbar-back:hover:not(:disabled) {
+  background: #3a2a00;
+  color: #ffcc66;
+}
+.topbar button.topbar-back:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: #3a3c40;
+  color: #888;
+}
+
+/* ── Packages section in NodeList (#7) ────────────────────────────────
+   Compact list pinned above the main visible-nodes list. Distinct
+   📦 glyph + amber type accent so users read "package picker" rather
+   than thinking it's a duplicate of the Visible Nodes list below. */
+.node-list .pkg-section {
+  border-bottom: 1px solid #3a3c40;
+  background: #1a1c1f;
+}
+.node-list .pkg-section-header {
+  padding: 4px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #cfd0d3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.node-list .pkg-section-header .pkg-section-count {
+  color: #7ab8ff;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+}
+.node-list .pkg-item {
+  padding: 3px 8px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  color: #cfd0d3;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  border-bottom: 1px solid #22242a;
+}
+.node-list .pkg-item:hover { background: #232529; }
+.node-list .pkg-item.selected { background: #2a3140; }
+.node-list .pkg-item .pkg-glyph {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.node-list .pkg-item .pkg-name {
+  flex: 1;
+  color: #ffb060;
+  word-break: break-all;
+}
+.node-list .pkg-item .pkg-qname {
+  color: #888;
+  font-size: 9.5px;
+  word-break: break-all;
+}
+.node-list .pkg-section-more {
+  padding: 4px 8px;
+  font-size: 10px;
+  color: #7ab8ff;
+  cursor: pointer;
+  font-style: italic;
+  border-bottom: 1px solid #22242a;
+}
+.node-list .pkg-section-more:hover {
+  background: #232529;
+  color: #aad4ff;
+}
+.node-list .pkg-section-empty {
+  padding: 4px 8px;
+  font-size: 10px;
+  color: #666;
+  font-style: italic;
+}
+
 .trace-controls {
   padding: 6px 8px;
   border-top: 1px solid #2a2c30;

@@ -5,6 +5,36 @@ import type {
 } from '@/types';
 import { DEFAULT_EDGE_TYPES, type GraphGroupSpec } from '@/lib/edges';
 
+// Default node-type whitelist for the boot canvas. Statement-level kinds
+// (IfStmt / LoopStmt / ReturnStmt / SwitchStmt / CallSite) and per-symbol
+// detail kinds (Field / Variable / Parameter / LocalVariable / Import /
+// Export / Decorator / Modifier / Constructor / Class / Enum / Contract /
+// Mapping / Event / MessageType) are off by default — they're noise on
+// the initial view. Users opt them in via NodeTypeFilters.
+const DEFAULT_NODE_TYPES_ON: ReadonlyArray<string> = [
+  'Function', 'Method', 'Type', 'Struct', 'Interface',
+  'Package', 'File', 'Commit',
+];
+
+// HistorySnapshot captures everything a "go back" navigation needs to
+// restore visually identical state. Keep this minimal — anything not
+// captured here (edgeTypeWhitelist, nodeTypeWhitelist, traceDirection,
+// dimmedCommunities, view/color mode) is treated as a *preference* that
+// survives navigation rather than as part of the location stack. This
+// matches browser back-button semantics: scroll position and selection
+// come back, but global preferences don't.
+export interface HistorySnapshot {
+  anchorId: NodeId | null;
+  depth: number;
+  selectedId: NodeId | null;
+  visibleRootIds: Set<NodeId>;
+  dimmedNodes: Set<NodeId>;
+  searchQuery: string;
+  focusDistance: Map<NodeId, number>;
+}
+
+const HISTORY_MAX = 20;
+
 interface State {
   // Read-only data caches.
   nodes: Map<NodeId, GraphNode>;
@@ -38,6 +68,12 @@ interface State {
   colorMode: ColorMode;
   fontSize: number;
   edgeTypeWhitelist: Set<string>;
+  // Node-type whitelist mirrors edgeTypeWhitelist for parity with the
+  // edge filter UX. Persisted via NodeTypeFilters under
+  // `ckg.nodeTypeWhitelist`. GraphCanvas.nodeVisibility consults this
+  // set so toggling 'Function' off hides every Function node without a
+  // re-fetch (the node data stays cached, only render gates flip).
+  nodeTypeWhitelist: Set<string>;
   // graphModeIsolation: when true, GraphPillStrip pill clicks REPLACE the
   // whitelist with just that group's edges (single-graph view) instead of
   // bulk-toggling the group on/off. Used to study one CKS axis (e.g. G4
@@ -46,6 +82,16 @@ interface State {
   graphModeIsolation: boolean;
   dimmedCommunities: Set<number>;
   isolatedCommunity: number | null;
+  // dimmedNodes: render at low alpha but keep in the visible set. Used
+  // by Impact-item clicks (NodeDetail.onImpactItemClick) to spotlight
+  // the impact subgraph against the wider context instead of replacing
+  // the visible set. Cleared by Home / search-clear / canvas-node click.
+  dimmedNodes: Set<NodeId>;
+  // historyStack: rolling LIFO of navigation snapshots. pushHistory
+  // appends; popHistory removes + returns the top. Capped at HISTORY_MAX
+  // so heavy explorers don't accumulate unbounded state. The TopBar
+  // back button gates on `historyStack.length === 0`.
+  historyStack: HistorySnapshot[];
 
   // First-time UX overlay. firstTimeSeen flips to true once the user
   // dismisses the overlay; persisted via localStorage so subsequent
@@ -97,6 +143,22 @@ interface State {
   setEdgeCountsByType: (m: Record<string, number>) => void;
   toggleDimCommunity: (c: number) => void;
   setIsolatedCommunity: (c: number | null) => void;
+  // Node-type whitelist setters. toggleNodeType flips one type;
+  // setNodeTypeWhitelistBulk turns N types on/off in a single commit
+  // (used by group "all on / all off" controls).
+  toggleNodeType: (t: string) => void;
+  setNodeTypeWhitelistBulk: (nodeTypes: ReadonlyArray<string>, on: boolean) => void;
+  // Dim-set actions. setDimmedNodes replaces the entire set in one
+  // commit (callers compute the dim set themselves). clearDimmedNodes
+  // is a convenience for the home / canvas-click reset paths.
+  setDimmedNodes: (s: Set<NodeId>) => void;
+  clearDimmedNodes: () => void;
+  // History actions. pushHistory captures the current navigation slice
+  // BEFORE a navigation runs (caller is responsible for ordering).
+  // popHistory removes and returns the most recent snapshot, or null
+  // when the stack is empty.
+  pushHistory: (snap: HistorySnapshot) => void;
+  popHistory: () => HistorySnapshot | null;
   setTraceDirection: (d: TraceDirection) => void;
   setTraceDepth: (n: number) => void;
   setLastRenderMs: (n: number) => void;
@@ -123,6 +185,33 @@ const initFirstTimeSeen = (): boolean => {
   catch { return false; }
 };
 
+// initNodeTypeWhitelist hydrates the per-type render gate set from
+// localStorage. SSR-safe (typeof guard) — same idiom as initGraphMode.
+// Falls back to DEFAULT_NODE_TYPES_ON when unset or when the stored
+// payload is malformed (parse error, non-array, etc.).
+const initNodeTypeWhitelist = (): Set<string> => {
+  if (typeof localStorage === 'undefined') return new Set(DEFAULT_NODE_TYPES_ON);
+  try {
+    const raw = localStorage.getItem('ckg.nodeTypeWhitelist');
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        return new Set(arr.filter((x): x is string => typeof x === 'string'));
+      }
+    }
+  } catch { /* localStorage may be blocked or stored payload corrupt */ }
+  return new Set(DEFAULT_NODE_TYPES_ON);
+};
+
+// Persist node-type whitelist on every change so the next session boots
+// with the user's choices applied. Failures are silent — localStorage
+// being blocked is a degraded but non-fatal mode.
+const persistNodeTypeWhitelist = (s: Set<string>): void => {
+  if (typeof localStorage === 'undefined') return;
+  try { localStorage.setItem('ckg.nodeTypeWhitelist', JSON.stringify([...s])); }
+  catch { /* ignore */ }
+};
+
 export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   nodes: new Map(),
   edges: [],
@@ -141,10 +230,13 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   colorMode: 'lang',
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
+  nodeTypeWhitelist: initNodeTypeWhitelist(),
   graphModeIsolation: initGraphMode(),
   firstTimeSeen: initFirstTimeSeen(),
   dimmedCommunities: new Set(),
   isolatedCommunity: null,
+  dimmedNodes: new Set(),
+  historyStack: [],
   traceDirection: 'both',
   traceDepth: 2,
   lastRenderMs: 0,
@@ -252,6 +344,44 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
     set({ dimmedCommunities: next });
   },
   setIsolatedCommunity: (c) => set({ isolatedCommunity: c }),
+  toggleNodeType: (t) => {
+    const next = new Set(get().nodeTypeWhitelist);
+    if (next.has(t)) next.delete(t); else next.add(t);
+    persistNodeTypeWhitelist(next);
+    set({ nodeTypeWhitelist: next });
+  },
+  setNodeTypeWhitelistBulk: (nodeTypes, on) => {
+    const next = new Set(get().nodeTypeWhitelist);
+    if (on) for (const t of nodeTypes) next.add(t);
+    else    for (const t of nodeTypes) next.delete(t);
+    persistNodeTypeWhitelist(next);
+    set({ nodeTypeWhitelist: next });
+  },
+  setDimmedNodes: (s) => set({ dimmedNodes: s }),
+  clearDimmedNodes: () => {
+    // Only allocate a fresh empty Set when the current value is non-empty.
+    // No-op skips the render trigger that an unconditional set() would
+    // cause on every Home/clear path even when nothing is dimmed.
+    if (get().dimmedNodes.size === 0) return;
+    set({ dimmedNodes: new Set() });
+  },
+  pushHistory: (snap) => {
+    const cur = get().historyStack;
+    // LIFO append, drop oldest when over cap. slice() keeps the array
+    // immutable from the consumer's perspective so subscribers see a new
+    // reference and React reconciles correctly.
+    const next = cur.length >= HISTORY_MAX
+      ? cur.slice(1).concat(snap)
+      : cur.concat(snap);
+    set({ historyStack: next });
+  },
+  popHistory: () => {
+    const cur = get().historyStack;
+    if (cur.length === 0) return null;
+    const top = cur[cur.length - 1];
+    set({ historyStack: cur.slice(0, -1) });
+    return top;
+  },
   setTraceDirection: (d) => set({ traceDirection: d }),
   setTraceDepth: (n) => set({ traceDepth: n }),
   setLastRenderMs: (n) => set({ lastRenderMs: n }),

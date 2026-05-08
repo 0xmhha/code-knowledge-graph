@@ -26,6 +26,10 @@ export default function SearchBox({ api }: Props) {
     setSearchQuery('');
     setSearchResults([]);
     const cur = useStore.getState();
+    // Search clear is part of the "leave search context" reset — wipe
+    // the dim set so a stale impact spotlight from before the search
+    // doesn't linger on the reverted root view.
+    cur.clearDimmedNodes();
     commit({
       visibleIds: new Set(cur.visibleRootIds),
       // Preserve the trace's focus distances if any — clearing search reverts
