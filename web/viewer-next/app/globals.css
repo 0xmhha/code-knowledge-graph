@@ -15,7 +15,14 @@ html, body {
      is absent the row collapses to 0px (no children). Without this row the
      banner shoves TopBar into the 1fr canvas row, breaking the layout. */
   grid-template-rows: auto 32px 1fr 28px;
-  /* minmax(0, 1fr): the spec default `1fr` is `minmax(auto, 1fr)`, whose
+  /* Three-column layout (#4 Call Flow):
+       col 1: optional CallFlow side panel (260–320px). Hidden when no
+              anchor is set; the column collapses to 0px so the canvas
+              reclaims the space without re-flowing other items.
+       col 2: canvas. minmax(0, 1fr) — see note below.
+       col 3: detail panel (240–360px clamp).
+
+     minmax(0, 1fr): the spec default `1fr` is `minmax(auto, 1fr)`, whose
      `auto` minimum follows the min-content size of the cell's contents.
      react-force-graph-2d sizes its <canvas> from the initial parent
      width (~1200px on first paint), and that becomes the 1fr track's
@@ -28,7 +35,7 @@ html, body {
      usable share, never below 240px (legibility floor for NodeList +
      EdgeFilters labels). At 720px viewport: panel ≈ 240px, canvas ≈
      480px — both visible. */
-  grid-template-columns: minmax(0, 1fr) clamp(240px, 32vw, 360px);
+  grid-template-columns: 0px minmax(0, 1fr) clamp(240px, 32vw, 360px);
   height: 100vh;
   width: 100vw;
   /* No grid-template-columns transition. Animating a layout property
@@ -37,7 +44,12 @@ html, body {
      column width interpolated and the canvas resized mid-animation.
      Snap-toggle is jarring once but never flashes. */
 }
-#app.no-panel { grid-template-columns: minmax(0, 1fr) 0px; }
+/* When CallFlow is active (anchor set), the left column expands to a
+   readable width. The viewer adds .has-callflow alongside any panel-state
+   class (.no-panel / default) so the rules compose. */
+#app.has-callflow { grid-template-columns: clamp(260px, 22vw, 320px) minmax(0, 1fr) clamp(240px, 32vw, 360px); }
+#app.no-panel { grid-template-columns: 0px minmax(0, 1fr) 0px; }
+#app.no-panel.has-callflow { grid-template-columns: clamp(260px, 22vw, 320px) minmax(0, 1fr) 0px; }
 #app.no-panel .panel { display: none; }
 
 /* Detail toggle — the prominent button users actually find. The plain
@@ -58,7 +70,7 @@ html, body {
 .topbar-detail-toggle:hover { background: #2a2c30; }
 
 .topbar {
-  grid-column: 1 / span 2;
+  grid-column: 1 / span 3;
   grid-row: 2;
   padding: 4px 8px;
   background: #1a1c1f;
@@ -135,7 +147,7 @@ html, body {
    them in adjacent columns. z-index:0 keeps it below the explicit
    z-index:1 on .panel below. */
 .canvas-host {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 3;
   position: relative;
   min-width: 0;
@@ -178,7 +190,7 @@ html, body {
 }
 
 .panel {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 3;
   position: relative;
   z-index: 1;
@@ -801,7 +813,7 @@ html, body {
 .trace-controls button.active { background: #2a3140; border-color: #7ab8ff; }
 
 .bottombar {
-  grid-column: 1 / span 2;
+  grid-column: 1 / span 3;
   grid-row: 4;
   background: #1a1c1f;
   padding: 3px 8px;
@@ -818,7 +830,7 @@ html, body {
    bottombar in the 1fr canvas slot. Hence the explicit grid-row on
    .topbar/.canvas-host/.panel/.bottombar above. */
 .stale-banner {
-  grid-column: 1 / span 2;
+  grid-column: 1 / span 3;
   grid-row: 1;
   background: #5a4a00;
   color: #fff;
@@ -1072,3 +1084,93 @@ html, body {
   flex-shrink: 0;
 }
 
+/* ── CallFlow side panel (#4) ───────────────────────────────────────────
+   Mirrors the right-panel look (.panel) but with the cyan accent on the
+   right edge instead of the left. Hidden via display:none when the
+   anchor is null (component renders the wrapper but the parent grid
+   collapses col 1 to 0px in that case — the explicit display:none is
+   defensive in case the column gets a non-zero default). */
+.call-flow {
+  grid-column: 1;
+  grid-row: 3;
+  position: relative;
+  z-index: 1;
+  background: #1f2329;
+  border-right: 2px solid #44aaff;
+  box-shadow: 8px 0 16px rgba(0, 0, 0, 0.4) inset;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.call-flow.hidden { display: none; }
+.call-flow .cf-header {
+  padding: 6px 8px;
+  border-bottom: 1px solid #2a2c30;
+  background: #1a1c1f;
+  font-size: 11px;
+  color: #cfd0d3;
+}
+.call-flow .cf-header-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7ab8ff;
+  margin-bottom: 2px;
+}
+.call-flow .cf-header-anchor {
+  font-family: ui-monospace, monospace;
+  color: #e6e7e9;
+  font-size: 11px;
+  word-break: break-all;
+}
+.call-flow .cf-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 4px 0;
+  min-height: 0;
+}
+.call-flow .cf-row {
+  padding: 2px 6px;
+  cursor: pointer;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  border-bottom: 1px solid #22242a;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.call-flow .cf-row:hover { background: #232529; }
+.call-flow .cf-row.selected { background: #2a3140; }
+.call-flow .cf-connector {
+  color: #555;
+  font-size: 10px;
+  white-space: pre;
+  flex-shrink: 0;
+}
+.call-flow .cf-content {
+  flex: 1;
+  min-width: 0;
+}
+.call-flow .cf-name { color: #cfd0d3; }
+.call-flow .cf-name .cf-type { color: #7ab8ff; }
+.call-flow .cf-sig {
+  color: #888;
+  font-size: 9.5px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.call-flow .cf-file {
+  color: #5a6068;
+  font-size: 9.5px;
+}
+.call-flow .cf-empty {
+  padding: 12px;
+  color: #888;
+  font-size: 11px;
+  text-align: center;
+  font-style: italic;
+}

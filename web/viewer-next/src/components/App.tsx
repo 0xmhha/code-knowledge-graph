@@ -19,6 +19,7 @@ import EdgeTypeFilters from './EdgeTypeFilters';
 import NodeTypeFilters from './NodeTypeFilters';
 import TraceControls from './TraceControls';
 import CanvasLegend from './CanvasLegend';
+import CallFlow from './CallFlow';
 import { DEFAULT_EDGE_TYPES, GRAPH_GROUPS, edgeToGroup } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
 import type { HistorySnapshot } from '@/store/store';
@@ -485,16 +486,34 @@ export default function App() {
     window.addEventListener('mouseup', onUp);
   }, []);
 
+  // anchorId drives the .has-callflow class so the grid expands col 1
+  // only when the CallFlow component has something to render. Reading
+  // it via the store keeps the grid in lockstep with the trace state
+  // without prop drilling.
+  const anchorId = useStore(s => s.anchorId);
+  const hasCallflow = anchorId !== null;
+
   // Inline grid-template-columns is applied only when the panel is
   // open. With panelHidden, .no-panel CSS rule (1fr 0px) takes over —
   // overriding it with inline style would defeat the hide.
+  // When CallFlow is active, the left column is part of the inline
+  // template so the user-resized panel width still wins for col 3.
   const appStyle = panelHidden
     ? undefined
-    : { gridTemplateColumns: `minmax(0, 1fr) ${panelWidth}px` };
+    : hasCallflow
+      ? { gridTemplateColumns: `clamp(260px, 22vw, 320px) minmax(0, 1fr) ${panelWidth}px` }
+      : { gridTemplateColumns: `0px minmax(0, 1fr) ${panelWidth}px` };
+
+  // Compose grid state classes. Both .no-panel and .has-callflow may
+  // be true simultaneously; CSS handles every combination.
+  const appClass = [
+    panelHidden ? 'no-panel' : '',
+    hasCallflow ? 'has-callflow' : '',
+  ].filter(Boolean).join(' ');
 
   return (
     <div id="app"
-         className={panelHidden ? 'no-panel' : ''}
+         className={appClass}
          style={appStyle}>
       <HelpOverlay open={helpOpen} onClose={() => setHelpOpen(false)} />
       {/* FirstTimeOverlay self-gates: renders nothing once dismissed.
@@ -526,6 +545,7 @@ export default function App() {
           onHelpClick={() => setHelpOpen(true)}
         />
       )}
+      <CallFlow onPick={onListPick} />
       <div className="canvas-host">
         {apiBox && (
           <GraphCanvas
