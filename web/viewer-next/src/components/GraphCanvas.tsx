@@ -8,7 +8,7 @@ import type { GraphEdge, GraphNode, NodeId, ViewMode } from '@/types';
 import {
   ALPHA_BY_CONF, nodeColorCss, nodeColorHex, nodeMesh,
 } from '@/lib/encoding';
-import { EDGE_STYLE } from '@/lib/edges';
+import { EDGE_STYLE, edgeToGroup } from '@/lib/edges';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), { ssr: false });
@@ -293,6 +293,26 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     return 0.25;
   };
 
+  // linkLineDash (#3b): per-edge dash pattern keyed off the CKS graph
+  // group. Returning null defers to a solid line. The 2D force-graph
+  // wires this prop into ctx.setLineDash on every link draw.
+  //   G1 Structural   → solid
+  //   G2 Semantic     → [6,3]   dashed
+  //   G3 Execution    → solid (default; the most-traversed axis stays clean)
+  //   G4 Concurrency  → [2,2]   dotted
+  //   G5 Distributed  → [6,2,2,2] dash-dot
+  //   G6 Temporal     → solid (the existing dim brightness already de-emphasises it)
+  // Edges whose group is unknown also fall through to solid.
+  const linkLineDash = (e: GraphEdge): number[] | null => {
+    const g = edgeToGroup(e.type);
+    switch (g) {
+      case 'G2': return [6, 3];
+      case 'G4': return [2, 2];
+      case 'G5': return [6, 2, 2, 2];
+      default:   return null;
+    }
+  };
+
   const drawNode2D = (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const r = 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5;
     const dimmedByCommunity = node.community_id != null && dimmedCommunities.has(node.community_id);
@@ -308,9 +328,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const op = dimmedByCommunity ? 0.18 : (dimmedByImpact ? 0.2 : baseAlpha);
     ctx.globalAlpha = op;
     ctx.fillStyle = nodeColorCss(node, colorMode);
-    ctx.beginPath();
-    ctx.arc(node.x ?? 0, node.y ?? 0, Math.max(2, r), 0, 2 * Math.PI);
-    ctx.fill();
+    // Shape differentiation (#3a): map node.type to a 2D primitive.
+    // The fallback is a circle so unknown types degrade gracefully.
+    // Sizes derived from `r` so usage_score still drives node prominence
+    // across shapes — bigger functions / packages stay visibly larger.
+    const cx = node.x ?? 0;
+    const cy = node.y ?? 0;
+    const rr = Math.max(2, r);
+    drawShape(ctx, node.type, cx, cy, rr);
     const dist = focusDistance.get(node.id);
     if (dist === 0) {
       // Anchor / selected node ring: cyan accent + double pass for
@@ -386,6 +411,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         linkVisibility={linkVisibility as never}
         linkColor={linkColor as never}
         linkWidth={linkWidth as never}
+        linkLineDash={linkLineDash as never}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={0.95}
         nodeCanvasObject={drawNode2D as never}
@@ -471,5 +497,183 @@ ${community}
 function escape(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// drawShape (#3a): fill a 2D primitive at (cx, cy) sized off `r`. The
+// caller has already set ctx.fillStyle / ctx.globalAlpha. Each branch
+// builds a path and fills it. Stroke-only shapes (chevron, asterisk)
+// override fillStyle's effect by stroking with the same colour.
+//
+// 3D parity is deferred — see lib/encoding.nodeMesh for the existing
+// per-type Three.js geometry table; updating it to mirror this 1:1 is
+// future work. The 2D mode shipping today gets the legend reading aid;
+// the 3D mesh table remains as-is.
+function drawShape(
+  ctx: CanvasRenderingContext2D,
+  type: string | undefined,
+  cx: number, cy: number, r: number,
+): void {
+  switch (type) {
+    case 'Type':
+    case 'Struct':
+    case 'Interface':
+    case 'TypeAlias': {
+      // Hexagon — pointy-top variant so it reads distinct from a square.
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const ang = (Math.PI / 3) * i + Math.PI / 6;
+        const x = cx + r * Math.cos(ang);
+        const y = cy + r * Math.sin(ang);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'Package': {
+      // Rounded rectangle — the docked-square shape reads as "container".
+      const s = r * 1.6;
+      const rad = Math.min(2, s / 4);
+      const x = cx - s / 2, y = cy - s / 2;
+      ctx.beginPath();
+      ctx.moveTo(x + rad, y);
+      ctx.lineTo(x + s - rad, y);
+      ctx.quadraticCurveTo(x + s, y, x + s, y + rad);
+      ctx.lineTo(x + s, y + s - rad);
+      ctx.quadraticCurveTo(x + s, y + s, x + s - rad, y + s);
+      ctx.lineTo(x + rad, y + s);
+      ctx.quadraticCurveTo(x, y + s, x, y + s - rad);
+      ctx.lineTo(x, y + rad);
+      ctx.quadraticCurveTo(x, y, x + rad, y);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'Field':
+    case 'Variable':
+    case 'Constant':
+    case 'LocalVariable':
+    case 'Parameter': {
+      // Small downward-pointing triangle — visually lighter than a circle.
+      const tr = r * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + tr);
+      ctx.lineTo(cx - tr, cy - tr * 0.6);
+      ctx.lineTo(cx + tr, cy - tr * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'File': {
+      // Diamond / rotated square.
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'Commit': {
+      // 5-point star.
+      ctx.beginPath();
+      const outer = r * 1.1;
+      const inner = r * 0.45;
+      for (let i = 0; i < 10; i++) {
+        const rad = i % 2 === 0 ? outer : inner;
+        const ang = (Math.PI / 5) * i - Math.PI / 2;
+        const x = cx + rad * Math.cos(ang);
+        const y = cy + rad * Math.sin(ang);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'CallSite':
+    case 'IfStmt':
+    case 'LoopStmt':
+    case 'ReturnStmt':
+    case 'SwitchStmt': {
+      // Micro dot — 1.5x smaller circle so statement-level nodes recede
+      // when the type is enabled in NodeTypeFilters.
+      ctx.beginPath();
+      ctx.arc(cx, cy, r / 1.5, 0, 2 * Math.PI);
+      ctx.fill();
+      return;
+    }
+    case 'Goroutine': {
+      // Upward-pointing equilateral triangle (concurrency family — pink).
+      const tr = r;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - tr);
+      ctx.lineTo(cx - tr * 0.95, cy + tr * 0.7);
+      ctx.lineTo(cx + tr * 0.95, cy + tr * 0.7);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'Channel': {
+      // Chevron / open arrow — strokes a `>` glyph at radius r. Stroke-
+      // only so the shape reads as "open" rather than a filled blob,
+      // matching the channel-as-pipe metaphor.
+      ctx.save();
+      const stroke = ctx.fillStyle as string | CanvasGradient | CanvasPattern;
+      ctx.strokeStyle = typeof stroke === 'string' ? stroke : '#cc66cc';
+      ctx.lineWidth = Math.max(1, r / 3);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - r * 0.7, cy - r * 0.7);
+      ctx.lineTo(cx + r * 0.4, cy);
+      ctx.lineTo(cx - r * 0.7, cy + r * 0.7);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    case 'Mutex': {
+      // Filled square with a hollow centre — proxies a lock glyph.
+      // Outer fill uses the current fillStyle; inner hollow is the
+      // canvas background so it reads as a hole regardless of palette.
+      const s = r * 1.5;
+      ctx.beginPath();
+      ctx.rect(cx - s / 2, cy - s / 2, s, s);
+      ctx.fill();
+      ctx.save();
+      ctx.fillStyle = '#0d0e10';
+      const hs = s * 0.4;
+      ctx.beginPath();
+      ctx.rect(cx - hs / 2, cy - hs / 2, hs, hs);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    case 'Endpoint': {
+      // Asterisk — three lines through (cx, cy). Stroke-only so the
+      // glyph reads as a "burst" against the canvas.
+      ctx.save();
+      const stroke = ctx.fillStyle as string | CanvasGradient | CanvasPattern;
+      ctx.strokeStyle = typeof stroke === 'string' ? stroke : '#44aaff';
+      ctx.lineWidth = Math.max(1, r / 3);
+      ctx.lineCap = 'round';
+      for (const deg of [0, 60, 120]) {
+        const ang = (deg * Math.PI) / 180;
+        ctx.beginPath();
+        ctx.moveTo(cx - r * Math.cos(ang), cy - r * Math.sin(ang));
+        ctx.lineTo(cx + r * Math.cos(ang), cy + r * Math.sin(ang));
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+    default: {
+      // Function / Method / unknown → circle (current behaviour).
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+      ctx.fill();
+      return;
+    }
+  }
 }
 

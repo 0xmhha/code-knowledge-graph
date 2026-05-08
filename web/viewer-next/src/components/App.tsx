@@ -18,6 +18,7 @@ import Legend from './Legend';
 import EdgeTypeFilters from './EdgeTypeFilters';
 import NodeTypeFilters from './NodeTypeFilters';
 import TraceControls from './TraceControls';
+import CanvasLegend from './CanvasLegend';
 import { DEFAULT_EDGE_TYPES, GRAPH_GROUPS, edgeToGroup } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
 import type { HistorySnapshot } from '@/store/store';
@@ -532,6 +533,11 @@ export default function App() {
             onNodeClick={traceAndCommit}
           />
         )}
+        {/* CanvasLegend mounts after the canvas so it overlays correctly
+            in the natural DOM order. Self-gates open/closed via
+            localStorage; renders nothing structural when api is still
+            booting (cheap to mount unconditionally). */}
+        <CanvasLegend />
       </div>
       <div className="panel">
         {/* Resize handle on the panel's left edge. Hover paints a

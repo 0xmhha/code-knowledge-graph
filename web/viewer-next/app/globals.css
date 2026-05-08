@@ -980,3 +980,95 @@ html, body {
   font-size: 10.5px;
   font-style: italic;
 }
+
+/* ── CanvasLegend (#3c) ─────────────────────────────────────────────────
+   Floating legend overlay rendered as position:absolute INSIDE
+   .canvas-host so it follows canvas resizes without participating in
+   the grid. Top-right corner — the bottom-right is taken by force-
+   graph's hidden tooltip area; top-left covers nodes near the anchor
+   when an exploration is active.
+
+   Two collapsible sections (Node Shapes, Edge Styles). Toggle persists
+   via localStorage (ckg.canvasLegend.open). Section-level open state is
+   not persisted — opening the legend always shows both sections so
+   users see all the symbols at a glance. */
+.canvas-legend {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 220px;
+  z-index: 10;
+  background: rgba(31, 35, 41, 0.92);
+  border: 1px solid #44aaff;
+  border-radius: 4px;
+  padding: 6px 8px;
+  color: #cfd0d3;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+}
+.canvas-legend.collapsed {
+  width: auto;
+  padding: 4px 8px;
+}
+.canvas-legend .canvas-legend-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7ab8ff;
+}
+.canvas-legend .canvas-legend-title {
+  cursor: pointer;
+  user-select: none;
+}
+.canvas-legend .canvas-legend-close {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 4px;
+  line-height: 1;
+}
+.canvas-legend .canvas-legend-close:hover { color: #e6e7e9; }
+.canvas-legend h5 {
+  font-size: 10px;
+  margin: 8px 0 3px 0;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.canvas-legend h5:first-of-type { margin-top: 4px; }
+.canvas-legend .legend-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+  font-size: 10px;
+}
+.canvas-legend .legend-icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.canvas-legend .legend-label {
+  flex: 1;
+  color: #cfd0d3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-legend .legend-tag {
+  color: #7ab8ff;
+  font-size: 9.5px;
+  flex-shrink: 0;
+}
+
