@@ -133,8 +133,12 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
 export const DEFAULT_EDGE_TYPES: ReadonlyArray<string> = [
   // G1 Structural
   'defines', 'imports',
-  // G2 Semantic
-  'extends', 'implements',
+  // G2 Semantic — uses_type / instantiates added 2026-05-09 (graphify
+  // audit): they fire ~12K + ~5K on the self-graph, which is comparable
+  // to G1 imports' ~9K — well within the canvas budget — and surface
+  // type relationships that were invisible by default. The user's "data
+  // is missing" complaint was driven partly by these being off.
+  'extends', 'implements', 'uses_type', 'instantiates',
   // G3 Execution
   'calls', 'invokes', 'timeout_path', 'cancellation_path',
   // G4 Concurrency

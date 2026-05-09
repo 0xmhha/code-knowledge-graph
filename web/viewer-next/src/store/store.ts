@@ -5,15 +5,32 @@ import type {
 } from '@/types';
 import { DEFAULT_EDGE_TYPES, type GraphGroupSpec } from '@/lib/edges';
 
-// Default node-type whitelist for the boot canvas. Statement-level kinds
-// (IfStmt / LoopStmt / ReturnStmt / SwitchStmt / CallSite) and per-symbol
-// detail kinds (Field / Variable / Parameter / LocalVariable / Import /
-// Export / Decorator / Modifier / Constructor / Class / Enum / Contract /
-// Mapping / Event / MessageType) are off by default — they're noise on
-// the initial view. Users opt them in via NodeTypeFilters.
+// Default node-type whitelist for the boot canvas. Two tiers stay OFF:
+//   - Statement-level kinds (IfStmt / LoopStmt / ReturnStmt / SwitchStmt /
+//     CallSite) — verbose control-flow detail; turn on for "show me the
+//     control structure" views.
+//   - Fine-grained-detail kinds (Parameter / LocalVariable / Import /
+//     Export / Decorator / Modifier / Constructor) — usually only useful
+//     when drilling into a single function.
+//
+// Everything else is ON by default. The 2026-05-09 graphify-comparison
+// audit showed users were reading "data is missing" when the boot canvas
+// hid Field / Variable / Constant / Goroutine / Channel / Mutex even
+// though the graph had thousands of each. Default-on follows the
+// principle: surface every node the parsers extract for the major
+// languages so the data the user paid build-time for is visible without
+// rummaging through filter UI. Turn off in NodeTypeFilters if a specific
+// graph has too many of one kind to render.
 const DEFAULT_NODE_TYPES_ON: ReadonlyArray<string> = [
-  'Function', 'Method', 'Type', 'Struct', 'Interface',
-  'Package', 'File', 'Commit',
+  // Symbols: top-level declarations
+  'Function', 'Method', 'Type', 'Struct', 'Interface', 'TypeAlias',
+  'Class', 'Enum', 'Contract',
+  // Members: per-symbol storage and fields
+  'Field', 'Variable', 'Constant',
+  // Containers: scopes and route entrypoints
+  'Package', 'File', 'Endpoint', 'MessageType',
+  // Concurrency primitives (Go) / VCS meta nodes
+  'Goroutine', 'Channel', 'Mutex', 'Commit',
 ];
 
 // HistorySnapshot captures everything a "go back" navigation needs to

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -35,57 +36,10 @@ func newServeCmd() *cobra.Command {
 			if graph == "" && dbDsn == "" {
 				return fmt.Errorf("one of --graph or --db must be provided")
 			}
-
-			var store persist.StoreReader
-			var sourceLabel string
-			if dbDsn != "" {
-				store, err = persist.OpenPostgresReadOnly(dbDsn)
-				if err != nil {
-					return fmt.Errorf("open postgres: %w", err)
-				}
-				sourceLabel = "postgres"
-			} else {
-				db := filepath.Join(graph, "graph.db")
-				store, err = persist.OpenReadOnly(db)
-				if err != nil {
-					return fmt.Errorf("open graph: %w", err)
-				}
-				sourceLabel = db
-			}
-			defer store.Close()
-
-			// CKG_DEV_VIEWER_DIR points to a `make viewer` output dir
-			// (typically `internal/server/web_assets/`) so viewer changes are
-			// picked up by browser reload without rebuilding ckg. Useful when
-			// iterating on the viewer with the binary running against a real
-			// graph.
-			opts := server.Options{
-				DevViewerDir: os.Getenv("CKG_DEV_VIEWER_DIR"),
-				NoViewer:     noViewer,
-			}
-			srv := server.NewWithOptions(store, log, opts)
-
-			// signal.NotifyContext gives us graceful Ctrl-C / SIGTERM handling;
-			// the server's ListenAndServe path uses ctx.Done to trigger Shutdown.
-			ctx, cancel := signal.NotifyContext(context.Background(),
-				os.Interrupt, syscall.SIGTERM)
-			defer cancel()
-
-			// Bind to loopback only — viewer is local-dev surface, not a public
-			// service. Operators who need remote access should front it with a
-			// reverse proxy.
-			addr := fmt.Sprintf("127.0.0.1:%d", port)
-			fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", sourceLabel, addr)
-			if noViewer {
-				fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
-			} else if opts.DevViewerDir != "" {
-				fmt.Fprintf(os.Stderr, "ckg: viewer served from %s (CKG_DEV_VIEWER_DIR)\n", opts.DevViewerDir)
-			}
-
-			if open && !noViewer {
-				go openBrowser("http://" + addr)
-			}
-			return srv.ListenAndServe(ctx, addr)
+			return runServe(serveOpts{
+				GraphDir: graph, DBDsn: dbDsn, Port: port,
+				OpenBrowser: open, NoViewer: noViewer, Log: log,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&graph, "graph", "", "graph directory containing graph.db")
@@ -100,6 +54,68 @@ func newServeCmd() *cobra.Command {
 		"disable embedded viewer; serve /api/* only (for reverse-proxy setups)")
 	// --graph is no longer required when --db is provided; enforce manually in RunE.
 	return cmd
+}
+
+// serveOpts groups the runServe parameters so newServeCmd and the
+// quickstart command can share the same path without an unwieldy
+// positional signature.
+type serveOpts struct {
+	GraphDir    string // path to the graph.db dir (mutually exclusive with DBDsn)
+	DBDsn       string // PostgreSQL DSN (overrides GraphDir when set)
+	Port        int    // bind port on 127.0.0.1
+	OpenBrowser bool   // open the default browser on start
+	NoViewer    bool   // serve /api/* only; skip the embedded viewer
+	Log         *slog.Logger
+}
+
+// runServe opens the configured store, builds the HTTP server, installs
+// SIGINT/SIGTERM handlers, and blocks until the server exits. Extracted
+// from the serve cobra RunE so quickstart can compose it after build.
+func runServe(o serveOpts) error {
+	var store persist.StoreReader
+	var sourceLabel string
+	var err error
+	if o.DBDsn != "" {
+		store, err = persist.OpenPostgresReadOnly(o.DBDsn)
+		if err != nil {
+			return fmt.Errorf("open postgres: %w", err)
+		}
+		sourceLabel = "postgres"
+	} else {
+		db := filepath.Join(o.GraphDir, "graph.db")
+		store, err = persist.OpenReadOnly(db)
+		if err != nil {
+			return fmt.Errorf("open graph: %w", err)
+		}
+		sourceLabel = db
+	}
+	defer store.Close()
+
+	// CKG_DEV_VIEWER_DIR points to a `make viewer` output dir (typically
+	// `internal/server/web_assets/`) so viewer changes are picked up by
+	// browser reload without rebuilding ckg.
+	opts := server.Options{
+		DevViewerDir: os.Getenv("CKG_DEV_VIEWER_DIR"),
+		NoViewer:     o.NoViewer,
+	}
+	srv := server.NewWithOptions(store, o.Log, opts)
+
+	ctx, cancel := signal.NotifyContext(context.Background(),
+		os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", o.Port)
+	fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", sourceLabel, addr)
+	if o.NoViewer {
+		fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
+	} else if opts.DevViewerDir != "" {
+		fmt.Fprintf(os.Stderr, "ckg: viewer served from %s (CKG_DEV_VIEWER_DIR)\n", opts.DevViewerDir)
+	}
+
+	if o.OpenBrowser && !o.NoViewer {
+		go openBrowser("http://" + addr)
+	}
+	return srv.ListenAndServe(ctx, addr)
 }
 
 // openBrowser launches the platform's default URL handler. The child process

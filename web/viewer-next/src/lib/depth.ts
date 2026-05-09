@@ -2,14 +2,16 @@ import type { CommitGraph, NodeId } from '@/types';
 import type { IAPI } from '@/lib/api';
 import { useStore, computeFocusDistance } from '@/store/store';
 
-const MAX_VISIBLE = 500;
+const MAX_VISIBLE = 800;
 
-// BOOT_VISIBLE caps the initial seed at 200 nodes — below MAX_VISIBLE so
+// BOOT_VISIBLE caps the initial seed at 400 nodes — below MAX_VISIBLE so
 // after the user navigates (anchor-driven BFS) more nodes can join the
-// visible set. 200 keeps the canvas readable on first paint while still
-// surfacing enough hub symbols that 1-hop expansion shows real call/import
-// structure rather than disconnected packages.
-const BOOT_VISIBLE = 200;
+// visible set. 400 (raised from 200 in 2026-05-09 after the
+// graphify-comparison audit) is the empirical sweet spot on go-stablenet-
+// scale graphs (~220K nodes / 1.9M edges): enough hub symbols surface that
+// the boot view doesn't read as "data is missing", while force-graph-2d's
+// layout step still settles in <500ms on commodity hardware.
+const BOOT_VISIBLE = 400;
 
 // recomputeVisible builds the next CommitGraph and returns it. It does NOT
 // commit — callers run store.commit() so the renderer sees one push.
