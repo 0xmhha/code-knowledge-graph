@@ -190,6 +190,14 @@
   ],
   "edges": [
     {
+      "src": "4eb178a7e8250ee3",
+      "dst": "2c6468f987e8884c",
+      "type": "calls",
+      "line": 5,
+      "count": 1,
+      "confidence": "INFERRED"
+    },
+    {
       "src": "e4a99e2b2fa5ab75",
       "dst": "4eb178a7e8250ee3",
       "type": "defines",
