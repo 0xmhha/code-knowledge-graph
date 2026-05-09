@@ -15,16 +15,22 @@ import (
 )
 
 // Run starts a stdio MCP server bound to store. Returns when stdin closes.
+//
+// The store is wrapped in newLLMSafeStoreReader so every read surface a
+// tool touches has the §11.3 H3 retrieval boundary applied — AMBIGUOUS
+// Hunk/Commit nodes (the unreachable-history track) never leak to LLM
+// consumers regardless of which tool the agent calls.
 func Run(ctx context.Context, store persist.StoreReader) error {
 	s := server.NewMCPServer("ckg", "0.1.0")
 
-	registerFindSymbol(s, store)
-	registerFindCallers(s, store)
-	registerFindCallees(s, store)
-	registerGetSubgraph(s, store)
-	registerSearchText(s, store)
-	registerGetContextForTask(s, store)
-	registerImpactOfChange(s, store)
+	safe := newLLMSafeStoreReader(store)
+	registerFindSymbol(s, safe)
+	registerFindCallers(s, safe)
+	registerFindCallees(s, safe)
+	registerGetSubgraph(s, safe)
+	registerSearchText(s, safe)
+	registerGetContextForTask(s, safe)
+	registerImpactOfChange(s, safe)
 
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("mcp serve stdio: %w", err)

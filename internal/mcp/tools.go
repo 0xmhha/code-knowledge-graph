@@ -33,6 +33,7 @@ func registerFindSymbol(s *server.MCPServer, store persist.StoreReader) {
 		if err != nil {
 			return nil, err
 		}
+		out = filterLLMSafe(out) // §11.3 H3 retrieval boundary
 		return textResult(map[string]any{"nodes": attachBlobs(store, out, incl)}), nil
 	})
 }
@@ -60,6 +61,8 @@ func registerFindCallers(s *server.MCPServer, store persist.StoreReader) {
 		if err != nil {
 			return nil, err
 		}
+		nodes = filterLLMSafe(nodes) // §11.3 H3 retrieval boundary
+		edges = filterLLMSafeEdges(edges, nodeIDSet(nodes))
 		return textResult(map[string]any{
 			"nodes": attachBlobs(store, nodes, incl),
 			"edges": edges,
@@ -83,6 +86,8 @@ func registerFindCallees(s *server.MCPServer, store persist.StoreReader) {
 		if err != nil {
 			return nil, err
 		}
+		nodes = filterLLMSafe(nodes) // §11.3 H3 retrieval boundary
+		edges = filterLLMSafeEdges(edges, nodeIDSet(nodes))
 		return textResult(map[string]any{
 			"nodes": attachBlobs(store, nodes, incl),
 			"edges": edges,
@@ -106,6 +111,8 @@ func registerGetSubgraph(s *server.MCPServer, store persist.StoreReader) {
 		if err != nil {
 			return nil, err
 		}
+		nodes = filterLLMSafe(nodes) // §11.3 H3 retrieval boundary
+		edges = filterLLMSafeEdges(edges, nodeIDSet(nodes))
 		return textResult(map[string]any{
 			"nodes": attachBlobs(store, nodes, incl),
 			"edges": edges,
@@ -133,6 +140,7 @@ func registerSearchText(s *server.MCPServer, store persist.StoreReader) {
 		if err != nil {
 			return nil, err
 		}
+		hits = filterLLMSafe(hits) // §11.3 H3 retrieval boundary
 		return textResult(map[string]any{"nodes": attachBlobs(store, hits, incl)}), nil
 	})
 }

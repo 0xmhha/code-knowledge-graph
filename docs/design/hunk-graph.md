@@ -1040,6 +1040,18 @@ We need three layers, partitioned across schema-1.8 H1 and a follow-up PR:
   unreachable hunks live in the same DB. The viewer can show them in a
   dedicated "Recovery" panel (out of scope for H1) so a human can
   manually consult them when an agent overwrites code.
+  **Landed**: `internal/mcp/h3_filter.go` introduces an
+  `llmSafeStoreReader` that wraps the persist.StoreReader passed into
+  `mcp.Run` — every tool (find_symbol / find_callers / find_callees /
+  get_subgraph / search_text / get_context_for_task / impact_of_change)
+  receives the wrapped reader, so AMBIGUOUS Hunk/Commit rows are
+  dropped from `FindSymbol`, `NodesByIDs`, `Subgraph/NeighborhoodByQname`,
+  `Search`, `SearchFTS` results and `GetBlob` returns sql.ErrNoRows for
+  AMBIGUOUS Hunk IDs. The HTTP `/api/*` surface (server/api.go)
+  intentionally stays unfiltered — those endpoints power the human
+  viewer where a future Recovery panel will surface the AMBIGUOUS
+  track deliberately. The new endpoint `/api/evidence` (when added)
+  will share the boundary by re-using `llmSafeStoreReader`.
 
 The recovery use-case is the user-stated motivation: an autonomous agent
 sometimes overwrites correct code, and a force-push that rolled the
