@@ -101,7 +101,70 @@ func emitHunkGraph(g *graph.Graph, srcRel string, commitIDByteSHA map[string]str
 	if len(relHunks) == 0 {
 		return nil, nil
 	}
-	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA)
+	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, types.ConfExtracted)
+	g.Nodes = append(g.Nodes, nodes...)
+	g.Edges = append(g.Edges, hasHunkEdges...)
+	g.Edges = append(g.Edges, adjacentEdges...)
+	return blobs, nil
+}
+
+// emitUnreachableHunkGraph adds Commit + Hunk nodes for SHAs reachable
+// only via reflog or fsck-unreachable (i.e. force-pushed-away history).
+// All nodes + edges get confidence='AMBIGUOUS' per docs/design/hunk-
+// graph.md §11.3. The H3 retrieval layer (future) MUST filter to
+// EXTRACTED so the LLM never sees code paths that were rolled back.
+//
+// Commit nodes for unreachable SHAs are emitted here (not by
+// buildCommitNodes, which only sees the HEAD-reachable hist.Commits).
+// They share the same shape as reachable Commits — only confidence
+// differs — so viewer/MCP code that already knows how to render
+// NodeCommit doesn't need a parallel "unreachable commit" path.
+//
+// Returns the gzipped patch blobs map; caller merges into InsertBlobs.
+func emitUnreachableHunkGraph(g *graph.Graph, srcRel, repoRoot string,
+	existingCommitIDs map[string]string) (map[string][]byte, error) {
+	commits, hunks, err := temporal.LoadUnreachableHunks(repoRoot, 0)
+	if err != nil {
+		return nil, fmt.Errorf("LoadUnreachableHunks: %w", err)
+	}
+	if len(commits) == 0 || len(hunks) == 0 {
+		return nil, nil
+	}
+	// Build Commit nodes for any unreachable SHA we don't already have.
+	// (HEAD-reachable Commits were materialised earlier; the unreachable
+	// set is supposed to be disjoint, but defensive de-dup costs nothing.)
+	filePath := srcRel
+	if filePath == "" || filePath == "." {
+		filePath = ".git"
+	}
+	commitNodes := make([]types.Node, 0, len(commits))
+	commitIDByteSHA := make(map[string]string, len(commits))
+	for k, v := range existingCommitIDs {
+		commitIDByteSHA[k] = v
+	}
+	for _, ci := range commits {
+		if _, present := commitIDByteSHA[ci.SHA]; present {
+			continue
+		}
+		node := makeCommitNode(ci.SHA, ci, filePath)
+		// Override confidence on the Commit row so downstream queries
+		// can spot recovery-track commits without a join through Hunk.
+		node.Confidence = types.ConfAmbiguous
+		commitNodes = append(commitNodes, node)
+		commitIDByteSHA[ci.SHA] = node.ID
+	}
+	g.Nodes = append(g.Nodes, commitNodes...)
+
+	// Reuse the existing hunk-build helper so binary / large-patch /
+	// adjacency semantics stay consistent across the EXTRACTED and
+	// AMBIGUOUS paths. Pass the unreachable hunks directly — they
+	// already have repo-rooted file paths since git show emits the
+	// same shape git log -p does.
+	relHunks, prefix := remapHunksToSrcRel(hunks, srcRel)
+	if len(relHunks) == 0 {
+		return nil, nil
+	}
+	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, types.ConfAmbiguous)
 	g.Nodes = append(g.Nodes, nodes...)
 	g.Edges = append(g.Edges, hasHunkEdges...)
 	g.Edges = append(g.Edges, adjacentEdges...)
@@ -146,8 +209,13 @@ func remapHunksToSrcRel(hunks []temporal.HunkInfo, srcRel string) ([]temporal.Hu
 // new-file start line. Output is sorted by hunk node ID for deterministic
 // graph snapshots, but the adjacency relation is computed BEFORE sorting
 // so the line-order semantics are preserved.
+//
+// confidence stamps both the Hunk node and the has_hunk/adjacent edges:
+// EXTRACTED for the HEAD-reachable pass, AMBIGUOUS for the unreachable
+// follow-up pass per docs/design/hunk-graph.md §11.3.
 func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
-	commitIDByteSHA map[string]string) ([]types.Node, []types.Edge, []types.Edge, map[string][]byte) {
+	commitIDByteSHA map[string]string,
+	confidence types.Confidence) ([]types.Node, []types.Edge, []types.Edge, map[string][]byte) {
 	// Group by (sha, file) so adjacent edges only fire within one commit-
 	// file pair, in line-order. We sort each group by NewStart so the
 	// "next-in-this-file" semantics match human reading order.
@@ -190,7 +258,7 @@ func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 
 		var prevHunkID string
 		for _, h := range grp {
-			node := makeHunkNode(*h)
+			node := makeHunkNode(*h, confidence)
 			nodes = append(nodes, node)
 			hasHunk = append(hasHunk, types.Edge{
 				Src:        commitID,
@@ -198,7 +266,7 @@ func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 				Type:       types.EdgeHasHunk,
 				FilePath:   h.FilePath,
 				Count:      1,
-				Confidence: types.ConfExtracted,
+				Confidence: confidence,
 			})
 			if prevHunkID != "" {
 				adjacent = append(adjacent, types.Edge{
@@ -207,7 +275,7 @@ func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 					Type:       types.EdgeAdjacent,
 					FilePath:   h.FilePath,
 					Count:      1,
-					Confidence: types.ConfExtracted,
+					Confidence: confidence,
 				})
 			}
 			prevHunkID = node.ID
@@ -228,7 +296,11 @@ func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 // file (post-remap), so viewer queries "show me the hunks that touched
 // main.go" can filter by file_path directly. doc_comment / signature stay
 // empty in H1 — they're reserved for H4's issue-id extraction.
-func makeHunkNode(h temporal.HunkInfo) types.Node {
+//
+// confidence is stamped on the row so the §11.3 hybrid (EXTRACTED for
+// HEAD-reachable, AMBIGUOUS for reflog/fsck-collected unreachable) can
+// be distinguished by H3 retrieval queries via a single SQL filter.
+func makeHunkNode(h temporal.HunkInfo, confidence types.Confidence) types.Node {
 	qname := fmt.Sprintf("hunk:%s:%s:%d", h.SHA, h.FilePath, h.Index)
 	displayName := h.SHA
 	if len(displayName) > 12 {
@@ -259,7 +331,7 @@ func makeHunkNode(h temporal.HunkInfo) types.Node {
 		EndByte:       1, // sentinel — patch text is in blobs.source, not a byte slice
 		Language:      hunkLanguageFor(h.FilePath),
 		SubKind:       "git",
-		Confidence:    types.ConfExtracted,
+		Confidence:    confidence,
 	}
 }
 

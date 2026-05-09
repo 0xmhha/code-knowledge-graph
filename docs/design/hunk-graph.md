@@ -1029,6 +1029,11 @@ We need three layers, partitioned across schema-1.8 H1 and a follow-up PR:
   pass enumerates unreachable SHAs (force-pushed-away branches, hard
   resets) and inserts their hunks with `confidence='AMBIGUOUS'`. The
   follow-up PR is independently reviewable — H1 stays scoped.
+  **Landed**: see `internal/temporal/unreachable.go` +
+  `emitUnreachableHunkGraph` in `internal/buildpipe/temporal_hunks.go`.
+  Self-graph eval (go-stablenet, 2026-05-09): 14 AMBIGUOUS Commit
+  nodes + 40 AMBIGUOUS Hunk nodes captured from reflog ∪ fsck-
+  unreachable, disjoint from the 6402-EXTRACTED HEAD-reachable set.
 - *Retrieval layer* (H3): `evidence_for_intent` and `/api/evidence` MUST
   add `WHERE n.confidence = 'EXTRACTED'` to every Hunk projection. The
   Coding Agent never sees code paths that were rolled back, even if the

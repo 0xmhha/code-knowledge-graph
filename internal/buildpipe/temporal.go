@@ -96,6 +96,20 @@ func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerF
 		return nil, fmt.Errorf("temporal hunk graph: %w", err)
 	}
 
+	// Hunk-graph §11.3 follow-up: append AMBIGUOUS-confidence Commit +
+	// Hunk nodes for SHAs reachable only via reflog or fsck-unreachable.
+	// These represent force-pushed-away history that the LLM retrieval
+	// layer (H3, future) must filter out — but a human "Recovery"
+	// workflow can browse them in the viewer when an agent has
+	// overwritten code that needs to come back.
+	unreachableBlobs, err := emitUnreachableHunkGraph(g, srcRel, repoRoot, commitIDByteSHA)
+	if err != nil {
+		return nil, fmt.Errorf("temporal unreachable hunk graph: %w", err)
+	}
+	for id, b := range unreachableBlobs {
+		hunkBlobs[id] = b
+	}
+
 	hunkCount, hunkEdgeCount := 0, 0
 	for _, n := range g.Nodes {
 		if n.Type == types.NodeHunk {
