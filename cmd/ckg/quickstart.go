@@ -126,6 +126,10 @@ func generateReport(graphDir, outPath string) error {
 	if err != nil {
 		return fmt.Errorf("edges: %w", err)
 	}
-	report := buildReport(manifest, nodes, edges, 25)
+	topics, err := store.LoadHierarchy("topic")
+	if err != nil {
+		topics = nil // graphs without a Leiden run still get a useful report
+	}
+	report := buildReport(manifest, nodes, edges, topics, 25)
 	return os.WriteFile(outPath, []byte(report), 0o644)
 }

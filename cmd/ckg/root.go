@@ -29,7 +29,7 @@ func newRootCmd() *cobra.Command {
 
 	root.AddCommand(newBuildCmd(), newServeCmd(), newMCPCmd(),
 		newExportStaticCmd(), newExportPostgresCmd(), newExportJSONCmd(),
-		newReportCmd(), newQuickstartCmd(), newEvalCmd(),
+		newReportCmd(), newQuickstartCmd(), newPathCmd(), newEvalCmd(),
 		newAuditCmd(), newValidateCmd())
 	return root
 }
