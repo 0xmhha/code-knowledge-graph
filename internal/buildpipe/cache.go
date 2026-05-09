@@ -45,10 +45,16 @@ import (
 // such a DB triggers an idempotent ALTER ADD COLUMN via Migrate(), and
 // ManifestUsable's version check forces a cold rebuild on first 1.7 run
 // so the new edges land in their natural emission order.
+// Bumped from "1.7" to "1.8" by Hunk-graph H1 (CKS G6 Temporal extension):
+// new node type NodeHunk + new edges has_hunk / adjacent + gzip-compressed
+// unified-diff blobs persisted under the existing blobs.node_id PK. No
+// schema DDL change (the new rows reuse existing tables); pre-1.8 DBs are
+// missing the rows + the new node/edge type literals so ManifestUsable's
+// version check forces a cold rebuild on first 1.8 run.
 //
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.7"
+const SchemaVersion = "1.8"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

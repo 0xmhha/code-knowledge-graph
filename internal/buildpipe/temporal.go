@@ -33,35 +33,39 @@ import (
 // surfacing enough churn signal for the viewer.
 const temporalDepthDefault = 10
 
-// emitTemporalEdges adds NodeCommit nodes + changed_in/blame edges to g.
-// Returns nil on success, or wraps the underlying git/IO error otherwise.
+// emitTemporalEdges adds NodeCommit + NodeHunk nodes and the corresponding
+// G6 Temporal edges (changed_in / blame for the file-level pass; has_hunk /
+// adjacent for the Hunk-graph H1 pass) to g. Returns the gzip-compressed
+// hunk patch blobs keyed by Hunk node ID — caller merges them into the
+// InsertBlobs map alongside CodeNode source slices.
 //
 // Behavior:
-//   - srcRoot not in a git checkout → no-op, log debug, return nil.
-//   - git history empty for srcRoot subtree → no-op, log debug, return nil.
+//   - srcRoot not in a git checkout → no-op, log debug, return (nil, nil).
+//   - git history empty for srcRoot subtree → no-op, log debug, return (nil, nil).
 //   - Otherwise: append nodes/edges in place. Caller MUST re-run
 //     graph.Validate after to catch any dangling refs introduced.
 //
-// The maxPerFile parameter caps per-file commit count; pass 0 to use the
-// E4 default (10). The Logger receives info-level summaries (commits/edges
-// added) and warn-level surfaces for git failures.
-func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerFile int) error {
+// The maxPerFile parameter caps per-file commit count for the changed_in /
+// blame pass; pass 0 to use the E4 default (10). The hunk pass uses its
+// own commit cap (temporal.LoadHunks default) since hunks are bounded by
+// total commits walked, not per-file.
+func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerFile int) (map[string][]byte, error) {
 	if maxPerFile <= 0 {
 		maxPerFile = temporalDepthDefault
 	}
 	repoRoot, srcRel, ok := gitRepoRel(srcRoot)
 	if !ok {
 		log.Debug("temporal: srcRoot is not a git checkout; skipping G6 edges", "src", srcRoot)
-		return nil
+		return nil, nil
 	}
 	hist, err := temporal.LoadHistory(repoRoot, maxPerFile)
 	if err != nil {
-		return fmt.Errorf("temporal LoadHistory: %w", err)
+		return nil, fmt.Errorf("temporal LoadHistory: %w", err)
 	}
 	if len(hist.Commits) == 0 || len(hist.Files) == 0 {
 		log.Debug("temporal: empty git history under srcRoot; no G6 edges emitted",
 			"repo", repoRoot, "rel", srcRel)
-		return nil
+		return nil, nil
 	}
 	// Translate repo-rooted paths → srcRoot-relative slash paths. The
 	// parsers stamp Node.FilePath using filepath.Rel(srcRoot, file) which
@@ -71,23 +75,47 @@ func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerF
 	if len(relHist) == 0 {
 		log.Debug("temporal: no overlap between srcRoot subtree and git history",
 			"repo", repoRoot, "rel", srcRel)
-		return nil
+		return nil, nil
 	}
 
 	commitNodes := buildCommitNodes(hist.Commits, srcRel, relHist)
 	g.Nodes = append(g.Nodes, commitNodes...)
 
 	nodesByPath, fileByPath := indexNodesByPath(g.Nodes)
-	changedIn, blame := buildTemporalEdges(relHist, nodesByPath, fileByPath, commitIDs(commitNodes))
+	commitIDByteSHA := commitIDs(commitNodes)
+	changedIn, blame := buildTemporalEdges(relHist, nodesByPath, fileByPath, commitIDByteSHA)
 	g.Edges = append(g.Edges, changedIn...)
 	g.Edges = append(g.Edges, blame...)
 
+	// Hunk-graph H1: append NodeHunk + has_hunk + adjacent edges, returning
+	// the gzip-compressed patch blobs. Hunks reuse the same commitIDByteSHA
+	// map so they anchor on the commits we just emitted (and only those —
+	// hunks for commits the file-overlap test dropped are skipped).
+	hunkBlobs, err := emitHunkGraph(g, srcRel, commitIDByteSHA, repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("temporal hunk graph: %w", err)
+	}
+
+	hunkCount, hunkEdgeCount := 0, 0
+	for _, n := range g.Nodes {
+		if n.Type == types.NodeHunk {
+			hunkCount++
+		}
+	}
+	for _, e := range g.Edges {
+		if e.Type == types.EdgeHasHunk || e.Type == types.EdgeAdjacent {
+			hunkEdgeCount++
+		}
+	}
 	log.Info("temporal G6 emitted",
 		"commit_nodes", len(commitNodes),
+		"hunk_nodes", hunkCount,
 		"changed_in_edges", len(changedIn),
 		"blame_edges", len(blame),
+		"hunk_edges", hunkEdgeCount,
+		"hunk_blobs", len(hunkBlobs),
 		"max_per_file", maxPerFile)
-	return nil
+	return hunkBlobs, nil
 }
 
 // remapToSrcRel filters out files outside srcRoot's subtree and rewrites

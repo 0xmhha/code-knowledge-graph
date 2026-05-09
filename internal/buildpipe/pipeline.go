@@ -39,26 +39,27 @@ import (
 // and binds_to are the caller's responsibility (cold wipes everything via
 // openColdStore; incremental issues targeted DeleteEdgesByType).
 func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
-	log *slog.Logger, strict bool) (*cluster.PkgTree, *cluster.TopicTree, error) {
+	log *slog.Logger, strict bool) (*cluster.PkgTree, *cluster.TopicTree, map[string][]byte, error) {
 	if solParser != nil {
 		abi := convertABI(solParser.ABI())
 		xlEdges := link.SolToTS(g.Nodes, abi)
 		g.Edges = append(g.Edges, xlEdges...)
 		if _, err := validateAndSanitize(g, log, "xlang", strict); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		log.Info("xlang linked", "binds_to", len(xlEdges))
 	}
-	if err := emitTemporalEdges(g, srcRoot, log, 0); err != nil {
-		return nil, nil, fmt.Errorf("temporal: %w", err)
+	hunkBlobs, err := emitTemporalEdges(g, srcRoot, log, 0)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("temporal: %w", err)
 	}
 	if _, err := validateAndSanitize(g, log, "temporal", strict); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	pkgTree := cluster.BuildPkgTree(g)
 	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
 	score.Compute(g)
-	return pkgTree, topicTree, nil
+	return pkgTree, topicTree, hunkBlobs, nil
 }
 
 // Options controls one ckg build invocation.
@@ -269,7 +270,7 @@ func runCold(opt Options, log *slog.Logger,
 	// by temporal living only in cold; the helper makes that recurrence
 	// structurally impossible.
 	log.Debug("metrics.start")
-	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
@@ -283,7 +284,7 @@ func runCold(opt Options, log *slog.Logger,
 		return persist.Manifest{}, err
 	}
 	defer store.Close()
-	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree); err != nil {
+	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree, hunkBlobs); err != nil {
 		return persist.Manifest{}, err
 	}
 	// G6 v3 (schema 1.5): persist Pass 1 pending refs so the next partial
@@ -349,8 +350,14 @@ func openStore(outDir, dbDsn string) (persist.Store, error) {
 
 // persistColdArtifacts performs the bulk-insert phase of a cold rebuild.
 // All inserts are unconditional — the DB was just wiped by openColdStore.
+//
+// hunkBlobs (schema 1.8 H1) is the gzip-compressed unified-diff text per
+// Hunk node ID, returned by emitTemporalEdges. Merged into the regular
+// extractBlobs map so a single InsertBlobs round-trip persists both
+// CodeNode source slices and hunk patches under the same blobs.node_id PK.
 func persistColdArtifacts(store persist.Store, srcRoot string,
-	g *graph.Graph, pkgTree *cluster.PkgTree, topicTree TopicTreeForPersist) error {
+	g *graph.Graph, pkgTree *cluster.PkgTree, topicTree TopicTreeForPersist,
+	hunkBlobs map[string][]byte) error {
 	if err := store.InsertNodes(g.Nodes); err != nil {
 		return err
 	}
@@ -363,7 +370,11 @@ func persistColdArtifacts(store persist.Store, srcRoot string,
 	if err := store.InsertTopicTree(topicTree); err != nil {
 		return err
 	}
-	if err := store.InsertBlobs(extractBlobs(srcRoot, g.Nodes)); err != nil {
+	blobs := extractBlobs(srcRoot, g.Nodes)
+	for id, b := range hunkBlobs {
+		blobs[id] = b
+	}
+	if err := store.InsertBlobs(blobs); err != nil {
 		return err
 	}
 	return store.RebuildFTS()
@@ -373,10 +384,18 @@ func persistColdArtifacts(store persist.Store, srcRoot string,
 // records for the new manifest. Called on cold rebuild so the next build can
 // diff against this baseline. EdgeIDs are int64 PRIMARY KEY values assigned
 // by the AUTOINCREMENT INSERT just performed.
+//
+// Meta nodes (Commit, Hunk) are excluded from per-file NodeIDs (schema 1.8
+// §11.8 decision): they're emitted wholesale by emitTemporalEdges on every
+// build, so attributing them to a file would inflate the manifest and
+// trigger spurious cache invalidations whenever that file's content changes.
 func computeColdFileEntries(srcRoot, ckgVersion string, discovery []DiscoveredFile, nodes []types.Node, edges []types.Edge) []persist.FileEntry {
 	nodesByPath := map[string][]string{}
 	for _, n := range nodes {
 		if n.FilePath == "" {
+			continue
+		}
+		if isMetaNodeType(n.Type) {
 			continue
 		}
 		nodesByPath[n.FilePath] = append(nodesByPath[n.FilePath], n.ID)
@@ -428,13 +447,19 @@ func shouldRun(lang string, opts []string) bool {
 
 // extractBlobs reads every node's source slice (StartByte..EndByte) into a
 // per-node blob, caching file contents to amortize IO. Package nodes are
-// skipped (they have no syntactic body) and offsets are bounds-checked
-// defensively to avoid panics on malformed nodes.
+// skipped (they have no syntactic body); meta nodes (Commit, Hunk) are
+// also skipped (they have no on-disk byte range — Hunk patch bytes come
+// from emitTemporalEdges' hunkBlobs map merged into the result by the
+// caller, NOT from a file slice). Offsets are bounds-checked defensively
+// to avoid panics on malformed nodes.
 func extractBlobs(root string, nodes []types.Node) map[string][]byte {
 	blobs := map[string][]byte{}
 	cache := map[string][]byte{}
 	for _, n := range nodes {
 		if n.Type == types.NodePackage {
+			continue
+		}
+		if isMetaNodeType(n.Type) {
 			continue
 		}
 		full := filepath.Join(root, n.FilePath)

@@ -29,10 +29,24 @@ type TopicTree struct {
 
 // BuildTopicTree runs Leiden at each gamma in `gammas`, naming communities.
 // Used to populate the topic_tree SQLite table downstream.
+//
+// Meta nodes (Commit, Hunk — schema 1.4/1.8 G6 Temporal) are excluded from
+// community participation per hunk-graph.md §11.7 (decision 2026-05-09).
+// They have no semantic edges (no calls/invokes/references/etc.) so their
+// inclusion would yield singleton communities that pollute the resolution
+// without adding signal. Excluded nodes get NO entry in NodeToComm — viewer
+// callers must treat absence as "no community" (matches the contract for
+// any node the Leiden run drops).
 func BuildTopicTree(g *graph.Graph, gammas []float64, seed int64) *TopicTree {
+	// Build a compacted index over participating nodes only.
+	participants := make([]int, 0, len(g.Nodes))
 	idx := make(map[string]int, len(g.Nodes))
 	for i, n := range g.Nodes {
-		idx[n.ID] = i
+		if n.Type == types.NodeCommit || n.Type == types.NodeHunk {
+			continue
+		}
+		idx[n.ID] = len(participants)
+		participants = append(participants, i)
 	}
 	edges := make([][2]int, 0, len(g.Edges))
 	for _, e := range g.Edges {
@@ -54,13 +68,14 @@ func BuildTopicTree(g *graph.Graph, gammas []float64, seed int64) *TopicTree {
 	}
 	tt := &TopicTree{}
 	for _, gamma := range gammas {
-		parts := RunLeiden(len(g.Nodes), edges, LeidenOpts{
+		parts := RunLeiden(len(participants), edges, LeidenOpts{
 			Resolution: gamma, Seed: seed, MaxIters: 50,
 		})
-		// Group node indices by community label.
+		// Group participant indices by community label. parts[k] is the
+		// community ID for participants[k] (i.e. g.Nodes[participants[k]]).
 		groups := map[int][]int{}
-		for i, c := range parts {
-			groups[c] = append(groups[c], i)
+		for k, c := range parts {
+			groups[c] = append(groups[c], k)
 		}
 		// Iterate community IDs in sorted order so output is deterministic
 		// across map-iteration runs.
@@ -79,7 +94,8 @@ func BuildTopicTree(g *graph.Graph, gammas []float64, seed int64) *TopicTree {
 			sort.Ints(members)
 			ms := make([]types.Node, 0, len(members))
 			ids := make([]string, 0, len(members))
-			for _, ni := range members {
+			for _, k := range members {
+				ni := participants[k]
 				ms = append(ms, g.Nodes[ni])
 				ids = append(ids, g.Nodes[ni].ID)
 				nodeMap[g.Nodes[ni].ID] = c

@@ -962,6 +962,19 @@ patterns. Spot-check one against `git show <sha> --format=%B`.
 These are flagged for explicit user decision before implementation
 begins. The recommended default is in **bold**.
 
+> **Decisions log (finalised 2026-05-09 — H1 implementation):**
+>
+> | § | Decision |
+> |---|----------|
+> | 11.1 | gzip (recommendation accepted) |
+> | 11.2 | no dedup in H1 (recommendation accepted) |
+> | 11.3 | hybrid: `confidence` enum encodes reachability — H1 only emits HEAD-reachable hunks (`EXTRACTED`); a follow-up PR will reflog/fsck-collect unreachable hunks marked `AMBIGUOUS`. **H3 EvidencePack assembler MUST filter to `confidence='EXTRACTED'`** so the LLM never sees force-pushed-away code paths; the AMBIGUOUS rows remain available for the recovery use-case (an agent's overwrite mistake) via the viewer / direct SQL. See §11.3 below for the expanded note. |
+> | 11.4 | target file extension; non-{go,ts,sol} → 'git' (recommendation accepted) |
+> | 11.5 | out of scope for H1–H3 (recommendation accepted) |
+> | 11.6 | 64 KB cap, first 32 KB + truncation marker + last 32 KB (recommendation accepted) |
+> | 11.7 | exclude both Commit and Hunk from PageRank + Leiden (recommendation accepted) |
+> | 11.8 | do NOT record Hunk node IDs in per-file NodeIDs (recommendation accepted) |
+
 ### 11.1 Patch encoding: gzip vs zstd vs raw
 
 - **gzip** is in the Go standard library (`compress/gzip`), already
@@ -1005,6 +1018,28 @@ force-pushed away), its Hunk rows are stale. Options:
 **Recommendation: A for H1.** Add the reachability check in H4 along
 with issue-id extraction (the same pass over `git log <head> --` gives
 us the live SHA set).
+
+**Decision 2026-05-09 (hybrid — supersedes the original A recommendation):**
+We need three layers, partitioned across schema-1.8 H1 and a follow-up PR:
+
+- *Storage layer* (H1): every hunk row uses the existing `confidence` enum
+  to tag reachability. H1 only walks `git log HEAD --` so every emitted
+  hunk gets `confidence='EXTRACTED'`. No new schema column.
+- *Storage layer* (follow-up PR after H1, separate change): a reflog/fsck
+  pass enumerates unreachable SHAs (force-pushed-away branches, hard
+  resets) and inserts their hunks with `confidence='AMBIGUOUS'`. The
+  follow-up PR is independently reviewable — H1 stays scoped.
+- *Retrieval layer* (H3): `evidence_for_intent` and `/api/evidence` MUST
+  add `WHERE n.confidence = 'EXTRACTED'` to every Hunk projection. The
+  Coding Agent never sees code paths that were rolled back, even if the
+  unreachable hunks live in the same DB. The viewer can show them in a
+  dedicated "Recovery" panel (out of scope for H1) so a human can
+  manually consult them when an agent overwrites code.
+
+The recovery use-case is the user-stated motivation: an autonomous agent
+sometimes overwrites correct code, and a force-push that rolled the
+unwanted change back must still be inspectable by humans. The hybrid
+keeps that history without leaking it back into the LLM's input.
 
 ### 11.4 Multi-language hunks
 
@@ -1071,6 +1106,14 @@ get spurious cache invalidations.
 Hunks live outside the file-level cache; they're regenerated wholesale
 on each build that calls `emitTemporalEdges`. Same idiom as Commit
 nodes today.
+
+**Decision 2026-05-09: accepted.** Implemented as the shared
+`isMetaNodeType` helper in `internal/buildpipe/temporal_hunks.go` —
+both `computeColdFileEntries` (cold rebuild) and `buildFileEntries`
+(incremental rebuild) call it to skip Commit + Hunk before populating
+`FileEntry.NodeIDs`. `extractBlobs` uses the same helper to skip meta
+nodes (Hunk patch bytes come from the side-channel `hunkBlobs` map
+returned by `emitTemporalEdges`, not from a file slice).
 
 ---
 

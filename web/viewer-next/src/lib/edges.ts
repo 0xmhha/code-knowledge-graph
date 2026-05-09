@@ -98,6 +98,17 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   changed_in:        { color: 0x888899, width: 1, dash: true },
   blame:             { color: 0xaa9988, width: 1 },
 
+  // G6 Hunk-graph (schema 1.8, H1). The Hunk node sits between Commit
+  // and CodeNode in the Temporal axis: `has_hunk` walks Commit → its
+  // diff blocks; `adjacent` chains hunks within the same (commit, file)
+  // pair in line-order so the EvidencePack assembler (H3) can stitch a
+  // multi-hunk view without an extra ORDER BY query. Both stay low-
+  // contrast and off by default — surfacing them by default would
+  // double the visible edge count on real-history graphs (~1 has_hunk
+  // per hunk + ~0.7 adjacent per hunk on average).
+  has_hunk:          { color: 0x9988aa, width: 1 },
+  adjacent:          { color: 0x776688, width: 1, dash: true },
+
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },
 };
@@ -112,6 +123,9 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
 // Excluded by design (toggle on via filter UI):
 //   - exports: rarely emitted by current parsers; would just clutter
 //   - changed_in: ~46K edges on real repos — opt-in only
+//   - has_hunk / adjacent: schema 1.8 H1 — ~700 hunks on the self-graph
+//     (~1.4K combined edges) which would dominate the boot view's
+//     temporal pill until the user is intentionally inspecting commits
 //
 // G3 schema 1.6 timeout_path / cancellation_path are on by default
 // because they are sparse self-loops that highlight time-budgeted /
@@ -198,8 +212,8 @@ export const GRAPH_GROUPS: ReadonlyArray<GraphGroupSpec> = [
   },
   {
     id: 'G6', label: 'Temporal', color: 0x888899,
-    description: 'Git history: changed_in (symbol→commit), blame (file→last commit)',
-    edges: ['changed_in', 'blame'],
+    description: 'Git history: changed_in (symbol→commit), blame (file→last commit), has_hunk (commit→hunk), adjacent (hunk→hunk in same file)',
+    edges: ['changed_in', 'blame', 'has_hunk', 'adjacent'],
   },
 ];
 
@@ -229,9 +243,9 @@ export function groupHasAnyEdge(group: GraphGroupSpec, whitelist: ReadonlySet<st
 // EDGE_STYLE entry AND assign it to a GRAPH_GROUPS bucket — otherwise
 // it silently disappears from the filter UI.
 //
-// Current state (schema 1.6):
-//   31 non-hidden edges in EDGE_STYLE (32 total - `contains` hidden)
-//   31 edges across GRAPH_GROUPS (G1=3, G2=12, G3=4, G4=6, G5=4, G6=2)
+// Current state (schema 1.8):
+//   33 non-hidden edges in EDGE_STYLE (34 total - `contains` hidden)
+//   33 edges across GRAPH_GROUPS (G1=3, G2=12, G3=4, G4=6, G5=4, G6=4)
 //
 // To verify after editing this file, eyeball the output of:
 //   node -e "const {ALL_EDGE_TYPES, GRAPH_GROUPS} = require('./edges'); \

@@ -15,7 +15,7 @@ const SHAPES: ReadonlyArray<ShapeEntry> = [
   { shape: 'triangle', label: 'Field · Variable · Constant' },
   { shape: 'diamond',  label: 'File' },
   { shape: 'star',     label: 'Commit' },
-  { shape: 'micro',    label: 'CallSite · IfStmt · LoopStmt · …' },
+  { shape: 'micro',    label: 'CallSite · IfStmt · LoopStmt · Hunk · …' },
   { shape: 'tri-up',   label: 'Goroutine' },
   { shape: 'chevron',  label: 'Channel' },
   { shape: 'lock',     label: 'Mutex' },

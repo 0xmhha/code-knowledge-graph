@@ -1,8 +1,10 @@
 package types
 
-// NodeType enumerates the 33 node kinds (spec §5.1; v0.2 schema 1.1 added
+// NodeType enumerates the 34 node kinds (spec §5.1; v0.2 schema 1.1 added
 // Mutex; schema 1.3 appended Endpoint + MessageType for CKS G5 Distributed;
-// schema 1.4 appended Commit for CKS G6 Temporal — git history nodes).
+// schema 1.4 appended Commit for CKS G6 Temporal — git history nodes;
+// schema 1.8 appended Hunk for CKS G6 Temporal Hunk-graph — one block of
+// changed lines per (commit, file)).
 type NodeType string
 
 const (
@@ -52,9 +54,26 @@ const (
 	// have no source range). Appended at the end so existing positional
 	// indices stay stable (TestAllNodeTypes_Stable).
 	NodeCommit NodeType = "Commit"
+	// Schema 1.8 (Hunk-graph H1 — CKS G6 Temporal extension): one contiguous
+	// block of changed lines in one file in one commit, as defined by
+	// unified-diff `@@` headers. Name = "<sha12>:<file>:<idx>",
+	// QualifiedName = `hunk:<full-sha>:<file>:<idx>` (idx = 0-based per-commit
+	// hunk position so multiple hunks per commit get distinct IDs via MakeID).
+	// SubKind = "git". StartLine/EndLine = the hunk's @@ header new-file
+	// line range; StartByte = 0 / EndByte = 1 sentinels (the patch text
+	// lives in blobs.source, gzip-compressed; see hunk-graph.md §2.2-2.3).
+	// Confidence semantics (hunk-graph.md §11.3 — finalised 2026-05-09):
+	//   - EXTRACTED: HEAD-reachable hunks (the only kind H1 collects).
+	//   - AMBIGUOUS: reserved for unreachable hunks that a future PR will
+	//                collect via reflog/fsck. The H3 EvidencePack assembler
+	//                MUST filter to confidence='EXTRACTED' so the LLM never
+	//                sees code paths that were rolled back by force-push.
+	// Appended at the end so existing positional indices stay stable
+	// (TestAllNodeTypes_Stable).
+	NodeHunk NodeType = "Hunk"
 )
 
-// AllNodeTypes returns all 33 node types in a stable order.
+// AllNodeTypes returns all 34 node types in a stable order.
 // NOTE: identifier names are stable; positional indices are load-bearing
 // only for tests that snapshot the full slice (TestAllNodeTypes_Stable).
 // NodeMutex was inserted at index 24 to keep the concurrency family
@@ -66,7 +85,9 @@ const (
 // (indices 30-31) — distributed topology is a distinct family from
 // concurrency / statements, no grouping argument applied. NodeCommit
 // (schema 1.4, E4) is appended at index 32 — temporal/git history is a
-// distinct family from everything above.
+// distinct family from everything above. NodeHunk (schema 1.8, Hunk-graph
+// H1) is appended at index 33 — same temporal family as NodeCommit but
+// finer-grained (one block of changed lines, not a whole commit).
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -78,14 +99,16 @@ func AllNodeTypes() []NodeType {
 		NodeIfStmt, NodeLoopStmt, NodeCallSite, NodeReturnStmt, NodeSwitchStmt,
 		NodeEndpoint, NodeMessageType,
 		NodeCommit,
+		NodeHunk,
 	}
 }
 
-// EdgeType enumerates the 32 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 34 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
-// cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation).
+// cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation;
+// schema 1.8 appended has_hunk / adjacent for the Hunk-graph H1 stage).
 type EdgeType string
 
 const (
@@ -160,9 +183,28 @@ const (
 	// test snapshots stay stable.
 	EdgeTimeoutPath      EdgeType = "timeout_path"
 	EdgeCancellationPath EdgeType = "cancellation_path"
+	// Schema 1.8 (Hunk-graph H1 — CKS G6 Temporal extension):
+	//   has_hunk: Commit → Hunk. One per Hunk; "this commit produced this
+	//             block of changed lines". Confidence mirrors the Hunk's
+	//             own (EXTRACTED for HEAD-reachable, AMBIGUOUS for
+	//             unreachable hunks added by a future reflog-collection PR).
+	//   adjacent: Hunk → Hunk between same-commit, same-file hunks
+	//             ordered by their @@ header start line. Provides a
+	//             deterministic "next-in-this-file" traversal so the
+	//             EvidencePack assembler can stitch a multi-hunk view
+	//             of a commit's edits without a separate ORDER BY query.
+	//             Emitted only between hunks within one (commit, file)
+	//             pair — never across commits or files. Out-of-scope edges:
+	//             modifies (Hunk → CodeNode interval overlap) lands in H2;
+	//             same_logical_change clustering across commits is out of
+	//             scope (see hunk-graph.md §11.5 decision).
+	// Appended (not interleaved) so existing edge-type hash positions /
+	// test snapshots stay stable.
+	EdgeHasHunk  EdgeType = "has_hunk"
+	EdgeAdjacent EdgeType = "adjacent"
 )
 
-// AllEdgeTypes returns all 32 edge types in stable order.
+// AllEdgeTypes returns all 34 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -175,6 +217,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeListensOn, EdgeHandlesMessage, EdgeRPCCalls,
 		EdgeChangedIn, EdgeBlame,
 		EdgeTimeoutPath, EdgeCancellationPath,
+		EdgeHasHunk, EdgeAdjacent,
 	}
 }
 

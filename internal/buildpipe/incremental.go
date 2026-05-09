@@ -213,15 +213,16 @@ func runIncremental(opt Options, log *slog.Logger,
 
 	// (5) Derived passes — xlang, temporal, cluster, score. Same helper as
 	// cold path; DB drops in step (1) ensure the in-memory re-emission
-	// translates cleanly to the persist step.
-	pkgTree, topicTree, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
+	// translates cleanly to the persist step. hunkBlobs (schema 1.8 H1) are
+	// merged into InsertBlobs alongside the dirty-file CodeNode slices.
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
 
 	// (6) Persist + new pending_refs for dirty files only.
 	if err := persistIncrementalArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree,
-		decisions.DirtyPaths(), cachedNodeIDs); err != nil {
+		decisions.DirtyPaths(), cachedNodeIDs, hunkBlobs); err != nil {
 		return persist.Manifest{}, err
 	}
 	if err := store.InsertPendingRefs(dirtyPending); err != nil {
@@ -375,10 +376,18 @@ func reloadCachedEdges(store persist.Store, cachedByLang map[string][]string) ([
 // persistIncrementalArtifacts handles the incremental-path inserts: nodes
 // (filtered to exclude cached node IDs to avoid INSERT OR REPLACE cascade),
 // edges (filtered to exclude reloaded edges via Edge.ID==0 discriminator),
-// pkg/topic trees (full replace), per-dirty-file blobs, FTS rebuild.
+// pkg/topic trees (full replace), per-dirty-file blobs + hunk blobs, FTS
+// rebuild.
+//
+// hunkBlobs (schema 1.8 H1) is the gzip-compressed unified-diff text per
+// Hunk node ID. Hunks aren't file-owned in the cache sense (§11.8), so the
+// full set is re-inserted on every build alongside the dirty-file CodeNode
+// blobs. INSERT OR REPLACE on blobs.node_id idempotently overwrites the
+// previous round's hunk rows.
 func persistIncrementalArtifacts(store persist.Store, srcRoot string,
 	g *graph.Graph, pkgTree *cluster.PkgTree, topicTree TopicTreeForPersist,
-	dirtyPaths []string, cachedNodeIDs map[string]bool) error {
+	dirtyPaths []string, cachedNodeIDs map[string]bool,
+	hunkBlobs map[string][]byte) error {
 	// Nodes: skip those already in DB (cached). Re-emitted dirty parse
 	// nodes that share an ID with a cached one (e.g. shared Package node)
 	// are skipped — DB row already represents them.
@@ -409,7 +418,11 @@ func persistIncrementalArtifacts(store persist.Store, srcRoot string,
 	if err := store.InsertTopicTree(topicTree); err != nil {
 		return err
 	}
-	if err := store.InsertBlobs(extractBlobsForFiles(srcRoot, g.Nodes, dirtyPaths)); err != nil {
+	blobs := extractBlobsForFiles(srcRoot, g.Nodes, dirtyPaths)
+	for id, b := range hunkBlobs {
+		blobs[id] = b
+	}
+	if err := store.InsertBlobs(blobs); err != nil {
 		return err
 	}
 	return store.RebuildFTS()
@@ -721,11 +734,17 @@ func buildManifestSkeleton(opt Options, goCount, tsCount, solCount int,
 // buildFileEntries assembles the FileEntry slice for the new manifest. Each
 // dirty / cached file gets one entry with current SHA + cache key + the IDs
 // it produced (looked up from the merged graph). Removed files are excluded.
+//
+// Meta nodes (Commit, Hunk) are excluded from per-file NodeIDs: they live
+// outside file-level cache (schema 1.8 §11.8 decision; see isMetaNodeType).
 func buildFileEntries(decisions CacheDecisions, nodes []types.Node, edges []types.Edge) []persist.FileEntry {
 	// Build path → []nodeID and path → []edgeID indexes once.
 	nodesByPath := map[string][]string{}
 	for _, n := range nodes {
 		if n.FilePath == "" {
+			continue
+		}
+		if isMetaNodeType(n.Type) {
 			continue
 		}
 		nodesByPath[n.FilePath] = append(nodesByPath[n.FilePath], n.ID)

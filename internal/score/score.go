@@ -9,6 +9,14 @@ import (
 )
 
 // Compute populates InDegree, OutDegree, PageRank, and UsageScore for each node.
+//
+// Meta nodes (Commit, Hunk — schema 1.4/1.8 G6 Temporal) are excluded from
+// PageRank participation per hunk-graph.md §11.7 (decision 2026-05-09):
+// Hunks have ~1 inbound edge each (has_hunk) and would rank near-zero,
+// adding noise to the metric without contributing signal. They keep
+// in/out degree counters populated (those are local, additive, and useful
+// for the viewer's "how many hunks does this commit have" query) but
+// their PageRank stays at the zero-initialised default.
 func Compute(g *graph.Graph) {
 	idx := make(map[string]int, len(g.Nodes))
 	for i, n := range g.Nodes {
@@ -35,15 +43,34 @@ func Compute(g *graph.Graph) {
 	pageRank(g, 0.85, 30)
 }
 
-// pageRank implements the standard iterative algorithm.
+// isMetaNodeType mirrors buildpipe.isMetaNodeType — kept duplicated to
+// avoid a buildpipe→score package cycle. Update both when a future schema
+// adds another meta-node family.
+func isMetaNodeType(t types.NodeType) bool {
+	return t == types.NodeCommit || t == types.NodeHunk
+}
+
+// pageRank implements the standard iterative algorithm. Meta nodes
+// (Commit, Hunk) are excluded from the participant set; their pr stays
+// at zero-init (see Compute doc-comment).
 func pageRank(g *graph.Graph, damping float64, iters int) {
-	n := len(g.Nodes)
-	if n == 0 {
+	if len(g.Nodes) == 0 {
 		return
 	}
-	idx := make(map[string]int, n)
+	// Build a compacted index over participating (non-meta) nodes only.
+	// participants[k] is the index in g.Nodes of the k-th participant.
+	participants := make([]int, 0, len(g.Nodes))
+	idx := make(map[string]int, len(g.Nodes))
 	for i, nd := range g.Nodes {
-		idx[nd.ID] = i
+		if isMetaNodeType(nd.Type) {
+			continue
+		}
+		idx[nd.ID] = len(participants)
+		participants = append(participants, i)
+	}
+	n := len(participants)
+	if n == 0 {
+		return
 	}
 	out := make([][]int, n)
 	outDeg := make([]int, n)
@@ -87,7 +114,7 @@ func pageRank(g *graph.Graph, damping float64, iters int) {
 		}
 		pr, next = next, pr
 	}
-	for i := range g.Nodes {
-		g.Nodes[i].PageRank = pr[i]
+	for k, gi := range participants {
+		g.Nodes[gi].PageRank = pr[k]
 	}
 }

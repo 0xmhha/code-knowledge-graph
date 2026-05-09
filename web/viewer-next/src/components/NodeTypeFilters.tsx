@@ -53,8 +53,8 @@ const NODE_TYPE_GROUPS: ReadonlyArray<NodeTypeGroupSpec> = [
   {
     id: 'concurrency',
     label: 'Concurrency / VCS',
-    description: 'Goroutines, channels, mutexes, and git Commit nodes',
-    types: ['Goroutine', 'Channel', 'Mutex', 'Commit'],
+    description: 'Goroutines, channels, mutexes, and git Commit / Hunk nodes',
+    types: ['Goroutine', 'Channel', 'Mutex', 'Commit', 'Hunk'],
   },
 ];
 

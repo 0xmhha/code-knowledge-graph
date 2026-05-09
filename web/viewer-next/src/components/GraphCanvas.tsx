@@ -595,9 +595,15 @@ function drawShape(
     case 'IfStmt':
     case 'LoopStmt':
     case 'ReturnStmt':
-    case 'SwitchStmt': {
-      // Micro dot — 1.5x smaller circle so statement-level nodes recede
-      // when the type is enabled in NodeTypeFilters.
+    case 'SwitchStmt':
+    case 'Hunk': {
+      // Micro dot — 1.5x smaller circle so statement-level + meta-Hunk nodes
+      // recede when the type is enabled in NodeTypeFilters. Hunk shares the
+      // micro shape because it's a fine-grained meta node (one diff block);
+      // distinguishing it visually from CallSite/IfStmt would require a
+      // separate shape we'd then have to legend, and the differentiation
+      // is already carried by node color (NodeHunk gets the G6 muted-purple
+      // family that EDGE_STYLE.has_hunk uses).
       ctx.beginPath();
       ctx.arc(cx, cy, r / 1.5, 0, 2 * Math.PI);
       ctx.fill();

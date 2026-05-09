@@ -26,14 +26,18 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
     // and 1-hop neighbours show real call/import structure. Fall back to
     // nodes('') when the new endpoint is missing (older backends, or when
     // the static export has no pagerank/usage_score values populated).
-    // excludeTypes=['Commit']: git Commit nodes outrank real symbols by
-    // pagerank in many graphs, dominating the top-N seed (e.g. 104/200
-    // were Commits in the self-graph). Their only outgoing edge type is
-    // `changed_in` which is off in DEFAULT_EDGE_TYPES, producing the
-    // "node visible but no edges" symptom on click. Excluding Commit at
-    // boot keeps the canvas focused on hub functions/methods/types
-    // whose edges (calls/defines/imports/...) are all on by default.
-    let top = await api.topNodes('pagerank', BOOT_VISIBLE, ['Commit']);
+    // excludeTypes=['Commit', 'Hunk']: git meta nodes (Commit, Hunk —
+    // schema 1.4/1.8 G6 Temporal) are excluded from PageRank participation
+    // in score.Compute (§11.7 decision), so they land at zero rank and
+    // trail real symbols. The SQL-layer filter still applies defensively
+    // so a future PageRank-rule change can't surprise the boot seed —
+    // and so older graph.dbs (where Commits did outrank symbols, e.g.
+    // 104/200 were Commits in the self-graph) keep the corrected boot
+    // behaviour. Hunk's only inbound edge is `has_hunk` (off in
+    // DEFAULT_EDGE_TYPES) — without exclusion it would produce the same
+    // "node visible but no edges" symptom that drove the original Commit
+    // exclusion in pre-1.8.
+    let top = await api.topNodes('pagerank', BOOT_VISIBLE, ['Commit', 'Hunk']);
     if (top.length === 0) top = await api.nodes('', BOOT_VISIBLE);
     s.loadNodes(top);
 

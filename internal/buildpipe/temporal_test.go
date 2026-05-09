@@ -30,7 +30,7 @@ func TestEmitTemporalEdges_BasicGitRepo(t *testing.T) {
 	originalNodes := len(g.Nodes)
 	originalEdges := len(g.Edges)
 
-	if err := emitTemporalEdges(g, repo, discardLog(), 10); err != nil {
+	if _, err := emitTemporalEdges(g, repo, discardLog(), 10); err != nil {
 		t.Fatalf("emitTemporalEdges: %v", err)
 	}
 
@@ -50,7 +50,9 @@ func TestEmitTemporalEdges_BasicGitRepo(t *testing.T) {
 	}
 
 	// Edge bookkeeping: every original node in main.go should have a
-	// changed_in edge to the commit; one blame edge from the File node.
+	// changed_in edge to the commit; one blame edge from the File node;
+	// schema 1.8 H1 also adds NodeHunk + has_hunk + (zero or more) adjacent
+	// edges depending on how the file's content split into hunks.
 	changedIn := edgesByType(g.Edges, types.EdgeChangedIn)
 	if len(changedIn) != originalNodes {
 		t.Errorf("expected %d changed_in edges (one per original node in main.go), got %d",
@@ -60,11 +62,25 @@ func TestEmitTemporalEdges_BasicGitRepo(t *testing.T) {
 	if len(blame) != 1 {
 		t.Errorf("expected exactly 1 blame edge, got %d", len(blame))
 	}
-	// Sanity: total node + edge counts include the new ones.
-	if want := originalNodes + 1; len(g.Nodes) != want {
+	hunks := nodesByType(g.Nodes, types.NodeHunk)
+	hasHunk := edgesByType(g.Edges, types.EdgeHasHunk)
+	adjacent := edgesByType(g.Edges, types.EdgeAdjacent)
+	if len(hasHunk) != len(hunks) {
+		t.Errorf("has_hunk edges (%d) must equal Hunk nodes (%d)", len(hasHunk), len(hunks))
+	}
+	// Single-file single-commit scenario: the file is wholly new, so the
+	// content collapses to one hunk → 1 NodeHunk, 1 has_hunk, 0 adjacent.
+	if len(hunks) != 1 {
+		t.Errorf("expected 1 Hunk for newly-added file, got %d", len(hunks))
+	}
+	if len(adjacent) != 0 {
+		t.Errorf("expected 0 adjacent edges (single hunk), got %d", len(adjacent))
+	}
+	// Sanity: total node + edge counts include all the new pieces.
+	if want := originalNodes + 1 + len(hunks); len(g.Nodes) != want {
 		t.Errorf("Node count = %d, want %d", len(g.Nodes), want)
 	}
-	if want := originalEdges + len(changedIn) + len(blame); len(g.Edges) != want {
+	if want := originalEdges + len(changedIn) + len(blame) + len(hasHunk) + len(adjacent); len(g.Edges) != want {
 		t.Errorf("Edge count = %d, want %d", len(g.Edges), want)
 	}
 
@@ -81,7 +97,7 @@ func TestEmitTemporalEdges_NotAGitRepo(t *testing.T) {
 	g := buildSyntheticGraph("main.go")
 	beforeNodes := len(g.Nodes)
 	beforeEdges := len(g.Edges)
-	if err := emitTemporalEdges(g, dir, discardLog(), 10); err != nil {
+	if _, err := emitTemporalEdges(g, dir, discardLog(), 10); err != nil {
 		t.Fatalf("expected nil err on non-git src, got %v", err)
 	}
 	if len(g.Nodes) != beforeNodes || len(g.Edges) != beforeEdges {
@@ -102,7 +118,7 @@ func TestEmitTemporalEdges_MultipleCommitsAndBlameOrder(t *testing.T) {
 	c2 := commitFileToRepo(t, repo, relPath, "package x\n\n// edit\n", "second")
 
 	g := buildSyntheticGraph(relPath)
-	if err := emitTemporalEdges(g, repo, discardLog(), 10); err != nil {
+	if _, err := emitTemporalEdges(g, repo, discardLog(), 10); err != nil {
 		t.Fatalf("emitTemporalEdges: %v", err)
 	}
 	commits := nodesByType(g.Nodes, types.NodeCommit)
@@ -137,7 +153,7 @@ func TestEmitTemporalEdges_PerFileCap(t *testing.T) {
 		commitFileToRepo(t, repo, rel, "package y\n//"+strings.Repeat("edit ", i+1)+"\n", "edit")
 	}
 	g := buildSyntheticGraph(rel)
-	if err := emitTemporalEdges(g, repo, discardLog(), 2); err != nil {
+	if _, err := emitTemporalEdges(g, repo, discardLog(), 2); err != nil {
 		t.Fatalf("emitTemporalEdges: %v", err)
 	}
 	commits := nodesByType(g.Nodes, types.NodeCommit)

@@ -71,9 +71,10 @@ export interface IAPI {
   // methods/types and 1-hop expansion shows real call/import structure
   // rather than 37 disconnected Package nodes.
   // excludeTypes filters out node kinds at the SQL layer — the viewer
-  // passes ['Commit'] so the boot seed isn't dominated by git Commit
-  // nodes (which outrank symbols by pagerank but only own `changed_in`
-  // edges off by default).
+  // passes ['Commit', 'Hunk'] so the boot seed isn't dominated by meta
+  // nodes (Commit/Hunk are excluded from PageRank in score.Compute per
+  // schema 1.8 §11.7, but the SQL filter is kept as a defensive hedge
+  // for older graph.db files and future PageRank-rule shifts).
   // Returns [] on older backends that don't expose /api/nodes/top —
   // callers should fall back to nodes('') in that case.
   topNodes(metric: TopMetric, limit: number, excludeTypes?: string[]): Promise<GraphNode[]>;
