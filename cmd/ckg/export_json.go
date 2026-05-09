@@ -39,9 +39,59 @@ type jsonGraphHeader struct {
 	Stats          map[string]int `json:"stats,omitempty"`
 }
 
+// minimalNode is the JSON shape emitted under --minimal: drops the
+// scoring metadata (PageRank / degree / complexity), the byte-range
+// coordinates (StartByte / EndByte — only useful with the matching
+// graph.db blob), and the optional textual fields (Visibility / Signature
+// / DocComment / SubKind). Keeps the eight fields a downstream consumer
+// actually needs to reason about the symbol: ID, Type, Name,
+// QualifiedName, FilePath, StartLine/EndLine, Language, Confidence.
+type minimalNode struct {
+	ID            string           `json:"id"`
+	Type          types.NodeType   `json:"type"`
+	Name          string           `json:"name"`
+	QualifiedName string           `json:"qualified_name"`
+	FilePath      string           `json:"file_path"`
+	StartLine     int              `json:"start_line"`
+	EndLine       int              `json:"end_line"`
+	Language      string           `json:"language"`
+	Confidence    types.Confidence `json:"confidence"`
+}
+
+// minimalEdge keeps the join surface (Src/Dst/Type/Count/Confidence)
+// + DispatchKind (the Track C invokes-classification — high signal,
+// low cost) but drops the auto-increment ID, which is meaningful only
+// inside the originating SQLite file.
+type minimalEdge struct {
+	Src          string           `json:"src"`
+	Dst          string           `json:"dst"`
+	Type         types.EdgeType   `json:"type"`
+	FilePath     string           `json:"file_path,omitempty"`
+	Line         int              `json:"line,omitempty"`
+	Count        int              `json:"count"`
+	Confidence   types.Confidence `json:"confidence"`
+	DispatchKind string           `json:"dispatch_kind,omitempty"`
+}
+
+func toMinimalNode(n types.Node) minimalNode {
+	return minimalNode{
+		ID: n.ID, Type: n.Type, Name: n.Name, QualifiedName: n.QualifiedName,
+		FilePath: n.FilePath, StartLine: n.StartLine, EndLine: n.EndLine,
+		Language: n.Language, Confidence: n.Confidence,
+	}
+}
+
+func toMinimalEdge(e types.Edge) minimalEdge {
+	return minimalEdge{
+		Src: e.Src, Dst: e.Dst, Type: e.Type, FilePath: e.FilePath,
+		Line: e.Line, Count: e.Count, Confidence: e.Confidence,
+		DispatchKind: e.DispatchKind,
+	}
+}
+
 func newExportJSONCmd() *cobra.Command {
 	var graph, out string
-	var pretty bool
+	var pretty, minimal bool
 	cmd := &cobra.Command{
 		Use:   "export-json",
 		Short: "Export the full graph as a single portable JSON file",
@@ -98,12 +148,16 @@ and language so the export is lossless against the SQLite source.`,
 			w := bufio.NewWriter(f)
 			defer w.Flush()
 
-			if err := writeGraphJSON(w, manifest, nodes, edges, pretty); err != nil {
+			if err := writeGraphJSON(w, manifest, nodes, edges, pretty, minimal); err != nil {
 				return fmt.Errorf("write json: %w", err)
 			}
+			mode := "full"
+			if minimal {
+				mode = "minimal"
+			}
 			fmt.Fprintf(os.Stderr,
-				"ckg: exported %d nodes / %d edges to %s\n",
-				len(nodes), len(edges), out)
+				"ckg: exported %d nodes / %d edges to %s (%s)\n",
+				len(nodes), len(edges), out, mode)
 			return nil
 		},
 	}
@@ -111,6 +165,8 @@ and language so the export is lossless against the SQLite source.`,
 	cmd.Flags().StringVar(&out, "out", "", "output JSON file path (required)")
 	cmd.Flags().BoolVar(&pretty, "pretty", false,
 		"pretty-print with 2-space indentation (larger file; default packs each row on one line)")
+	cmd.Flags().BoolVar(&minimal, "minimal", false,
+		"drop metadata fields (PageRank / degree / byte ranges / Visibility / Signature / DocComment / SubKind / Edge.ID) — typically 10-20% smaller, but the bigger win is a tighter schema for downstream consumers that don't have the originating graph.db handy")
 	_ = cmd.MarkFlagRequired("graph")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
@@ -120,8 +176,13 @@ and language so the export is lossless against the SQLite source.`,
 // roll the array brackets so the encoder can flush each Node/Edge row
 // independently — building the whole structure in memory would peak
 // at ~3x file size on a 220K-node graph.
+//
+// minimal=true emits the slim minimalNode/minimalEdge shapes (see
+// types defined above); minimal=false preserves the full pkg/types
+// schema. Both modes share the same envelope + bracket scaffolding so
+// the file is a single switch on the per-row Marshal call.
 func writeGraphJSON(w *bufio.Writer, m persist.Manifest,
-	nodes []types.Node, edges []types.Edge, pretty bool) error {
+	nodes []types.Node, edges []types.Edge, pretty, minimal bool) error {
 	hdr := jsonGraphHeader{
 		SchemaVersion:  m.SchemaVersion,
 		CKGVersion:     m.CKGVersion,
@@ -158,7 +219,15 @@ func writeGraphJSON(w *bufio.Writer, m persist.Manifest,
 		}
 		// json.Encoder appends a trailing newline; for non-pretty mode
 		// that breaks the `[item,item]` shape. Use Marshal directly.
-		b, err := json.Marshal(n)
+		var (
+			b   []byte
+			err error
+		)
+		if minimal {
+			b, err = json.Marshal(toMinimalNode(n))
+		} else {
+			b, err = json.Marshal(n)
+		}
 		if err != nil {
 			return err
 		}
@@ -185,7 +254,15 @@ func writeGraphJSON(w *bufio.Writer, m persist.Manifest,
 				return err
 			}
 		}
-		b, err := json.Marshal(e)
+		var (
+			b   []byte
+			err error
+		)
+		if minimal {
+			b, err = json.Marshal(toMinimalEdge(e))
+		} else {
+			b, err = json.Marshal(e)
+		}
 		if err != nil {
 			return err
 		}
