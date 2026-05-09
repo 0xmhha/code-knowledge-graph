@@ -1,6 +1,23 @@
 {
   "nodes": [
     {
+      "id": "17c44b0409ab41d9",
+      "type": "ReturnStmt",
+      "name": "ReturnStmt",
+      "qualified_name": "VaultService.depositFn#ReturnStmt@146",
+      "file_path": "services/vault.ts",
+      "start_line": 5,
+      "end_line": 5,
+      "start_byte": 146,
+      "end_byte": 180,
+      "language": "ts",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
+    },
+    {
       "id": "2c6468f987e8884c",
       "type": "Method",
       "name": "deposit",
@@ -10,6 +27,23 @@
       "end_line": 3,
       "start_byte": 63,
       "end_byte": 70,
+      "language": "ts",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": "2ff7ae3e02fb1509",
+      "type": "ReturnStmt",
+      "name": "ReturnStmt",
+      "qualified_name": "Vault.deposit#ReturnStmt@104",
+      "file_path": "contracts/Vault.ts",
+      "start_line": 3,
+      "end_line": 3,
+      "start_byte": 104,
+      "end_byte": 129,
       "language": "ts",
       "in_degree": 0,
       "out_degree": 0,
@@ -137,6 +171,23 @@
       "confidence": "EXTRACTED"
     },
     {
+      "id": "cc83c81c1adad946",
+      "type": "CallSite",
+      "name": "CallSite",
+      "qualified_name": "Vault.deposit#CallSite@111",
+      "file_path": "contracts/Vault.ts",
+      "start_line": 3,
+      "end_line": 3,
+      "start_byte": 111,
+      "end_byte": 128,
+      "language": "ts",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
+    },
+    {
       "id": "d84556ef777fd2e3",
       "type": "Method",
       "name": "constructor",
@@ -186,16 +237,61 @@
       "pagerank": 0,
       "usage_score": 0,
       "confidence": "EXTRACTED"
+    },
+    {
+      "id": "f90e35bcc7ba7960",
+      "type": "CallSite",
+      "name": "CallSite",
+      "qualified_name": "VaultService.depositFn#CallSite@153",
+      "file_path": "services/vault.ts",
+      "start_line": 5,
+      "end_line": 5,
+      "start_byte": 153,
+      "end_byte": 179,
+      "language": "ts",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
     }
   ],
   "edges": [
     {
-      "src": "4eb178a7e8250ee3",
+      "src": "f90e35bcc7ba7960",
       "dst": "2c6468f987e8884c",
       "type": "calls",
       "line": 5,
       "count": 1,
       "confidence": "INFERRED"
+    },
+    {
+      "src": "2c6468f987e8884c",
+      "dst": "2ff7ae3e02fb1509",
+      "type": "contains",
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "src": "2c6468f987e8884c",
+      "dst": "cc83c81c1adad946",
+      "type": "contains",
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "src": "4eb178a7e8250ee3",
+      "dst": "17c44b0409ab41d9",
+      "type": "contains",
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "src": "4eb178a7e8250ee3",
+      "dst": "f90e35bcc7ba7960",
+      "type": "contains",
+      "count": 1,
+      "confidence": "EXTRACTED"
     },
     {
       "src": "e4a99e2b2fa5ab75",

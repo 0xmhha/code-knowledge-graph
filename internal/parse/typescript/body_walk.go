@@ -28,84 +28,19 @@ import (
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
-	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// runBodyCalls walks every call_expression in the parse tree and emits
-// one PendingRef per call, anchored on the smallest enclosing Function /
-// Method node we already added to v.nodes. Calls outside any tracked
-// function (e.g. module-level top-level statements like
-// `console.log("init")`) are silently dropped — they have no caller
-// node to attach to.
-func (v *declVisitor) runBodyCalls() {
-	// declarations.go records StartByte/EndByte = the IDENTIFIER's byte
-	// range (just the function name), not the full declaration. We can't
-	// use those for "is this call inside this function" containment
-	// checks; instead we re-query the parse tree for the full
-	// function_declaration / method_definition spans and link them back
-	// to the previously-emitted Function/Method nodes by (name, line).
-	intervals := collectFnIntervalsFromTree(v)
-	if len(intervals) == 0 {
-		return
-	}
-
-	q, qErr := sitter.NewQuery(v.lang, queryCallExpression)
-	if qErr != nil {
-		return
-	}
-	defer q.Close()
-	cur := sitter.NewQueryCursor()
-	defer cur.Close()
-	matches := cur.Matches(q, v.root, v.src)
-	names := q.CaptureNames()
-
-	// emittedPairs: per-(caller, callee, line) dedup so multi-arg calls
-	// like `foo(bar(), bar())` don't double-count `calls(foo, bar)`.
-	// The line is part of the key because two calls to the same callee
-	// from one function on different lines are real distinct edges in
-	// the source — the count is reflected by the edge.Count column when
-	// Resolve later collapses them by (src, dst, type).
-	emittedPairs := make(map[string]struct{}, 256)
-
-	for {
-		m := matches.Next()
-		if m == nil {
-			break
-		}
-		var calleeName string
-		var callPos int
-		var callLine int
-		for _, c := range m.Captures {
-			node := c.Node
-			switch names[c.Index] {
-			case "callee":
-				calleeName = node.Utf8Text(v.src)
-			case "call":
-				callPos = int(node.StartByte())
-				callLine = int(node.StartPosition().Row) + 1
-			}
-		}
-		if calleeName == "" {
-			continue
-		}
-		callerID, ok := findEnclosingFn(intervals, callPos)
-		if !ok {
-			continue
-		}
-		key := callerID + "|" + calleeName + "|" + itoa(callLine)
-		if _, dup := emittedPairs[key]; dup {
-			continue
-		}
-		emittedPairs[key] = struct{}{}
-		v.pending = append(v.pending, parse.PendingRef{
-			SrcID:       callerID,
-			TargetQName: calleeName,
-			EdgeType:    types.EdgeCalls,
-			Line:        callLine,
-		})
-	}
-}
+// (Note: the original runBodyCalls function lived here in earlier
+// schema-1.8 work — it walked call_expression nodes and emitted
+// PendingRefs anchored on the enclosing Function/Method. It has been
+// replaced by runBodyStatements in statements.go, which performs the
+// same call walk plus four other statement kinds (IfStmt / LoopStmt /
+// SwitchStmt / ReturnStmt) and re-anchors PendingRefs on a fresh
+// CallSite node, mirroring the canonical Go-parser pattern. The helpers
+// below — fnInterval, collectFnIntervalsFromTree, visitTreeForFnDecls,
+// findEnclosingFn, fnKey, itoa — are still used by statements.go and
+// kept here untouched.)
 
 // fnInterval is one Function/Method's byte range + ID + start line.
 // Sorted (by start asc, end desc) so a linear scan from the start can

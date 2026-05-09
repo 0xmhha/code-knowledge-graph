@@ -42,11 +42,14 @@ func (v *declVisitor) visit() {
 	v.runQuery(queryEnum, types.NodeEnum)
 	v.runQuery(queryDecorator, types.NodeDecorator)
 	v.runImports()
-	// P3 (schema 1.8): walk function/method bodies for call_expression
-	// → emit Pending refs that Resolve unions by callee Name. Runs after
-	// the declaration queries so the Function/Method byte ranges are
-	// already populated for the enclosing-fn lookup.
-	v.runBodyCalls()
+	// Walk function/method bodies for statement-level nodes (IfStmt,
+	// LoopStmt, SwitchStmt, ReturnStmt, CallSite) + emit cross-file
+	// PendingRefs anchored on each CallSite. Runs after the declaration
+	// queries so the Function/Method byte intervals (collected via
+	// collectFnIntervalsFromTree) are populated for the enclosing-fn
+	// lookup. Replaces the earlier P3 runBodyCalls — see
+	// internal/parse/typescript/statements.go for the full schema.
+	v.runBodyStatements()
 }
 
 func (v *declVisitor) runQuery(q string, nt types.NodeType) {

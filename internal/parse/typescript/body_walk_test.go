@@ -97,8 +97,12 @@ helper();   // top-level — no enclosing function
 
 // TestTSBodyWalk_NestedSmallestEnclosing verifies the "smallest
 // containing interval" semantics: a call inside a method that lives
-// inside a class anchors on the method, not on any outer function/class
-// span the method might overlap with.
+// inside a class anchors on a CallSite contained-by the method, not
+// on any outer function/class span the method might overlap with.
+//
+// Schema change: PendingRef.SrcID is now the CallSite ID (mirroring
+// the Go parser's CallSite-anchored pattern); we assert via the
+// `contains` edge that the CallSite traces back to the expected method.
 func TestTSBodyWalk_NestedSmallestEnclosing(t *testing.T) {
 	src := []byte(`
 class App {
@@ -117,7 +121,6 @@ function teardown() {}
 	if err != nil {
 		t.Fatalf("ParseFile: %v", err)
 	}
-	// Find Method nodes and their IDs.
 	methodIDByName := map[string]string{}
 	for _, n := range r.Nodes {
 		if n.Type == types.NodeMethod {
@@ -127,16 +130,25 @@ function teardown() {}
 	if methodIDByName["start"] == "" || methodIDByName["stop"] == "" {
 		t.Fatalf("expected start and stop Method nodes, got: %v", methodIDByName)
 	}
-	// Each method should anchor exactly one PendingRef (its own callee).
-	for _, p := range r.Pending {
-		switch p.TargetQName {
+	// Build CallSite → enclosing-method map via the `contains` edges.
+	containerOf := map[string]string{}
+	for _, e := range r.Edges {
+		if e.Type == types.EdgeContains {
+			containerOf[e.Dst] = e.Src
+		}
+	}
+	for _, pr := range r.Pending {
+		container := containerOf[pr.SrcID]
+		switch pr.TargetQName {
 		case "initialize":
-			if p.SrcID != methodIDByName["start"] {
-				t.Errorf("initialize call should anchor on start, got %s", p.SrcID)
+			if container != methodIDByName["start"] {
+				t.Errorf("initialize call's CallSite (%s) should be contained by start (%s), got container %s",
+					pr.SrcID, methodIDByName["start"], container)
 			}
 		case "teardown":
-			if p.SrcID != methodIDByName["stop"] {
-				t.Errorf("teardown call should anchor on stop, got %s", p.SrcID)
+			if container != methodIDByName["stop"] {
+				t.Errorf("teardown call's CallSite (%s) should be contained by stop (%s), got container %s",
+					pr.SrcID, methodIDByName["stop"], container)
 			}
 		}
 	}
