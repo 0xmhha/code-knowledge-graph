@@ -31,6 +31,7 @@ func Run(ctx context.Context, store persist.StoreReader) error {
 	registerSearchText(s, safe)
 	registerGetContextForTask(s, safe)
 	registerImpactOfChange(s, safe)
+	registerEvidenceForIntent(s, safe)
 
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("mcp serve stdio: %w", err)

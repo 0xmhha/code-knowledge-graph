@@ -548,6 +548,21 @@ gate runs unchanged.
 
 ## 5. EvidencePack assembler (H3)
 
+> **Status (2026-05-10)**: Landed. `pkg/evidence/evidence.go` `BuildPack`
+> implements the §5.2 ranking algorithm; `internal/mcp/evidence.go`
+> registers `evidence_for_intent` as the 8th MCP tool;
+> `internal/server/api.go` `handleEvidence` exposes the same assembler
+> via `GET /api/evidence`. §11.3 retrieval boundary enforced two ways
+> — the MCP wrapper filters the storeReader, and `indexCorpus` itself
+> drops AMBIGUOUS Hunk/Commit rows + AMBIGUOUS edges as defense in
+> depth. Self-graph eval (go-stablenet, /tmp/ckg-h2): query
+> `intent=release merge dev` returns 3 EXTRACTED commits about
+> secp256k1 / GovMinter / EIP-7951 even though the AMBIGUOUS
+> "release: merge dev to master (#80)" exists in the same corpus —
+> proving the boundary holds end-to-end. 8 unit tests cover ranking,
+> §11.3 filtering, seed_qname expansion, budget cap, empty intent,
+> empty corpus, qname parser, and gunzip helper.
+
 ### 5.1 New MCP capability
 
 H3 adds one new MCP tool, registered alongside the existing seven in

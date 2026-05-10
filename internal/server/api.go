@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
 	"github.com/0xmhha/code-knowledge-graph/pkg/impact"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
@@ -120,6 +121,38 @@ func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.decorateNodes(nodes))
+}
+
+// handleEvidence returns the H3 EvidencePack JSON for an intent string
+// + optional seed_qname. Mirrors the MCP evidence_for_intent tool —
+// shares the same pkg/evidence.BuildPack assembler, so HTTP and stdio
+// consumers observe the same ranking + budget behaviour.
+//
+// §11.3 retrieval boundary: BuildPack itself filters confidence=
+// 'EXTRACTED' on Hunk/Commit rows at indexCorpus time. The HTTP layer
+// doesn't get the MCP wrapper, so this in-package filter is the only
+// guard — but it's airtight: the BM25 corpus is constructed from
+// EXTRACTED hunks alone, and the gunzip-on-read path doesn't widen
+// the source set.
+func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
+	intent := r.URL.Query().Get("intent")
+	if intent == "" {
+		http.Error(w, "intent query param is required", http.StatusBadRequest)
+		return
+	}
+	k, _ := strconv.Atoi(r.URL.Query().Get("k"))
+	budget, _ := strconv.Atoi(r.URL.Query().Get("budget_tokens"))
+	pack, err := evidence.BuildPack(s.store, evidence.Options{
+		Intent:       intent,
+		SeedQname:    r.URL.Query().Get("seed_qname"),
+		K:            k,
+		BudgetTokens: budget,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, pack)
 }
 
 // handleAmbiguousNodes returns Hunk + Commit rows with confidence='AMBIGUOUS'
