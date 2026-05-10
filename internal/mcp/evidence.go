@@ -46,6 +46,8 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, c
 			mcp.Description("Top-K commits to return. Each commit may contain multiple hunks (the adjacent edge means the Agent reads the full change).")),
 		mcp.WithNumber("budget_tokens", mcp.DefaultNumber(6000),
 			mcp.Description("Stop emitting commits once cumulative patch text exceeds this many tokens (4 chars/token approx).")),
+		mcp.WithNumber("offset", mcp.DefaultNumber(0),
+			mcp.Description("Skip the first N commits in the recency-sorted result. Used for paging through a large ticket without raising budget_tokens; pair with `k` to walk back through history page by page.")),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		opt := evidence.Options{
@@ -54,6 +56,7 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, c
 			IssueID:      req.GetString("issue_id", ""),
 			K:            int(req.GetFloat("k", 5)),
 			BudgetTokens: int(req.GetFloat("budget_tokens", 6000)),
+			Offset:       int(req.GetFloat("offset", 0)),
 		}
 		pack, err := cache.BuildPack(store, opt)
 		if err != nil {

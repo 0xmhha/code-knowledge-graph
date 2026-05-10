@@ -105,7 +105,7 @@ func (c *Cache) BuildPack(store persist.StoreReader, opt Options) (*Pack, error)
 		scored = filterByModifiesReach(scored, corpus, allowed)
 	}
 
-	pack.Hits = groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, store)
+	pack.Hits = groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, opt.Offset, store)
 	return pack, nil
 }
 

@@ -124,6 +124,11 @@ export interface EvidenceQuery {
   seedQname?: string;
   k?: number;
   budgetTokens?: number;
+  // offset skips the first N commits in the recency-sorted result.
+  // Used by the TicketIndex "Load more" button to walk back through
+  // a large ticket without inflating budgetTokens (which would also
+  // make every server-side response heavier).
+  offset?: number;
 }
 
 export interface EvidenceModifies {
@@ -258,6 +263,7 @@ export class API implements IAPI {
     if (opts.seedQname) q.set('seed_qname', opts.seedQname);
     if (opts.k != null) q.set('k', String(opts.k));
     if (opts.budgetTokens != null) q.set('budget_tokens', String(opts.budgetTokens));
+    if (opts.offset != null) q.set('offset', String(opts.offset));
     const r = await fetch(`${this.base}/api/evidence?${q}`);
     if (!r.ok) throw new Error(`/api/evidence ${r.status}`);
     const v = await r.json();

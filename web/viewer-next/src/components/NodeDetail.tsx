@@ -65,6 +65,7 @@ export default function NodeDetail({ api }: Props) {
   const setSelected = useStore(s => s.setSelected);
   const setAnchor = useStore(s => s.setAnchor);
   const commit = useStore(s => s.commit);
+  const setSelectedIssueID = useStore(s => s.setSelectedIssueID);
   // Derive via useMemo: returning a fresh array literal from a useStore
   // selector defeats Object.is equality and causes a render loop
   // (React error #185). Same pitfall as GraphCanvas.graphData.
@@ -238,19 +239,31 @@ export default function NodeDetail({ api }: Props) {
       {(() => {
         const ids = parseIssueIDs(node.doc_comment);
         if (ids.length === 0) return null;
+        // Clicking a pill stages selectedIssueID in the store; TicketIndex
+        // picks it up via subscription, force-expands the panel + the
+        // matching ticket row, fires /api/evidence?issue_id=…, and
+        // scrolls into view. Pills become buttons so keyboard / screen
+        // readers also reach this jump path.
         return (
           <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
             <strong style={{ color: '#ccc', fontSize: 11 }}>Issues:</strong>
             {ids.map(id => (
-              <span key={id} style={{
-                background: 'rgba(212, 148, 92, 0.18)',
-                color: '#d4945c',
-                padding: '1px 6px',
-                borderRadius: 3,
-                fontSize: 10,
-                fontFamily: 'ui-monospace,monospace',
-                border: '1px solid rgba(212, 148, 92, 0.4)',
-              }}>{id}</span>
+              <button
+                key={id}
+                type="button"
+                onClick={() => setSelectedIssueID(id)}
+                title={`Show evidence for ${id}`}
+                style={{
+                  background: 'rgba(212, 148, 92, 0.18)',
+                  color: '#d4945c',
+                  padding: '1px 6px',
+                  borderRadius: 3,
+                  fontSize: 10,
+                  fontFamily: 'ui-monospace,monospace',
+                  border: '1px solid rgba(212, 148, 92, 0.4)',
+                  cursor: 'pointer',
+                }}
+              >{id}</button>
             ))}
           </div>
         );

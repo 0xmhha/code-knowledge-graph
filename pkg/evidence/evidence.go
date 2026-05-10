@@ -57,6 +57,13 @@ type Options struct {
 	IssueID      string
 	K            int
 	BudgetTokens int
+	// Offset skips the first N commits in the recency-sorted result —
+	// the "Load more" page boundary. Used by viewer/agent flows that
+	// already consumed page 0 and want to keep walking back through a
+	// large ticket without raising BudgetTokens (which would also
+	// inflate the per-call payload). Stable across calls because
+	// commit recency tie-breaks on SHA in groupByCommit's sort.
+	Offset int
 }
 
 // Pack is the EvidencePack JSON shape (§1.5). Stable field names so the
@@ -400,10 +407,13 @@ func filterByModifiesReach(scored []bm25.ScoredDoc, c *hunkCorpus, allowed map[s
 // matching cmd/ckg/benchmark.go's `charsPerToken` constant. Different
 // from the Agent's actual tokeniser but fine for ratio-based budget
 // enforcement at this scale.
-func groupByCommit(scored []bm25.ScoredDoc, c *hunkCorpus, k, budgetTokens int, store persist.StoreReader) []Hit {
+func groupByCommit(scored []bm25.ScoredDoc, c *hunkCorpus, k, budgetTokens, offset int, store persist.StoreReader) []Hit {
 	const charsPerToken = 4
 	if len(scored) == 0 {
 		return nil
+	}
+	if offset < 0 {
+		offset = 0
 	}
 
 	// Group hunks by parent SHA. We materialise patch text now so the
@@ -472,11 +482,22 @@ func groupByCommit(scored []bm25.ScoredDoc, c *hunkCorpus, k, budgetTokens int, 
 	}
 
 	// Sort commits by author timestamp DESC (recency tie-break per §5.2).
+	// SHA tie-break inside the comparator keeps the order stable across
+	// calls so Offset paging is deterministic — two commits with
+	// identical author_time would otherwise pair-swap between sorts.
 	sort.SliceStable(commitOrder, func(i, j int) bool {
 		ti := commits[commitOrder[i]].Commit.AuthorTime
 		tj := commits[commitOrder[j]].Commit.AuthorTime
-		return ti > tj
+		if ti != tj {
+			return ti > tj
+		}
+		return commitOrder[i] < commitOrder[j]
 	})
+
+	if offset >= len(commitOrder) {
+		return nil
+	}
+	commitOrder = commitOrder[offset:]
 
 	out := make([]Hit, 0, k)
 	usedTokens := 0

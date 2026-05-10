@@ -145,12 +145,17 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	k, _ := strconv.Atoi(r.URL.Query().Get("k"))
 	budget, _ := strconv.Atoi(r.URL.Query().Get("budget_tokens"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
 	pack, err := s.evidenceCache.BuildPack(s.store, evidence.Options{
 		Intent:       intent,
 		IssueID:      issueID,
 		SeedQname:    r.URL.Query().Get("seed_qname"),
 		K:            k,
 		BudgetTokens: budget,
+		Offset:       offset,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

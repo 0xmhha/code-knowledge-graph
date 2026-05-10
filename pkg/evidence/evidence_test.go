@@ -318,6 +318,75 @@ func TestBuildPack_IssueIDWithIntent(t *testing.T) {
 	}
 }
 
+// TestBuildPack_OffsetPaging covers the pagination follow-up: with
+// Offset>0 we skip the first N commits in the recency-sorted result.
+// Verifies that page 0 + page 1 together cover the full set with no
+// overlap, and that an offset past the end yields an empty pack.
+func TestBuildPack_OffsetPaging(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			// Three commits citing GH-7, descending author_time so the
+			// recency sort gives a deterministic order.
+			{ID: "c1", Type: types.NodeCommit,
+				QualifiedName: "commit:cccc3333cccc3333cccc3333cccc3333cccc3333",
+				Signature:     "1700000300: latest GH-7", Confidence: types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit,
+				QualifiedName: "commit:bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222",
+				Signature:     "1700000200: middle GH-7", Confidence: types.ConfExtracted},
+			{ID: "c3", Type: types.NodeCommit,
+				QualifiedName: "commit:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+				Signature:     "1700000100: oldest GH-7", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk,
+				QualifiedName: "hunk:cccc3333cccc3333cccc3333cccc3333cccc3333:a.go:0",
+				FilePath:      "a.go", DocComment: "issues:GH-7",
+				Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk,
+				QualifiedName: "hunk:bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222:b.go:0",
+				FilePath:      "b.go", DocComment: "issues:GH-7",
+				Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk,
+				QualifiedName: "hunk:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111:c.go:0",
+				FilePath:      "c.go", DocComment: "issues:GH-7",
+				Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("latest"), "h2": gz("middle"), "h3": gz("oldest"),
+		},
+	}
+	// Page 0: K=2 returns the two most-recent commits (c1, c2).
+	page0, err := BuildPack(store, Options{IssueID: "GH-7", K: 2, BudgetTokens: 100000})
+	if err != nil {
+		t.Fatalf("page0: %v", err)
+	}
+	if len(page0.Hits) != 2 || page0.Hits[0].Commit.SHA[:4] != "cccc" || page0.Hits[1].Commit.SHA[:4] != "bbbb" {
+		t.Fatalf("page0 expected [cccc, bbbb], got: %+v", commitSHAs(page0.Hits))
+	}
+	// Page 1: Offset=2 skips them and returns the third commit (c3).
+	page1, err := BuildPack(store, Options{IssueID: "GH-7", K: 2, BudgetTokens: 100000, Offset: 2})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1.Hits) != 1 || page1.Hits[0].Commit.SHA[:4] != "aaaa" {
+		t.Fatalf("page1 expected [aaaa], got: %+v", commitSHAs(page1.Hits))
+	}
+	// Offset past the end yields an empty pack (not an error).
+	pageEnd, err := BuildPack(store, Options{IssueID: "GH-7", K: 2, BudgetTokens: 100000, Offset: 99})
+	if err != nil {
+		t.Fatalf("pageEnd: %v", err)
+	}
+	if len(pageEnd.Hits) != 0 {
+		t.Errorf("offset past end should yield 0 hits, got %d", len(pageEnd.Hits))
+	}
+}
+
+func commitSHAs(hits []Hit) []string {
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.Commit.SHA[:4]
+	}
+	return out
+}
+
 // TestBuildPack_IssueIDNoMatch covers the empty result path: a ticket
 // nobody cites should produce 0 hits — not an error, not a fallback to
 // the unfiltered corpus.

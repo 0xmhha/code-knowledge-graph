@@ -116,6 +116,15 @@ interface State {
   // when api is ready AND firstTimeSeen is false.
   firstTimeSeen: boolean;
 
+  // selectedIssueID: when non-null, TicketIndex auto-expands the
+  // panel, opens the matching row, kicks off /api/evidence?issue_id=…,
+  // and scrolls the row into view. Wired up by NodeDetail's H4 issue
+  // pills so the operator can jump from "this function changed in a
+  // hunk citing GH-66" → "show me GH-66's full footprint" without
+  // hunting in the side panel. Cleared by TicketIndex once the
+  // navigation completes (so a second click on the same pill re-fires).
+  selectedIssueID: string | null;
+
   // Trace controls.
   traceDirection: TraceDirection;
   traceDepth: number;
@@ -179,6 +188,7 @@ interface State {
   setTraceDirection: (d: TraceDirection) => void;
   setTraceDepth: (n: number) => void;
   setLastRenderMs: (n: number) => void;
+  setSelectedIssueID: (id: string | null) => void;
 }
 
 let pending: CommitGraph | null = null;
@@ -258,6 +268,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   traceDepth: 2,
   lastRenderMs: 0,
   edgeCountsByType: {},
+  selectedIssueID: null,
 
   loadNodes: (arr) => {
     if (!Array.isArray(arr) || arr.length === 0) return;
@@ -402,6 +413,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   setTraceDirection: (d) => set({ traceDirection: d }),
   setTraceDepth: (n) => set({ traceDepth: n }),
   setLastRenderMs: (n) => set({ lastRenderMs: n }),
+  setSelectedIssueID: (id) => set({ selectedIssueID: id }),
 })));
 
 // computeFocusDistance: BFS undirected, capped. Pure function — callers
