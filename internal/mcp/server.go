@@ -12,6 +12,7 @@ import (
 	server "github.com/mark3labs/mcp-go/server"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
 )
 
 // Run starts a stdio MCP server bound to store. Returns when stdin closes.
@@ -31,7 +32,10 @@ func Run(ctx context.Context, store persist.StoreReader) error {
 	registerSearchText(s, safe)
 	registerGetContextForTask(s, safe)
 	registerImpactOfChange(s, safe)
-	registerEvidenceForIntent(s, safe)
+	// One Cache per server lifetime — amortises BM25 corpus indexing
+	// across all evidence_for_intent calls. Manifest-keyed
+	// invalidation handles concurrent `ckg build` rebuilds.
+	registerEvidenceForIntent(s, safe, evidence.NewCache())
 
 	if err := server.ServeStdio(s); err != nil {
 		return fmt.Errorf("mcp serve stdio: %w", err)

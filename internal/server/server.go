@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
 )
 
 // Server bundles a read-only Store, a routed mux, and a logger. Construct
@@ -25,6 +26,10 @@ type Server struct {
 	mux       *http.ServeMux
 	log       *slog.Logger
 	community communityCache // lazy-loaded topic_tree projection (see community.go)
+	// evidenceCache amortises the H3 BuildPack BM25 corpus across
+	// /api/evidence calls. Manifest-keyed invalidation handles
+	// concurrent `ckg build` rebuilds — see pkg/evidence/cache.go.
+	evidenceCache *evidence.Cache
 }
 
 // Options tunes how Server mounts the static viewer surface. The zero value
@@ -54,7 +59,12 @@ func NewWithOptions(store persist.StoreReader, log *slog.Logger, opts Options) *
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
-	s := &Server{store: store, mux: http.NewServeMux(), log: log}
+	s := &Server{
+		store:         store,
+		mux:           http.NewServeMux(),
+		log:           log,
+		evidenceCache: evidence.NewCache(),
+	}
 	s.routes(opts)
 	return s
 }

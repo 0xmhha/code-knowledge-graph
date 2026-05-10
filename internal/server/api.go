@@ -142,7 +142,7 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	}
 	k, _ := strconv.Atoi(r.URL.Query().Get("k"))
 	budget, _ := strconv.Atoi(r.URL.Query().Get("budget_tokens"))
-	pack, err := evidence.BuildPack(s.store, evidence.Options{
+	pack, err := s.evidenceCache.BuildPack(s.store, evidence.Options{
 		Intent:       intent,
 		SeedQname:    r.URL.Query().Get("seed_qname"),
 		K:            k,

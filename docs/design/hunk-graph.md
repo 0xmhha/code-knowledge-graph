@@ -555,7 +555,12 @@ gate runs unchanged.
 > via `GET /api/evidence`. §11.3 retrieval boundary enforced two ways
 > — the MCP wrapper filters the storeReader, and `indexCorpus` itself
 > drops AMBIGUOUS Hunk/Commit rows + AMBIGUOUS edges as defense in
-> depth. Self-graph eval (go-stablenet, /tmp/ckg-h2): query
+> depth. Performance: a per-process `pkg/evidence.Cache` (sync.RWMutex
+> + manifest-keyed invalidation) amortises the BM25 corpus build
+> across queries — go-stablenet (240K nodes / 9K hunks) goes from
+> ~5.2s cold to ~0.18s warm (~28× speedup); both `ckg serve` and the
+> MCP `Run` hold a single Cache for their lifetime, so the second
+> query against the same `graph.db` already pays the warm cost. Self-graph eval (go-stablenet, /tmp/ckg-h2): query
 > `intent=release merge dev` returns 3 EXTRACTED commits about
 > secp256k1 / GovMinter / EIP-7951 even though the AMBIGUOUS
 > "release: merge dev to master (#80)" exists in the same corpus —

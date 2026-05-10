@@ -27,7 +27,13 @@ import (
 
 // registerEvidenceForIntent adds the evidence_for_intent tool. Schema
 // matches design §5.1; defaults match the package constants.
-func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader) {
+//
+// The cache parameter is shared across the lifetime of one MCP Run
+// invocation so the BM25 corpus is built once and reused — sub-second
+// query latency on graphs that take ~4s for a cold rebuild. The cache
+// invalidates itself when the underlying graph.db's manifest drifts
+// (a `ckg build` while the server is running).
+func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, cache *evidence.Cache) {
 	tool := mcp.NewTool("evidence_for_intent",
 		mcp.WithDescription("EvidencePack: BM25-rank past commit hunks against an intent, return top-K with patches + modifies neighbours. Filters AMBIGUOUS unreachable-history per §11.3."),
 		mcp.WithString("intent", mcp.Required(),
@@ -46,7 +52,7 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader) {
 			K:            int(req.GetFloat("k", 5)),
 			BudgetTokens: int(req.GetFloat("budget_tokens", 6000)),
 		}
-		pack, err := evidence.BuildPack(store, opt)
+		pack, err := cache.BuildPack(store, opt)
 		if err != nil {
 			return nil, err
 		}

@@ -33,6 +33,16 @@ func (f *fakeStore) GetBlob(id string) ([]byte, error) {
 	return b, nil
 }
 
+// GetManifest is needed by Cache.ensureIndex to compute the
+// invalidation key. Empty values are fine for tests — the key is
+// stable across calls so the cache hits.
+func (f *fakeStore) GetManifest() (persist.Manifest, error) {
+	return persist.Manifest{
+		BuildTimestamp: "test",
+		SrcCommit:      "test",
+	}, nil
+}
+
 func gz(s string) []byte {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)

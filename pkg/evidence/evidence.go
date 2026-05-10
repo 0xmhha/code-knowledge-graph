@@ -30,7 +30,6 @@ package evidence
 import (
 	"bytes"
 	"compress/gzip"
-	"fmt"
 	"io"
 	"sort"
 	"strconv"
@@ -101,57 +100,17 @@ const (
 // hits=[]) when no hunks match — never nil — so the Agent's JSON
 // parsers don't have to guard against null. Errors propagate from the
 // underlying store or from gzip decompression.
+//
+// This is the uncached entrypoint — every call rebuilds the BM25
+// corpus from scratch. Long-lived processes (ckg serve, mcp Run)
+// should hold a *Cache instance instead and call Cache.BuildPack so
+// the indexing cost amortises across queries. See cache.go.
 func BuildPack(store persist.StoreReader, opt Options) (*Pack, error) {
-	if opt.K <= 0 {
-		opt.K = defaultK
-	}
-	if opt.BudgetTokens <= 0 {
-		opt.BudgetTokens = defaultBudgetTokens
-	}
-	pack := &Pack{Intent: opt.Intent, Hits: []Hit{}}
-
-	nodes, err := store.AllNodes()
-	if err != nil {
-		return nil, fmt.Errorf("load nodes: %w", err)
-	}
-	edges, err := store.AllEdges()
-	if err != nil {
-		return nil, fmt.Errorf("load edges: %w", err)
-	}
-
-	corpus := indexCorpus(nodes, edges)
-	if len(corpus.hunks) == 0 {
-		return pack, nil
-	}
-
-	// Build BM25 documents and score.
-	docs := make([]bm25.Document, 0, len(corpus.hunks))
-	for _, h := range corpus.hunks {
-		docs = append(docs, bm25.Document{
-			ID:     h.ID,
-			Tokens: hunkDocTokens(store, h, corpus),
-		})
-	}
-	scorer := bm25.NewOkapi()
-	scorer.Index(docs)
-	queryTokens := bm25.Tokenize(opt.Intent)
-	if len(queryTokens) == 0 {
-		// No usable query tokens — empty result is honest.
-		return pack, nil
-	}
-	scored := scorer.TopK(queryTokens, bm25TopN)
-
-	// Optional seed_qname filter.
-	if opt.SeedQname != "" {
-		allowed := buildSeedAllowList(corpus, opt.SeedQname)
-		scored = filterByModifiesReach(scored, corpus, allowed)
-	}
-
-	// Cap to k commits AFTER grouping. The §5.2 ranking step caps
-	// hunks first; the grouping step then expands per-commit.
-	hits := groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, store)
-	pack.Hits = hits
-	return pack, nil
+	// Single-shot path: a per-call Cache that gets discarded after
+	// return. The Cache code path is the source of truth for the
+	// algorithm; this wrapper exists for callers that don't want the
+	// caching surface (one-off CLI tools, tests, eval harnesses).
+	return NewCache().BuildPack(store, opt)
 }
 
 // hunkCorpus is the in-memory index BuildPack walks. Built once per
