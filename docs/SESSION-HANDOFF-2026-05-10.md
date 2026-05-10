@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `693c643` (feat: pagination + NodeDetail pill → ticket EvidencePack loop).
+기준점: branch `main`, HEAD `fa59535` (fix: eliminate React #418 hydration mismatch).
 
 ---
 
@@ -10,6 +10,8 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `fa59535` | fix: eliminate React #418 hydration mismatch | `usePersistedBool/Number/JSON` 신규 hook, 8 컴포넌트 + store `hydrateFromStorage()` 마이그레이션 — SSR-safe default + mount-effect로 stored value 적용 |
+| `da4af1d` | refactor: extract EvidenceView component + diff line colouring | `EvidenceView.tsx` 신규 분리, `+`/`-`/`@` 첫 char 기반 라인 color (green/red/blue) — `<pre>` 안 `<span>` 으로 monospace+copy 유지 |
 | `693c643` | pagination + NodeDetail pill → ticket EvidencePack loop | `Options.Offset` + viewer "load more" 버튼; NodeDetail amber pill → store 시그널 → TicketIndex 자동 expand+scroll+load |
 | `a6210d1` | issue_id filter for /api/evidence + ticket→patches viewer flow | `Options.IssueID`; IssueID-only=recency / +Intent=BM25 교집합 / +SeedQname=modifies-reach 추가 필터 |
 | `ff7ff9b` | ticket index — H4 issue-id rollup surface | `/api/tickets` + `Cache.TicketIndex(limit)` + viewer TicketIndex 패널 (purple/blue accent) |
@@ -141,13 +143,13 @@ H4/H3 cross-panel loop:
 
 | 순위 | 항목 | 비고 |
 |------|------|------|
-| 1 | #4 EvidenceView 컴포넌트 분리 | TicketIndex 200+줄 cleanup. Low effort. |
-| 2 | #3 eval/ harness H3+H4 시나리오 | 회귀 안전망. Mid. |
-| 3 | #6 `ckg evidence` CLI subcommand | shell/CI 워크플로. Mid. |
-| 4 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
-| 5 | #10 OR/AND mode | Low. |
-| 6 | #9 sample_commits 메타 확장 | Low. |
-| 7 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+| ✅ | ~~#4 EvidenceView 컴포넌트 분리~~ | 완료 (`da4af1d`) — diff coloring 동봉 |
+| 1 | #3 eval/ harness H3+H4 시나리오 | 회귀 안전망. Mid. |
+| 2 | #6 `ckg evidence` CLI subcommand | shell/CI 워크플로. Mid. |
+| 3 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
+| 4 | #10 OR/AND mode | Low. |
+| 5 | #9 sample_commits 메타 확장 | Low. |
+| 6 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
 
 ---
 
@@ -157,6 +159,7 @@ H4/H3 cross-panel loop:
 - TS body walk P3가 `function-expression` / `arrow-function` 의 일부 nested 형태에서 enclosing 식별 누락 가능성 — 검증된 케이스는 모두 통과하나 edge case 가능.
 - `/api/search` FTS가 일부 graph 에서 활성화 안 됨 (페이지네이션 검증 시 발견; FTS 활성화 단계 미수행 그래프). `ckg build` 의 FTS 인덱싱 옵션 검토 필요.
 - viewer의 NodeDetail pill 클릭은 코드 리뷰 + setter+useEffect 표준 패턴으로 검증됨; live click 검증은 Hunk 노드를 캔버스에 노출하는 절차가 추가로 필요해서 이번 세션에선 unit + 페이지네이션 라이브 검증으로 대체.
+- 모든 `localStorage`-backed UI 상태는 mount 후 1 frame 의 default-state flash 가 발생 — React #418 회피의 의도적 trade-off. 16-30ms 수준이라 사용자 인지 어려움. 다른 패널이 추가되면 동일 패턴 (`usePersistedBool/Number/JSON` 또는 `hydrateFromStorage`) 따라야 회귀 방지.
 
 ---
 
@@ -176,7 +179,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `693c643`): 23/23 패키지 PASS.
+직전 회귀 (HEAD `fa59535`): 23/23 패키지 PASS.
 
 ---
 
@@ -186,3 +189,4 @@ cd web/viewer-next && npx tsc --noEmit
 - 다음 후보 상세: `docs/NEXT-CANDIDATES-2026-05-10.md`
 - 설계 문서: `docs/design/hunk-graph.md` (H1-H4, §11 결정 원본)
 - 스키마: `docs/SCHEMA.md` (schema 1.8 정의)
+- 새 hydration 패턴: `web/viewer-next/src/lib/usePersistedState.ts` (`usePersistedBool/Number/JSON`)
