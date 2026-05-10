@@ -103,12 +103,13 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
-// EdgeType enumerates the 34 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 35 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
 // cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation;
-// schema 1.8 appended has_hunk / adjacent for the Hunk-graph H1 stage).
+// schema 1.8 appended has_hunk / adjacent for the Hunk-graph H1 stage,
+// then `modifies` for the H2 AST-overlap stage).
 type EdgeType string
 
 const (
@@ -202,9 +203,19 @@ const (
 	// test snapshots stay stable.
 	EdgeHasHunk  EdgeType = "has_hunk"
 	EdgeAdjacent EdgeType = "adjacent"
+	// Schema 1.8 (Hunk-graph H2 — CKS G6 Temporal extension):
+	//   modifies: Hunk → CodeNode (Function/Method/Struct/Interface/Field
+	//             /etc) when the hunk's [start_line, end_line] interval
+	//             overlaps the CodeNode's interval inside the same file.
+	//             Whitelisted to "FunctionLike + TypeLike + Field-ish" so
+	//             noise-level statement nodes (CallSite / IfStmt / ...)
+	//             don't blow up the edge count without retrieval signal.
+	//             See docs/design/hunk-graph.md §4.
+	// Appended at the end so existing hash positions stay stable.
+	EdgeModifies EdgeType = "modifies"
 )
 
-// AllEdgeTypes returns all 34 edge types in stable order.
+// AllEdgeTypes returns all 35 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -217,7 +228,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeListensOn, EdgeHandlesMessage, EdgeRPCCalls,
 		EdgeChangedIn, EdgeBlame,
 		EdgeTimeoutPath, EdgeCancellationPath,
-		EdgeHasHunk, EdgeAdjacent,
+		EdgeHasHunk, EdgeAdjacent, EdgeModifies,
 	}
 }
 

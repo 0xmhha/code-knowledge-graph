@@ -14,7 +14,7 @@ func TestAllNodeTypes_Count(t *testing.T) {
 }
 
 func TestAllEdgeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllEdgeTypes()), 34; got != want {
+	if got, want := len(types.AllEdgeTypes()), 35; got != want {
 		t.Fatalf("AllEdgeTypes count = %d, want %d", got, want)
 	}
 }
@@ -41,7 +41,7 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 		types.EdgeListensOn, types.EdgeHandlesMessage, types.EdgeRPCCalls,
 		types.EdgeChangedIn, types.EdgeBlame,
 		types.EdgeTimeoutPath, types.EdgeCancellationPath,
-		types.EdgeHasHunk, types.EdgeAdjacent,
+		types.EdgeHasHunk, types.EdgeAdjacent, types.EdgeModifies,
 	}
 	have := make(map[types.EdgeType]struct{}, len(types.AllEdgeTypes()))
 	for _, e := range types.AllEdgeTypes() {
@@ -96,7 +96,7 @@ func TestAllEdgeTypes_Stable(t *testing.T) {
 		types.EdgeListensOn, types.EdgeHandlesMessage, types.EdgeRPCCalls,
 		types.EdgeChangedIn, types.EdgeBlame,
 		types.EdgeTimeoutPath, types.EdgeCancellationPath,
-		types.EdgeHasHunk, types.EdgeAdjacent,
+		types.EdgeHasHunk, types.EdgeAdjacent, types.EdgeModifies,
 	}
 	if !reflect.DeepEqual(types.AllEdgeTypes(), want) {
 		t.Fatalf("AllEdgeTypes order changed:\n got=%v\nwant=%v", types.AllEdgeTypes(), want)

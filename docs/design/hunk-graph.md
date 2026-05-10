@@ -466,6 +466,18 @@ repo: ~1 minute (dominated by `git diff` invocations). Acceptable.
 
 ## 4. AST overlap detection (H2)
 
+> **Status (2026-05-10)**: Landed. `internal/buildpipe/temporal_hunks.go`
+> `emitModifiesEdges` runs after both EXTRACTED and AMBIGUOUS hunks are
+> in place; confidence on each `modifies` edge follows its source hunk.
+> Self-graph eval (go-stablenet, 8967 EXTRACTED + 40 AMBIGUOUS hunks):
+> 11,435 `modifies` edges (11,373 EXTRACTED + 62 AMBIGUOUS), avg 3.07
+> per hunk, max 167 (a generated-code regeneration hit). Edge breakdown
+> by destination type: Function 2981 · Method 2774 · Variable 2474 ·
+> Field 2095 · Struct 575 · Constant 374 · TypeAlias 63 · Interface 60 ·
+> Modifier 18 · Contract 17 — the §4.2 whitelist behaves as designed,
+> with the FunctionLike + TypeLike kinds dominating and statement-level
+> noise (CallSite/IfStmt/...) correctly skipped.
+
 ### 4.1 The join
 
 After H1 lands all Hunk nodes, H2 emits `modifies` edges. The algorithm:

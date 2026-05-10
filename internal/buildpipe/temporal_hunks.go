@@ -55,6 +55,31 @@ var hunkLanguageWhitelist = map[string]string{
 	".sol": "sol",
 }
 
+// modifiesNodeWhitelist is the H2 §4.2 "FunctionLike + TypeLike +
+// Field-ish" set: only nodes of these kinds receive `modifies` edges
+// when a hunk overlaps their byte range. Statement-level kinds
+// (CallSite, IfStmt, LoopStmt, ReturnStmt, SwitchStmt) are deliberately
+// excluded because they'd explode the edge count by ~10× without
+// improving the few-shot retrieval signal that motivates the edge.
+//
+// Future inclusions (e.g. Endpoint once handler declarations get richer)
+// are one-line additions per the design.
+var modifiesNodeWhitelist = map[types.NodeType]bool{
+	types.NodeFunction:    true,
+	types.NodeMethod:      true,
+	types.NodeConstructor: true,
+	types.NodeModifier:    true,
+	types.NodeStruct:      true,
+	types.NodeInterface:   true,
+	types.NodeClass:       true,
+	types.NodeTypeAlias:   true,
+	types.NodeEnum:        true,
+	types.NodeContract:    true,
+	types.NodeField:       true,
+	types.NodeConstant:    true,
+	types.NodeVariable:    true,
+}
+
 // isMetaNodeType reports whether t is a "meta" node — one that lives
 // outside the file-level cache (Commit, Hunk). Meta nodes:
 //
@@ -388,5 +413,87 @@ func gzipPatch(b []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// emitModifiesEdges (H2) walks every Hunk node and emits a `modifies`
+// edge for each whitelisted CodeNode in the same file whose
+// [start_line, end_line] interval overlaps the hunk's. Confidence
+// follows the hunk: EXTRACTED for HEAD-reachable hunks, AMBIGUOUS for
+// the unreachable-history track populated by emitUnreachableHunkGraph.
+//
+// Algorithm (mirrors design §4.1):
+//
+//	for hunk in hunks(g):
+//	    for codeNode in nodesByFile[hunk.file_path]:
+//	        if !modifiesNodeWhitelist[codeNode.Type] continue
+//	        if overlap(hunk_lines, codeNode_lines) emit modifies(hunk -> codeNode)
+//
+// Determinism: hunks iterate in g.Nodes order (already deterministic
+// from buildHunkNodes' sortNodesByID); candidates iterate in their
+// original parser-emission order (file-path bucket preserves insertion).
+//
+// Performance: per design §4.3, 700 hunks × ~50 candidates × O(1) test
+// ≈ 35K comparisons, < 50 ms. Real go-stablenet (~9K hunks × ~190
+// candidates) ~1.7M ops — still sub-second.
+func emitModifiesEdges(g *graph.Graph) {
+	// Bucket whitelisted CodeNodes by file_path. Hunks aren't candidates
+	// for self-modifies even though they have a FilePath set.
+	byFile := make(map[string][]int, 64)
+	for i := range g.Nodes {
+		n := &g.Nodes[i]
+		if n.Type == types.NodeHunk {
+			continue
+		}
+		if !modifiesNodeWhitelist[n.Type] {
+			continue
+		}
+		if n.FilePath == "" {
+			continue
+		}
+		byFile[n.FilePath] = append(byFile[n.FilePath], i)
+	}
+	if len(byFile) == 0 {
+		return
+	}
+	// Walk hunks and emit overlapping `modifies` edges.
+	var newEdges []types.Edge
+	for i := range g.Nodes {
+		hunk := &g.Nodes[i]
+		if hunk.Type != types.NodeHunk {
+			continue
+		}
+		candidates, ok := byFile[hunk.FilePath]
+		if !ok {
+			continue
+		}
+		hStart, hEnd := hunk.StartLine, hunk.EndLine
+		if hEnd < hStart {
+			hEnd = hStart
+		}
+		for _, ci := range candidates {
+			cand := &g.Nodes[ci]
+			cStart, cEnd := cand.StartLine, cand.EndLine
+			if cEnd < cStart {
+				cEnd = cStart
+			}
+			// Standard inclusive interval-overlap test:
+			//   a.start <= b.end && b.start <= a.end
+			if hStart > cEnd || cStart > hEnd {
+				continue
+			}
+			newEdges = append(newEdges, types.Edge{
+				Src:        hunk.ID,
+				Dst:        cand.ID,
+				Type:       types.EdgeModifies,
+				FilePath:   hunk.FilePath,
+				Line:       hunk.StartLine,
+				Count:      1,
+				Confidence: hunk.Confidence,
+			})
+		}
+	}
+	if len(newEdges) > 0 {
+		g.Edges = append(g.Edges, newEdges...)
+	}
 }
 

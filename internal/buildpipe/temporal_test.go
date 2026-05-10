@@ -80,8 +80,15 @@ func TestEmitTemporalEdges_BasicGitRepo(t *testing.T) {
 	if want := originalNodes + 1 + len(hunks); len(g.Nodes) != want {
 		t.Errorf("Node count = %d, want %d", len(g.Nodes), want)
 	}
-	if want := originalEdges + len(changedIn) + len(blame) + len(hasHunk) + len(adjacent); len(g.Edges) != want {
+	modifies := edgesByType(g.Edges, types.EdgeModifies)
+	if want := originalEdges + len(changedIn) + len(blame) + len(hasHunk) + len(adjacent) + len(modifies); len(g.Edges) != want {
 		t.Errorf("Edge count = %d, want %d", len(g.Edges), want)
+	}
+	// In the BasicGitRepo fixture (Package + File + Function in main.go,
+	// one whole-file hunk) we expect exactly 1 modifies edge: hunk →
+	// Function. Package + File aren't in modifiesNodeWhitelist.
+	if len(modifies) != 1 {
+		t.Errorf("expected 1 modifies edge (hunk → Function), got %d", len(modifies))
 	}
 
 	// Validate post-emit so a regression in dangling refs surfaces here.

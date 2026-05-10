@@ -110,6 +110,14 @@ func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerF
 		hunkBlobs[id] = b
 	}
 
+	// Hunk-graph H2: every Hunk gets `modifies` edges to whitelisted
+	// CodeNodes in the same file whose line range overlaps the hunk's.
+	// Runs after both EXTRACTED and AMBIGUOUS hunks have been added so
+	// recovery-track hunks also get their AST overlap edges (still
+	// confidence-stamped per their parent hunk so H3 retrieval boundary
+	// can filter consistently).
+	emitModifiesEdges(g)
+
 	hunkCount, hunkEdgeCount := 0, 0
 	for _, n := range g.Nodes {
 		if n.Type == types.NodeHunk {

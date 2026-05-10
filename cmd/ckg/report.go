@@ -296,7 +296,7 @@ func edgeToAxis(t types.EdgeType) string {
 		return "G4"
 	case types.EdgeListensOn, types.EdgeHandlesMessage, types.EdgeRPCCalls, types.EdgeBindsTo:
 		return "G5"
-	case types.EdgeChangedIn, types.EdgeBlame, types.EdgeHasHunk, types.EdgeAdjacent:
+	case types.EdgeChangedIn, types.EdgeBlame, types.EdgeHasHunk, types.EdgeAdjacent, types.EdgeModifies:
 		return "G6"
 	}
 	return ""

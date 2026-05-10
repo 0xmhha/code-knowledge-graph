@@ -108,6 +108,12 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   // per hunk + ~0.7 adjacent per hunk on average).
   has_hunk:          { color: 0x9988aa, width: 1 },
   adjacent:          { color: 0x776688, width: 1, dash: true },
+  // H2 (schema 1.8): Hunk → CodeNode interval-overlap edge. Distinct
+  // amber accent so it reads as the "what code did this hunk touch?"
+  // surface — close in spirit to `defines` but originating from a
+  // diff block rather than a containing file. Off by default; users
+  // toggle on when they're inspecting a specific commit's footprint.
+  modifies:          { color: 0xc4945c, width: 1 },
 
   // cross-language binding
   binds_to:        { color: 0xffd700, width: 3 },
@@ -216,8 +222,8 @@ export const GRAPH_GROUPS: ReadonlyArray<GraphGroupSpec> = [
   },
   {
     id: 'G6', label: 'Temporal', color: 0x888899,
-    description: 'Git history: changed_in (symbol→commit), blame (file→last commit), has_hunk (commit→hunk), adjacent (hunk→hunk in same file)',
-    edges: ['changed_in', 'blame', 'has_hunk', 'adjacent'],
+    description: 'Git history: changed_in (symbol→commit), blame (file→last commit), has_hunk (commit→hunk), adjacent (hunk→hunk in same file), modifies (hunk→CodeNode AST overlap)',
+    edges: ['changed_in', 'blame', 'has_hunk', 'adjacent', 'modifies'],
   },
 ];
 
@@ -247,9 +253,9 @@ export function groupHasAnyEdge(group: GraphGroupSpec, whitelist: ReadonlySet<st
 // EDGE_STYLE entry AND assign it to a GRAPH_GROUPS bucket — otherwise
 // it silently disappears from the filter UI.
 //
-// Current state (schema 1.8):
-//   33 non-hidden edges in EDGE_STYLE (34 total - `contains` hidden)
-//   33 edges across GRAPH_GROUPS (G1=3, G2=12, G3=4, G4=6, G5=4, G6=4)
+// Current state (schema 1.8 + H2):
+//   34 non-hidden edges in EDGE_STYLE (35 total - `contains` hidden)
+//   34 edges across GRAPH_GROUPS (G1=3, G2=12, G3=4, G4=6, G5=4, G6=5)
 //
 // To verify after editing this file, eyeball the output of:
 //   node -e "const {ALL_EDGE_TYPES, GRAPH_GROUPS} = require('./edges'); \
