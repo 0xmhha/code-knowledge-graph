@@ -1529,3 +1529,10 @@ html, body {
   max-height: 320px;
   overflow-y: auto;
 }
+/* Unified-diff line colouring rendered by EvidenceView. The classes
+   wrap inline <span>s inside <pre> so the file's monospaced layout +
+   copy-paste fidelity stay intact. */
+.diff-add { color: #8ce99a; }
+.diff-del { color: #ff8787; }
+.diff-hunk-header { color: #74c0fc; }
+.diff-context { color: #ccc; }

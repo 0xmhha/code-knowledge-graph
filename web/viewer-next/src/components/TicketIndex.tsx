@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/store';
+import EvidenceView from '@/components/EvidenceView';
 import type { IAPI, TicketRow, EvidencePack } from '@/lib/api';
 
 // TicketIndex surfaces the H4 issue-id rollup — every issue/PR ID
@@ -254,35 +255,3 @@ export default function TicketIndex({ api }: Props) {
   );
 }
 
-// EvidenceView renders one EvidencePack as a list of commits, each
-// with its hunks (file_path + line range + patch_text in a <pre>).
-// Kept inside this file because it has no other consumer; if the
-// node-detail panel ever needs a similar surface, lift it out.
-function EvidenceView({ pack }: { pack: EvidencePack }) {
-  if (!pack.hits || pack.hits.length === 0) {
-    return <div className="ticket-patches-empty">no patches found</div>;
-  }
-  return (
-    <div className="ticket-patches">
-      {pack.hits.map(hit => (
-        <div key={hit.commit.sha} className="ticket-patches-commit">
-          <div className="ticket-patches-commit-header">
-            <span className="ticket-sha">{hit.commit.sha.slice(0, 12)}</span>
-            <span className="ticket-subject">{hit.commit.subject}</span>
-          </div>
-          {hit.hunks.map(hunk => (
-            <div key={hunk.id} className="ticket-patches-hunk">
-              <div className="ticket-patches-hunk-header">
-                <span className="ticket-patches-file">{hunk.file_path}</span>
-                <span className="ticket-patches-lines">
-                  L{hunk.start_line}-{hunk.end_line}
-                </span>
-              </div>
-              <pre className="ticket-patches-pre">{hunk.patch_text}</pre>
-            </div>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
