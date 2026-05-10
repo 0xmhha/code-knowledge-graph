@@ -30,6 +30,12 @@ type Server struct {
 	// /api/evidence calls. Manifest-keyed invalidation handles
 	// concurrent `ckg build` rebuilds — see pkg/evidence/cache.go.
 	evidenceCache *evidence.Cache
+	// stalenessCache debounces computeStaleness's git spawn (the
+	// residual cost on /api/manifest after the manifest read itself
+	// got cached). 5-second TTL — short enough no human notices a
+	// stale indicator linger, long enough to absorb viewer poll
+	// bursts without re-spawning git.
+	stalenessCache *stalenessCache
 }
 
 // Options tunes how Server mounts the static viewer surface. The zero value
@@ -78,10 +84,11 @@ func NewWithOptions(store persist.StoreReader, log *slog.Logger, opts Options) *
 	}
 	cached := newCachedManifestStore(store, log)
 	s := &Server{
-		store:         cached,
-		mux:           http.NewServeMux(),
-		log:           log,
-		evidenceCache: evidence.NewCache(),
+		store:          cached,
+		mux:            http.NewServeMux(),
+		log:            log,
+		evidenceCache:  evidence.NewCache(),
+		stalenessCache: newStalenessCache(stalenessCacheTTL),
 	}
 	s.routes(opts)
 	go s.prewarmTicketIndex()

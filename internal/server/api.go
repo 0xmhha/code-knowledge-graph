@@ -38,7 +38,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, r *http.Request) {
 		GraphStale    bool   `json:"graph_stale"`
 		CurrentCommit string `json:"current_commit,omitempty"`
 	}
-	cur, stale := computeStaleness(m)
+	cur, stale := s.stalenessCache.get(m)
 	writeJSON(w, Out{Manifest: m, GraphStale: stale, CurrentCommit: cur})
 }
 
