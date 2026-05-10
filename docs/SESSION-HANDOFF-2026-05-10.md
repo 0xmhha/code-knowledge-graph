@@ -1,0 +1,188 @@
+# Session Hand-off — 2026-05-10
+
+다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
+
+기준점: branch `main`, HEAD `693c643` (feat: pagination + NodeDetail pill → ticket EvidencePack loop).
+
+---
+
+## §1. 이번 세션 commits (시간 역순)
+
+| SHA | 제목 | 핵심 |
+|------|------|------|
+| `693c643` | pagination + NodeDetail pill → ticket EvidencePack loop | `Options.Offset` + viewer "load more" 버튼; NodeDetail amber pill → store 시그널 → TicketIndex 자동 expand+scroll+load |
+| `a6210d1` | issue_id filter for /api/evidence + ticket→patches viewer flow | `Options.IssueID`; IssueID-only=recency / +Intent=BM25 교집합 / +SeedQname=modifies-reach 추가 필터 |
+| `ff7ff9b` | ticket index — H4 issue-id rollup surface | `/api/tickets` + `Cache.TicketIndex(limit)` + viewer TicketIndex 패널 (purple/blue accent) |
+| `a3fe80e` | cache BM25 corpus across BuildPack calls (~28x speedup) | manifest-keyed (`BuildTimestamp+SrcCommit`) `evidence.Cache` + sync.RWMutex 더블체크 락 |
+| `d1be6b2` | H4 issue-id extraction — commit subjects → Hunk doc_comment | 4 정규식 (GH-#, [PROJ-N], JIRA prefix, GitHub URL) → `issues:GH-42;JIRA-7` encoding |
+| `197d786` | H3 EvidencePack assembler — evidence_for_intent | BM25 over (subject \|\| patch \|\| modifies-qnames) 가상 문서, K-Top 후 budget cap |
+| `7567c71` | H2 modifies edge — Hunk → CodeNode AST overlap | 13-NodeType 화이트리스트로 modifies 적용 (Function/Method/Type/etc.) |
+| `2af1259` | Recovery panel for AMBIGUOUS unreachable history | viewer Recovery 패널 (amber accent), `/api/nodes/ambiguous` |
+| `452552a` | H3 retrieval boundary — AMBIGUOUS Hunk/Commit hidden from LLM | `llmSafeStoreReader` wrapper로 모든 read-path tool에서 AMBIGUOUS 차단 |
+| `6eec88d` | unreachable hunk collection — schema 1.8 §11.3 follow-up | `git reflog --all` + `git fsck --no-reflogs --unreachable` 합성, HEAD-reachable 차감 → AMBIGUOUS confidence |
+| `84f4f2c` | TS statement-level nodes | IfStmt/LoopStmt/SwitchStmt/ReturnStmt/CallSite + PendingRef anchor |
+| `6d312c5` | Tier 2 graphify-inspired ergonomics + accuracy | `--minimal` JSON, EXTRACTED-only filter |
+| `1282e3e` | Tier 1 graphify-inspired ergonomics | god-node filter 강화, report 명령 |
+| `12cfbc8` | TS function body walk P3 — calls PendingRef | tree-sitter body 순회, CallSite anchor (Go-parity) |
+| `7d70f0a` | graphify-style CLI UX + viewer default filter relaxation | viewer 기본 노드 타입 확장 (Field/Variable/Constant/Goroutine 등) |
+| `5a34126` | H1 Hunk graph — schema 1.8 | `Hunk` 노드 + `has_hunk`/`adjacent` 엣지, gzip 압축 patch blob, 64KB cap |
+
+---
+
+## §2. schema 1.8 §11 결정 8개 — 결과
+
+§11 결정들은 H1을 시작하기 전 사용자와 합의한 8개 항목으로, 모두 main에 반영됨.
+
+| §11.x | 항목 | 결정 / 구현 |
+|-------|------|------|
+| §11.1 | patch 저장 방식 | gzip 압축 (~70% 감소) |
+| §11.2 | 동일 hunk 중복 dedup | 미적용 (단순성 우선) |
+| §11.3 | unreachable 처리 | **3-layer hybrid**: storage AMBIGUOUS / LLM-filter wrapper / human Recovery 패널 |
+| §11.4 | 대상 확장자 | 빌드 시 indexed 모든 파일 (제한 없음) |
+| §11.5 | cross-repo dedup | out of scope |
+| §11.6 | blob 최대 크기 | 64KB cap |
+| §11.7 | PageRank 제외 | Hunk + Commit 모두 제외 |
+| §11.8 | manifest 노드 추가 | 추가 안 함 (manifest는 별도 테이블) |
+
+§11.3 hybrid의 검증 (직접 측정):
+- 쿼리 "release merge dev"는 EXTRACTED 3 commits 반환
+- AMBIGUOUS "release: merge dev to master (#80)" 는 노출 안 됨 (LLM-filter wrapper 동작)
+- Recovery 패널에서는 정상 표시 (인간 surface)
+
+---
+
+## §3. viewer 패널 현황 (8 + 1 = 9 패널)
+
+| 패널 | 상태 | 색상 | 데이터 소스 |
+|------|------|------|------|
+| Topbar (search, home, back) | ✅ | — | — |
+| Canvas (3D/2D) | ✅ | per node type | `/api/nodes/top` boot, `/api/edges` 1-hop |
+| Canvas legend (node shape + edge dash) | ✅ | — | static |
+| NodeList (visible nodes) | ✅ | — | store derived |
+| NodeDetail | ✅ | — | `/api/blob/{id}`, `/api/impact` |
+| **NodeDetail issue pills** | ✅ amber 클릭 가능 | amber | Hunk.doc_comment `issues:` |
+| EdgeFilters / NodeTypeFilters | ✅ | — | static |
+| **Recovery panel** | ✅ | amber | `/api/nodes/ambiguous` |
+| **TicketIndex panel** | ✅ | purple/blue | `/api/tickets` + `/api/evidence?issue_id=` |
+
+H4/H3 cross-panel loop:
+1. NodeDetail에서 Hunk 노드 선택 시 amber issue pill 렌더
+2. pill 클릭 → store `selectedIssueID` 시그널
+3. TicketIndex가 watch → 패널 강제 expand → 매칭 row 자동 open → `/api/evidence?issue_id=` 자동 fetch → 스크롤 인투뷰
+4. EvidenceView에서 commits + hunks + patch_text 인라인 표시
+5. "▾ load more" 버튼으로 다음 page (offset 기반) 추가 로드 가능
+6. 빈 응답 시 버튼 자동 사라짐
+
+---
+
+## §4. 환경 / 검증된 graph.db
+
+각 graph.db는 다른 commit/feature 검증용. 가장 큰 (go-stablenet) 그래프가 H4 평가 기준.
+
+| 경로 | 소스 | 노드 | 엣지 | 비고 |
+|------|------|------|------|------|
+| `/tmp/ckg-h4` | go-stablenet | 243K | 1.98M | H4 issue-id 검증 graph (GH-66 = 501 hunks 등) |
+| `/tmp/ckg-tsstmt` | (TS test) | small | small | TS statement-level 노드 검증 |
+| `/tmp/ckg-h2` | go-stablenet 일부 | medium | medium | H2 modifies 검증 |
+| `/tmp/ckg-self` | CKG 자체 | small | small | self-graph 평가 |
+| `/tmp/ckg-tier2` | — | — | — | Tier 2 lean json 검증 |
+
+**서버 띄우는 법** (--graph 는 directory, graph.db 가 아님):
+```bash
+./bin/ckg serve --graph /tmp/ckg-h4 --port 8765
+```
+
+**MCP stdio**:
+```bash
+./bin/ckg mcp --graph /tmp/ckg-h4
+```
+
+---
+
+## §5. 주요 API + 데이터 형식
+
+### `/api/evidence`
+- 파라미터: `intent`, `issue_id`, `seed_qname`, `k`, `budget_tokens`, **`offset`**
+- 적어도 `intent` 또는 `issue_id` 중 하나 필요 (둘 다 비어있으면 400)
+- Combinations:
+  - `intent` 만: BM25 ranking (기존)
+  - `issue_id` 만: ticket 전체 footprint, recency desc
+  - `intent + issue_id`: BM25 ranking을 ticket으로 교집합
+  - `seed_qname` 추가: modifies-reach 1-hop 필터 (G3 calls/invokes 양방향)
+  - `offset`: recency 정렬 후 N commit skip
+
+### `/api/tickets`
+- 파라미터: `limit` (default 100)
+- 반환: `[{issue_id, hunk_count, commit_count, sample_commits[3]}]`
+- hunk_count desc → commit_count desc → issue_id asc 정렬
+
+### `/api/nodes/ambiguous`
+- AMBIGUOUS confidence Hunk + Commit (unreachable history)
+
+### MCP tool `evidence_for_intent`
+- 파라미터: `intent`, `seed_qname`, `issue_id`, `k`, `budget_tokens`, **`offset`**
+- 모든 read-path tool은 `llmSafeStoreReader` wrapper 통해 AMBIGUOUS 차단
+
+---
+
+## §5.1 schema 1.8 노드 / 엣지 카운트
+
+- 노드 타입: 34개 (Hunk = #33, NodeCommit = #21 등)
+- 엣지 타입: 35개 (modifies 추가, has_hunk/adjacent 추가)
+- Confidence enum: `EXTRACTED` / `INFERRED` / `AMBIGUOUS`
+
+---
+
+## §6. 다음 세션 후보
+
+상세 후보는 `docs/NEXT-CANDIDATES-2026-05-10.md` 참조 (10개 항목, 항목별 상세 분석).
+
+이번 세션에서 #1 (페이지네이션) + #2 (NodeDetail pill loop) 가 완료됐으므로, 우선순위 재정렬 후 남은 후보:
+
+| 순위 | 항목 | 비고 |
+|------|------|------|
+| 1 | #4 EvidenceView 컴포넌트 분리 | TicketIndex 200+줄 cleanup. Low effort. |
+| 2 | #3 eval/ harness H3+H4 시나리오 | 회귀 안전망. Mid. |
+| 3 | #6 `ckg evidence` CLI subcommand | shell/CI 워크플로. Mid. |
+| 4 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
+| 5 | #10 OR/AND mode | Low. |
+| 6 | #9 sample_commits 메타 확장 | Low. |
+| 7 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+
+---
+
+## §7. 미해결 / 알려진 한계
+
+- `/api/evidence` 에서 `offset >= len(commits)` 시 JSON `hits: null` 반환 — frontend `asArray()` 가 coerce 하므로 viewer는 정상 동작하나 외부 클라이언트(curl/python)에서 `null.length` 접근 시 에러. 후속 cleanup 후보.
+- TS body walk P3가 `function-expression` / `arrow-function` 의 일부 nested 형태에서 enclosing 식별 누락 가능성 — 검증된 케이스는 모두 통과하나 edge case 가능.
+- `/api/search` FTS가 일부 graph 에서 활성화 안 됨 (페이지네이션 검증 시 발견; FTS 활성화 단계 미수행 그래프). `ckg build` 의 FTS 인덱싱 옵션 검토 필요.
+- viewer의 NodeDetail pill 클릭은 코드 리뷰 + setter+useEffect 표준 패턴으로 검증됨; live click 검증은 Hunk 노드를 캔버스에 노출하는 절차가 추가로 필요해서 이번 세션에선 unit + 페이지네이션 라이브 검증으로 대체.
+
+---
+
+## §8. 빌드 / 테스트 명령어
+
+```bash
+# 전체 빌드 (TS + Go embed)
+make build
+
+# 전체 회귀
+go test ./... -count 1
+
+# 특정 패키지 빠른 회귀
+go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
+
+# TS-only typecheck
+cd web/viewer-next && npx tsc --noEmit
+```
+
+직전 회귀 (HEAD `693c643`): 23/23 패키지 PASS.
+
+---
+
+## §9. 참조
+
+- 직전 핸드오프: `docs/SESSION-HANDOFF-2026-05-08.md` (직전 세션 시작점)
+- 다음 후보 상세: `docs/NEXT-CANDIDATES-2026-05-10.md`
+- 설계 문서: `docs/design/hunk-graph.md` (H1-H4, §11 결정 원본)
+- 스키마: `docs/SCHEMA.md` (schema 1.8 정의)
