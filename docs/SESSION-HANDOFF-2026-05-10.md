@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `85af082` (test: close mode=and verification gaps).
+기준점: branch `main`, HEAD `f1e2609` (docs: verification checklist + hydration pattern).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `f1e2609` | docs: verification checklist + viewer hydration pattern guide | `docs/VERIFICATION-CHECKLIST.md` (4축 surface / 조합 매트릭스 / negative path / PR-ready checklist) + `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + `usePersistedState` 사용법 + 1-frame flash 트레이드오프) |
 | `85af082` | test(evidence,server): close mode=and verification gaps | AND+IssueID 조합 단위 + HTTP `/api/evidence?mode=and\|invalid\|empty` 3종 wiring 테스트. 라이브 재검증 HTTP AND=0 / OR=5 / invalid=400 |
 | `2982864` | feat(evidence): mode=and toggle for precise term-match queries | `Options.Mode` ("or" default / "and") + BM25 후 `containsAll` 후처리. /api/evidence + MCP + CLI `--mode` 모두 wired. 단위 테스트 2 + 라이브 OR/AND 차이 확인 |
 | `5df3ed8` | test(mcp): lock §11.3 boundary across all 8 MCP tools | 12 wrapper 메서드 AMBIGUOUS leak guard (table-driven) + Run() 8 register* 정적 scan. fakeStore 10 method 확장. negative case 검증 |
@@ -153,12 +154,11 @@ H4/H3 cross-panel loop:
 | ✅ | ~~#6 `ckg evidence` CLI subcommand~~ | 완료 (`5f2cf21`) — 9 시나리오 라이브 검증 |
 | ✅ | ~~#5 MCP 8 tools 통합 테스트~~ | 완료 (`5df3ed8`) — 12-method wrapper boundary + 8-tool register static scan |
 | ✅ | ~~#10 OR/AND mode~~ | 완료 (`2982864` + `85af082`) — Options.Mode + BM25 post-filter, AND+IssueID 조합까지 lock-in |
-| 1 | **검증 체크리스트 docs 화** | Low (~30분) — **신규**. `docs/VERIFICATION-CHECKLIST.md`: surface fan-out (Options/HTTP/MCP/CLI) + 조합 매트릭스 + negative paths. 이번 세션 5종 누락 패턴 학습 자료 충분 |
-| 2 | #9 sample_commits top-files 메타 | Low |
-| 3 | `/api/evidence` `hits=null` → `[]` cleanup | Low (~10분) — offset past end 시 외부 client 호환 |
-| 4 | docs/ 에 hydration 패턴 가이드 1줄 | Low — `usePersistedBool/Number/JSON` + `hydrateFromStorage` 패턴 docs |
-| 5 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
-| 6 | mode=and 남은 3 검증 (MCP live / AND+SeedQname / issue-only+mode) | Low — #1 체크리스트 작업과 묶음 처리 권장 |
+| ✅ | ~~검증 체크리스트 + hydration 패턴 docs~~ | 완료 (`f1e2609`) — `docs/VERIFICATION-CHECKLIST.md` + `docs/HYDRATION-PATTERN.md` |
+| 1 | #9 sample_commits top-files 메타 | Low |
+| 2 | `/api/evidence` `hits=null` → `[]` cleanup | Low (~10분) — offset past end 시 외부 client 호환 |
+| 3 | mode=and 남은 3 검증 (MCP live / AND+SeedQname / issue-only+mode) | Low — `VERIFICATION-CHECKLIST.md` §1 워크플로 첫 적용 후보 |
+| 4 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
 
 ---
 
@@ -188,7 +188,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `85af082`): 23/23 패키지 PASS. H3+H4 통합 테스트 5회 연속 deterministic ~700ms. `ckg evidence` 9 시나리오 라이브 통과. MCP §11.3 boundary 12 method × 8 tool 정적+동적 lock-in. mode=and HTTP/CLI 라이브 (AND=0 / OR=5 / invalid=400).
+직전 회귀 (HEAD `f1e2609`): 23/23 패키지 PASS. H3+H4 통합 테스트 5회 연속 deterministic ~700ms. `ckg evidence` 9 시나리오 라이브 통과. MCP §11.3 boundary 12 method × 8 tool 정적+동적 lock-in. mode=and HTTP/CLI 라이브 (AND=0 / OR=5 / invalid=400). `f1e2609` 는 docs only — 회귀 영향 없음.
 
 ---
 
@@ -202,3 +202,5 @@ cd web/viewer-next && npx tsc --noEmit
 - H3+H4 회귀 안전망: `internal/buildpipe/h3h4_integration_test.go` + `internal/temporal/issueid_test.go::TestExtractIssueIDs_CorpusPrecisionRecall`
 - evidence CLI: `cmd/ckg/evidence.go` (사용 예: `ckg evidence --graph /tmp/ckg-h4 --issue GH-66 -k 5 --budget 1000000 --format text`, `--mode and` 정밀 검색)
 - MCP boundary 회귀 안전망: `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta` + `internal/mcp/server_test.go::TestRunRegistersAllEightTools`
+- 검증 체크리스트: `docs/VERIFICATION-CHECKLIST.md` (PR-ready 워크플로 + 5종 누락 패턴 카탈로그)
+- viewer hydration 패턴: `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + 8 마이그레이션 사례)
