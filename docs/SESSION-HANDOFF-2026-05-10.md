@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `1d175a8` (feat: bench-server — /api/* p50/p95/p99 baseline).
+기준점: branch `main`, HEAD `473f839` (perf: manifest caching + ticket-index pre-warm).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `473f839` | perf(server): manifest caching + ticket-index pre-warm | `cachedManifestStore` wrapper + boot goroutine. before/after: manifest p50 −73% / tickets p50 −90% & p99 −99.4% / evidence.intent p50 −97% / evidence.and p50 −98%. 2 unit |
 | `1d175a8` | feat(cmd): bench-server — /api/* p50/p95/p99 baseline harness | `ckg bench-server` 신규 (in-process httptest, 12 probes). `docs/PERF-BASELINE-2026-05-10.md` 첫 측정 결과 (manifest 235ms hottest slow / search 0.6ms hottest fast / tickets p99 5.7s = cold start). 4 unit + 라이브 |
 | `1dbe2e0` | chore(evidence,viewer): cleanup x3 — null hits / mode coverage / pill tooltip | (1) BuildPack nil → `[]Hit{}` (외부 client JSON 호환) (2) AND+SeedQname / issue-only ignores mode 단위 (3) MCP evidence_for_intent in-process mode propagation 검증 (4) pill `title` tooltip. 5 tests / 라이브 OK |
 | `51cd1c7` | feat(evidence): top_files hint per sample commit in TicketIndex | `CommitInfo.TopFiles` (omitempty) + `topFilesForCommit` count-desc/name-asc top-3 directory rollup. viewer ticket panel pill 렌더 + (root) 폴백. HTTP + Playwright 라이브 검증, GH-66 → ["crypto/secp256k1/...", "consensus/qbft/core", ...] |
@@ -160,10 +161,12 @@ H4/H3 cross-panel loop:
 | ✅ | ~~검증 체크리스트 + hydration 패턴 docs~~ | 완료 (`f1e2609`) — `docs/VERIFICATION-CHECKLIST.md` + `docs/HYDRATION-PATTERN.md` |
 | ✅ | ~~#9 sample_commits top-files 메타~~ | 완료 (`51cd1c7`) — TopFiles + viewer pill, VERIFICATION-CHECKLIST §1 첫 적용 사례 |
 | ✅ | ~~그룹 A cleanup × 3~~ | 완료 (`1dbe2e0`) — hits=null cleanup + mode 남은 3 검증 + pill tooltip 모두 한 commit |
-| ✅ | ~~#7 성능 baseline~~ | 완료 (`1d175a8`) — `ckg bench-server` + `docs/PERF-BASELINE-2026-05-10.md` 첫 측정. NEXT-CANDIDATES 원본 10/10 모두 완료 |
-| 1 | manifest 캐싱 (235ms → <1ms) | Low — `docs/PERF-BASELINE-2026-05-10.md` §개선 후보 #1 |
-| 2 | tickets cache 사전 워밍 | Low — §개선 후보 #3, 첫 호출 5s spike 제거 |
-| 3 | bench-mcp (stdio tool latency) | Mid — §개선 후보 #4 |
+| ✅ | ~~#7 성능 baseline~~ | 완료 (`1d175a8`) — `ckg bench-server` + `docs/PERF-BASELINE-2026-05-10.md` 첫 측정 |
+| ✅ | ~~manifest 캐싱~~ | 완료 (`473f839`) — `cachedManifestStore` wrapper, p50 −73% (235ms→64ms) |
+| ✅ | ~~tickets cache 사전 워밍~~ | 완료 (`473f839`) — boot goroutine, p50 −90% & p99 −99.4% (5775ms→34ms). evidence 모든 surface 부수 효과로 -97%까지 |
+| 1 | computeStaleness 디바운스 (manifest 잔여 64ms) | Low — `git rev-parse HEAD` spawn 비용 제거 |
+| 2 | edges.counts p99 jitter 조사 | Mid — SQLite EXPLAIN + covering index |
+| 3 | bench-mcp (stdio tool latency) | Mid |
 | 4 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
@@ -194,7 +197,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `1d175a8`): 23/23 패키지 PASS. `1d175a8` 4 신규 테스트 (percentile / required flag / range guards / seed conditional) + 라이브 12 endpoint 측정 baseline `docs/PERF-BASELINE-2026-05-10.md`. 누적 안전망: H3+H4 통합 ~700ms, `ckg evidence` 9 시나리오, MCP §11.3 boundary 12-method × 8-tool, mode=and HTTP/CLI/MCP all wired, top_files pill tooltip OK, `/api/*` p50/p95/p99 baseline.
+직전 회귀 (HEAD `473f839`): 23/23 패키지 PASS. `473f839` 2 신규 단위 테스트 (manifest cache one-read / fallback) + 라이브 before/after measurement (manifest -73% / tickets -90% & p99 -99.4% / evidence -97~98%). 누적: 안전망 + perf 양면 cover. 12 endpoint baseline doc에 before/after 컬럼 포함.
 
 ---
 
