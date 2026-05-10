@@ -362,6 +362,60 @@ func TestBuildPack_AndMode(t *testing.T) {
 	}
 }
 
+// TestBuildPack_AndMode_WithIssueID locks in the filter sequence:
+// Cache.BuildPack applies issue_id BEFORE the AND post-filter, so a
+// hit must clear BOTH gates to survive. Documents the contract that
+// IssueID + Mode=and is the strictest combination — neither falls
+// back to OR semantics on the other axis.
+func TestBuildPack_AndMode_WithIssueID(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			// c1 cites GH-42, two hunks: h1 has only "panel"; h2 has both
+			// tokens. c2 cites GH-99 with both tokens. AND alone keeps
+			// h2+h3 (both tokens). issue=GH-42 alone keeps h1+h2 (its
+			// commit). Combined: only h2 survives.
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: panel work", Confidence: types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit, QualifiedName: "commit:bbbb",
+				Signature: "1700000200: panel jitter elsewhere", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:Panel.tsx:0",
+				FilePath: "Panel.tsx", DocComment: "issues:GH-42",
+				Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:Panel.tsx:1",
+				FilePath: "Panel.tsx", DocComment: "issues:GH-42",
+				Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk, QualifiedName: "hunk:bbbb:Panel.tsx:0",
+				FilePath: "Panel.tsx", DocComment: "issues:GH-99",
+				Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("panel mounts and unmounts"),
+			"h2": gz("panel jitter on remount"),
+			"h3": gz("panel jitter elsewhere"),
+		},
+	}
+	// AND + GH-42: only the c1 commit (which has h2 with both tokens).
+	pack, err := BuildPack(store, Options{
+		Intent: "panel jitter", IssueID: "GH-42", Mode: "and",
+	})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 1 {
+		t.Fatalf("AND+IssueID: want 1 commit (c1), got %d", len(pack.Hits))
+	}
+	if pack.Hits[0].Commit.SHA != "aaaa" {
+		t.Errorf("AND+IssueID: surviving commit = %s, want aaaa", pack.Hits[0].Commit.SHA)
+	}
+	// The surviving commit must contain h2 only (the AND-passing hunk).
+	if got := len(pack.Hits[0].Hunks); got != 1 {
+		t.Errorf("AND+IssueID: c1 should report 1 surviving hunk, got %d", got)
+	}
+	if pack.Hits[0].Hunks[0].ID != "h2" {
+		t.Errorf("AND+IssueID: surviving hunk = %s, want h2", pack.Hits[0].Hunks[0].ID)
+	}
+}
+
 // TestBuildPack_AndMode_NoSurvivors covers the empty-survivor path:
 // AND mode with a query no doc fully contains yields 0 hits, not a
 // fallback to OR. Important contract — the caller asked for precise

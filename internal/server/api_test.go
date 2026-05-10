@@ -57,4 +57,44 @@ func TestHandlersBasic(t *testing.T) {
 			}
 		})
 	}
+
+	// /api/evidence wiring smokes — the endpoint must surface the
+	// allow-list guards added with mode=and. Both negative paths
+	// (missing intent+issue, unknown mode) must return 400 so callers
+	// don't silently fall back to a permissive query that returns
+	// arbitrary commits. Lives next to TestHandlersBasic so the
+	// fixture build is shared.
+	t.Run("evidence_no_intent_no_issue_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/evidence")
+		if err != nil {
+			t.Fatalf("GET /api/evidence: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", resp.StatusCode)
+		}
+	})
+	t.Run("evidence_invalid_mode_returns_400", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/api/evidence?intent=anything&mode=xor")
+		if err != nil {
+			t.Fatalf("GET /api/evidence?mode=xor: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400 (mode allow-list failure)", resp.StatusCode)
+		}
+	})
+	t.Run("evidence_mode_and_returns_200", func(t *testing.T) {
+		// On the resolve fixture there's no git history, so the
+		// EvidencePack is empty — that's the contract for non-git
+		// graphs. We only assert the wiring is happy (200, JSON).
+		resp, err := http.Get(ts.URL + "/api/evidence?intent=anything&mode=and")
+		if err != nil {
+			t.Fatalf("GET /api/evidence?mode=and: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("status = %d, want 200 (wiring sanity for mode=and)", resp.StatusCode)
+		}
+	})
 }
