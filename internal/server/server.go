@@ -92,6 +92,7 @@ func NewWithOptions(store persist.StoreReader, log *slog.Logger, opts Options) *
 	}
 	s.routes(opts)
 	go s.prewarmTicketIndex()
+	go s.prewarmEdgeCounts()
 	return s
 }
 
@@ -104,6 +105,18 @@ func NewWithOptions(store persist.StoreReader, log *slog.Logger, opts Options) *
 func (s *Server) prewarmTicketIndex() {
 	if _, err := s.evidenceCache.TicketIndex(s.store, 0); err != nil {
 		s.log.Debug("server: ticket index pre-warm failed (non-fatal)", "err", err)
+	}
+}
+
+// prewarmEdgeCounts kicks the SELECT-COUNT-GROUP-BY scan off the
+// viewer's first /api/edges/counts call. The viewer fetches this on
+// every boot to populate per-pill axis-weight badges, so the lazy
+// cache miss would always land on the user. Sequencing it here
+// pushes the ~290ms scan into the boot window. Result is discarded;
+// the side-effect is populating cachedManifestStore.edgeCounts.
+func (s *Server) prewarmEdgeCounts() {
+	if _, err := s.store.EdgeCountsByType(); err != nil {
+		s.log.Debug("server: edge counts pre-warm failed (non-fatal)", "err", err)
 	}
 }
 

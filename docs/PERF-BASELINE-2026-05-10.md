@@ -23,24 +23,26 @@ reflect that specific commit:
     (`/tmp/ckg-bench/after.json`).
   - **after #3**: + staleness debounce
     (`/tmp/ckg-bench/after-staleness.json`).
+  - **after #4**: + edge-counts cache + prewarm
+    (`/tmp/ckg-bench/after-edges-prewarm.json`).
 
 Same graph fingerprint across all three, so deltas reflect code
 changes rather than measurement noise.
 
-| Endpoint | before p50 | after #1+#2 | after #3 | Δ p50 (final) | before p99 | after #3 p99 |
-|----------|-----------:|------------:|---------:|--------------:|-----------:|-------------:|
-| manifest             | 235.13ms |  64.34ms |  26.30ms | **−89%** |  286.02ms |  74.21ms |
-| hierarchy.pkg        | 164.70ms | 168.03ms | 166.99ms |    +1% |  244.54ms | 242.85ms |
-| nodes                |   1.02ms |   0.99ms |   1.02ms |    +0% |   92.34ms | 101.03ms |
-| nodes.top.pagerank   |  69.56ms |  73.10ms |  71.32ms |    +3% |  230.05ms | 217.50ms |
-| nodes.top.usage      |  69.63ms |  67.01ms |  69.49ms |    −0% |  102.44ms | 112.74ms |
-| nodes.ambiguous      |   6.43ms |   6.21ms |   5.55ms |   −14% |   10.57ms |   7.47ms |
-| edges.counts         | 152.23ms | 151.72ms | 152.67ms |    +0% |  755.72ms | 396.64ms |
-| search               |   0.61ms |   0.67ms |   0.72ms |   +18% |    6.46ms |   6.30ms |
-| tickets              | 190.07ms |  18.67ms |  17.88ms | **−91%** | 5774.90ms |  19.47ms |
-| evidence.intent      | 168.31ms |   4.56ms |   4.11ms | **−98%** |  238.71ms |  10.40ms |
-| evidence.issue       | 203.44ms |  54.09ms |  54.41ms | **−73%** |  259.77ms | 124.51ms |
-| evidence.and         | 169.24ms |   2.68ms |   2.78ms | **−98%** |  223.87ms |   8.05ms |
+| Endpoint | before p50 | #1+#2 | #3 | #4 (final) | Δ p50 | before p99 | final p99 | Δ p99 |
+|----------|-----------:|------:|----:|----------:|------:|----------:|---------:|------:|
+| manifest             | 235.13ms |  64.34ms |  26.30ms |   26.11ms | **−89%** |  286.02ms |  85.24ms | −70% |
+| hierarchy.pkg        | 164.70ms | 168.03ms | 166.99ms |  165.33ms |   −0% |  244.54ms | 240.50ms |  −2% |
+| nodes                |   1.02ms |   0.99ms |   1.02ms |    0.95ms |   −7% |   92.34ms |  99.16ms |  +7% |
+| nodes.top.pagerank   |  69.56ms |  73.10ms |  71.32ms |   65.98ms |   −5% |  230.05ms | 198.99ms | −13% |
+| nodes.top.usage      |  69.63ms |  67.01ms |  69.49ms |   63.48ms |   −9% |  102.44ms | 104.23ms |  +2% |
+| nodes.ambiguous      |   6.43ms |   6.21ms |   5.55ms |    5.64ms |  −12% |   10.57ms |  18.66ms | +77% |
+| edges.counts         | 152.23ms | 151.72ms | 152.67ms |  **0.10ms** | **−99.9%** |  755.72ms | **0.31ms** | **−99.96%** |
+| search               |   0.61ms |   0.67ms |   0.72ms |    0.64ms |   +5% |    6.46ms |   4.05ms | −37% |
+| tickets              | 190.07ms |  18.67ms |  17.88ms |   17.59ms | **−91%** | 5774.90ms |  21.07ms | **−99.6%** |
+| evidence.intent      | 168.31ms |   4.56ms |   4.11ms |    4.34ms | **−97%** |  238.71ms |  13.59ms | −94% |
+| evidence.issue       | 203.44ms |  54.09ms |  54.41ms |   49.26ms | **−76%** |  259.77ms | 100.44ms | −61% |
+| evidence.and         | 169.24ms |   2.68ms |   2.78ms |    2.47ms | **−99%** |  223.87ms |   7.72ms | **−97%** |
 
 Raw JSON outputs in `/tmp/ckg-bench/`. `ckg bench-server` emits the
 same shape so future runs diff mechanically.
@@ -87,11 +89,14 @@ same shape so future runs diff mechanically.
    Trade-off: a fresh `ckg build` while serve is up surfaces the
    stale indicator with up to 5s lag — within human-perception
    tolerance for a banner refresh.
-4. **`edges.counts` p99 jitter** — p99 dropped from 755ms to 397ms
-   across the three runs (cache pressure decreased), but still an
-   outlier. SQLite `EXPLAIN QUERY PLAN` review + covering index on
-   `edges.type` would likely settle this. Deferred — sub-second p99
-   on the GROUP BY is not a user pain point.
+4. ✅ **`edges.counts` cache + pre-warm** — landed in the same
+   session. EXPLAIN QUERY PLAN already showed
+   `SCAN edges USING COVERING INDEX idx_edges_type`, so adding
+   another index was a dead-end; the 1.98M-row scan itself was the
+   cost. Lifted into `cachedManifestStore.EdgeCountsByType` with a
+   matching `prewarmEdgeCounts` boot goroutine. p50 152ms → 0.10ms
+   (−99.9%); p99 755ms → 0.31ms (−99.96%). Trade-off identical to
+   manifest: build-time-fixed data, restart on rebuild.
 5. **bench-mcp** — measure each MCP tool's stdio round-trip latency.
    Not in this baseline because MCP latency is dominated by stdio
    framing + JSON-RPC, not graph reads. Future enhancement.
