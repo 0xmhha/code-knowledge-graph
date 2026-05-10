@@ -26,6 +26,7 @@ import (
 	"path"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/bm25"
@@ -40,7 +41,24 @@ type Cache struct {
 	corpus *hunkCorpus    // post-indexCorpus
 	scorer bm25.Scorer    // post-Index over the per-hunk virtual docs
 	docs   []bm25.Document
+
+	// manifestMu guards the small TTL-based manifest mini-cache.
+	// Without it, every BuildPack call would issue a fresh
+	// store.GetManifest() purely to compute the cache invalidation
+	// key — that read measured at 26-65ms on raw SQLite stores
+	// (stalenessCache landed in `ckg serve`, but other callers like
+	// bench-mcp / `ckg evidence` get the unwrapped path). 1s TTL is
+	// short enough that a graph rebuild + serve restart still
+	// surfaces fresh state on the operator's first new query, and
+	// long enough that a hot read loop never re-hits SQLite.
+	manifestMu       sync.Mutex
+	cachedManifest   persist.Manifest
+	cachedManifestAt time.Time
 }
+
+// manifestCacheTTL is the in-Cache debounce window for
+// store.GetManifest. See Cache field comments for the rationale.
+const manifestCacheTTL = time.Second
 
 // NewCache returns a fresh, empty Cache. Safe to share across goroutines
 // — every method takes the lock internally.
@@ -209,7 +227,7 @@ func containsAll(doc, query []string) bool {
 // the manifest key drifts. Fast path takes the read lock for the
 // key check; slow path takes the write lock and re-validates.
 func (c *Cache) ensureIndex(store persist.StoreReader) error {
-	man, err := store.GetManifest()
+	man, err := c.getManifest(store)
 	if err != nil {
 		return fmt.Errorf("evidence cache: manifest: %w", err)
 	}
@@ -254,6 +272,30 @@ func (c *Cache) ensureIndex(store persist.StoreReader) error {
 	c.scorer = scorer
 	c.key = wantKey
 	return nil
+}
+
+// getManifest serves store.GetManifest() through a short-lived TTL
+// mini-cache. The original ensureIndex path called GetManifest on
+// every BuildPack invocation purely to compute the corpus
+// invalidation key — measured at 26-65ms per hit on raw SQLite,
+// dominating the steady-state evidence latency for callers that
+// don't already wrap the store in a manifest cache (bench-mcp,
+// `ckg evidence` from CLI). 1s TTL keeps graph-rebuild detection
+// effectively immediate in human time while collapsing hot loops
+// to a single in-memory dereference.
+func (c *Cache) getManifest(store persist.StoreReader) (persist.Manifest, error) {
+	c.manifestMu.Lock()
+	defer c.manifestMu.Unlock()
+	if !c.cachedManifestAt.IsZero() && time.Since(c.cachedManifestAt) < manifestCacheTTL {
+		return c.cachedManifest, nil
+	}
+	m, err := store.GetManifest()
+	if err != nil {
+		return persist.Manifest{}, err
+	}
+	c.cachedManifest = m
+	c.cachedManifestAt = time.Now()
+	return m, nil
 }
 
 // TicketRow is one entry in the TicketIndex output: an issue/PR ID
@@ -456,6 +498,13 @@ func sortInPlaceCommits(infos []CommitInfo, less func(i, j int) bool) {
 // Invalidate clears the cached state, forcing the next BuildPack to
 // rebuild from scratch. Used by tests; production code shouldn't need
 // this — manifest-based invalidation handles the common rebuild case.
+//
+// Resets the per-Cache manifest mini-cache as well so a test can
+// drive the (setKey → re-BuildPack) flow without waiting for the
+// 1-second TTL to expire. Production callers that mutate the
+// underlying store directly should also call Invalidate() to mirror
+// the new state immediately rather than risking a one-second window
+// of stale corpus.
 func (c *Cache) Invalidate() {
 	c.mu.Lock()
 	c.corpus = nil
@@ -463,6 +512,9 @@ func (c *Cache) Invalidate() {
 	c.docs = nil
 	c.key = ""
 	c.mu.Unlock()
+	c.manifestMu.Lock()
+	c.cachedManifestAt = time.Time{}
+	c.manifestMu.Unlock()
 }
 
 // CachedKey returns the manifest signature the cache currently holds.

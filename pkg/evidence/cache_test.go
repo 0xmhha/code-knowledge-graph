@@ -272,8 +272,16 @@ func TestCache_KeyDriftRebuilds(t *testing.T) {
 	}
 	beforeNodes := store.allNodesCalls.Load()
 
-	// Simulate rebuild: drift the key.
+	// Simulate rebuild: drift the key. The 1s manifest TTL means a
+	// test that runs the second BuildPack within the window would
+	// see the cached pre-drift manifest and skip the rebuild —
+	// production callers that drop a fresh graph.db while the cache
+	// is hot accept the same lag (1s drift detection). Calling
+	// Invalidate() here mirrors what `ckg build` will do if it ever
+	// gets a "tell the running server my graph just changed" hook;
+	// it's also the only way to keep the test fast.
 	store.setKey("key-v2")
+	cache.Invalidate()
 	if _, err := cache.BuildPack(store, Options{Intent: "hello"}); err != nil {
 		t.Fatalf("post-drift BuildPack: %v", err)
 	}

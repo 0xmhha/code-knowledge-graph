@@ -90,7 +90,8 @@ node, which is the current /tmp/ckg-h4 case.
 | find_symbol             | 200 |  0.07ms |  0.26ms |  0.94ms |  0.10ms |
 | search_text             | 200 |  0.75ms |  1.25ms |  1.74ms |  0.78ms |
 | get_context_for_task    | 200 |  6.71ms |  9.98ms | 12.25ms |  7.01ms |
-| evidence_for_intent     | 200 | 172.36ms | 209.62ms | 248.58ms | 174.96ms |
+| evidence_for_intent (before fix) | 200 | 172.36ms | 209.62ms | 248.58ms | 174.96ms |
+| evidence_for_intent (after fix)  | 200 |   8.76ms |  36.02ms | 163.10ms |  12.61ms |
 
 Each probe runs a single warmup call before the timed loop so
 cold-start costs (the BM25 corpus build) don't pollute the
@@ -98,16 +99,16 @@ measurement. Without the warmup, evidence_for_intent's first call
 shows the ~5s `ensureIndex` build (mirrors the cold start that
 prewarmTicketIndex absorbs in bench-server).
 
-**Observation**: `evidence_for_intent` is 40× more expensive
-in-process than the same `/api/evidence?intent=...` HTTP call after
-the perf passes (172ms vs 4.3ms). Both routes use the same
-`evidence.Cache`, so the gap is somewhere in the per-call setup —
-likely the structured-content envelope built by `textResult`, or a
-cache instance that's not the one bench-server's
-`prewarmTicketIndex` warmed. Worth a follow-up trace; for now the
-honest signal is that the BM25 ranking + commit grouping is *not*
-free, and bench-mcp surfaces that cost where bench-server's HTTP
-view doesn't.
+**Trace finding**: the original 40× gap (172ms in-process vs 4.3ms
+HTTP) was `evidence.Cache.ensureIndex` calling `store.GetManifest()`
+on every `BuildPack` invocation purely to compute the corpus
+invalidation key. bench-server's wrapped store served that read
+from memory; bench-mcp's raw store hit SQLite (~26-65ms per call).
+The fix lifted the manifest fetch into a 1s TTL mini-cache inside
+`evidence.Cache` itself, so every consumer (bench-mcp, `ckg
+evidence` from CLI, future MCP-only deployments) gets the same
+fast path the HTTP route had. After-fix bench-mcp matches
+bench-server within measurement jitter (8.76ms vs 4.41ms p50).
 
 Raw: `/tmp/ckg-bench/mcp.json`.
 
@@ -133,18 +134,22 @@ Raw: `/tmp/ckg-bench/mcp.json`.
    matching `prewarmEdgeCounts` boot goroutine. p50 152ms → 0.10ms
    (−99.9%); p99 755ms → 0.31ms (−99.96%). Trade-off identical to
    manifest: build-time-fixed data, restart on rebuild.
-5. ✅ **bench-mcp (in-process)** — landed in the same session.
-   `cmd/ckg/bench_mcp.go` + `internal/mcp/bench.go::NewBenchHandlers`
-   exposes the eight tool handlers for direct invocation. Reveals
-   that `evidence_for_intent` graph-layer cost is ~170ms even with
-   a warm cache — the HTTP path's 4ms p50 (after the perf passes)
-   includes some still-unexplained shortcut. Worth a follow-up.
-6. **bench-mcp-stdio** — measure the same handlers through a real
+5. ✅ **bench-mcp (in-process)** — landed (commit 218008a).
+6. ✅ **evidence per-call manifest fetch** — surfaced as the 40× gap
+   between bench-mcp and bench-server's evidence_for_intent;
+   `evidence.Cache.ensureIndex` was hitting `store.GetManifest()` on
+   every BuildPack purely for the cache-invalidation key compute.
+   Lifted into a 1s TTL mini-cache inside the Cache struct so every
+   consumer benefits, not just `ckg serve` (whose
+   `cachedManifestStore` already short-circuited the read). After:
+   bench-mcp evidence p50 172ms → 8.76ms (−95%); bench-server held
+   steady at ~4ms (already fast).
+7. **bench-mcp-stdio** — measure the same handlers through a real
    `ckg mcp` subprocess to attribute the JSON-RPC + framing cost
-   independently. Deferred — in-process numbers above already
-   confirm the graph layer dominates the warm-cache path; framing
-   measurement is a "decide if stdio is worth optimising" question
-   for a future session.
+   independently. Deferred — the in-process numbers now match the
+   HTTP path closely, so the remaining "is stdio worth optimising"
+   question is decoupled from the BM25 cost question this session
+   was chasing.
 
 ---
 
