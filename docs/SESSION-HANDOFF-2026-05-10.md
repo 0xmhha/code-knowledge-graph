@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `1dbe2e0` (chore: cleanup x3 — null hits / mode coverage / pill tooltip).
+기준점: branch `main`, HEAD `1d175a8` (feat: bench-server — /api/* p50/p95/p99 baseline).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `1d175a8` | feat(cmd): bench-server — /api/* p50/p95/p99 baseline harness | `ckg bench-server` 신규 (in-process httptest, 12 probes). `docs/PERF-BASELINE-2026-05-10.md` 첫 측정 결과 (manifest 235ms hottest slow / search 0.6ms hottest fast / tickets p99 5.7s = cold start). 4 unit + 라이브 |
 | `1dbe2e0` | chore(evidence,viewer): cleanup x3 — null hits / mode coverage / pill tooltip | (1) BuildPack nil → `[]Hit{}` (외부 client JSON 호환) (2) AND+SeedQname / issue-only ignores mode 단위 (3) MCP evidence_for_intent in-process mode propagation 검증 (4) pill `title` tooltip. 5 tests / 라이브 OK |
 | `51cd1c7` | feat(evidence): top_files hint per sample commit in TicketIndex | `CommitInfo.TopFiles` (omitempty) + `topFilesForCommit` count-desc/name-asc top-3 directory rollup. viewer ticket panel pill 렌더 + (root) 폴백. HTTP + Playwright 라이브 검증, GH-66 → ["crypto/secp256k1/...", "consensus/qbft/core", ...] |
 | `f1e2609` | docs: verification checklist + viewer hydration pattern guide | `docs/VERIFICATION-CHECKLIST.md` (4축 surface / 조합 매트릭스 / negative path / PR-ready checklist) + `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + `usePersistedState` 사용법 + 1-frame flash 트레이드오프) |
@@ -159,8 +160,11 @@ H4/H3 cross-panel loop:
 | ✅ | ~~검증 체크리스트 + hydration 패턴 docs~~ | 완료 (`f1e2609`) — `docs/VERIFICATION-CHECKLIST.md` + `docs/HYDRATION-PATTERN.md` |
 | ✅ | ~~#9 sample_commits top-files 메타~~ | 완료 (`51cd1c7`) — TopFiles + viewer pill, VERIFICATION-CHECKLIST §1 첫 적용 사례 |
 | ✅ | ~~그룹 A cleanup × 3~~ | 완료 (`1dbe2e0`) — hits=null cleanup + mode 남은 3 검증 + pill tooltip 모두 한 commit |
-| 1 | #7 성능 baseline | Mid — go-stablenet 1.9M edges 위에서 모든 `/api/*` + 8 MCP tools p50/p95/p99 + memory snapshot |
-| 2 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
+| ✅ | ~~#7 성능 baseline~~ | 완료 (`1d175a8`) — `ckg bench-server` + `docs/PERF-BASELINE-2026-05-10.md` 첫 측정. NEXT-CANDIDATES 원본 10/10 모두 완료 |
+| 1 | manifest 캐싱 (235ms → <1ms) | Low — `docs/PERF-BASELINE-2026-05-10.md` §개선 후보 #1 |
+| 2 | tickets cache 사전 워밍 | Low — §개선 후보 #3, 첫 호출 5s spike 제거 |
+| 3 | bench-mcp (stdio tool latency) | Mid — §개선 후보 #4 |
+| 4 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
 
@@ -190,7 +194,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `1dbe2e0`): 23/23 패키지 PASS. cleanup x3 commit으로 5 신규 테스트 추가. `1dbe2e0` 라이브 검증: hits=null→[] / AND+seed strict / pill tooltip. 누적: H3+H4 통합 ~700ms, `ckg evidence` 9 시나리오, MCP §11.3 boundary 12-method × 8-tool, mode=and HTTP/CLI/MCP all wired, top_files pill tooltip OK.
+직전 회귀 (HEAD `1d175a8`): 23/23 패키지 PASS. `1d175a8` 4 신규 테스트 (percentile / required flag / range guards / seed conditional) + 라이브 12 endpoint 측정 baseline `docs/PERF-BASELINE-2026-05-10.md`. 누적 안전망: H3+H4 통합 ~700ms, `ckg evidence` 9 시나리오, MCP §11.3 boundary 12-method × 8-tool, mode=and HTTP/CLI/MCP all wired, top_files pill tooltip OK, `/api/*` p50/p95/p99 baseline.
 
 ---
 
@@ -206,3 +210,4 @@ cd web/viewer-next && npx tsc --noEmit
 - MCP boundary 회귀 안전망: `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta` + `internal/mcp/server_test.go::TestRunRegistersAllEightTools`
 - 검증 체크리스트: `docs/VERIFICATION-CHECKLIST.md` (PR-ready 워크플로 + 5종 누락 패턴 카탈로그)
 - viewer hydration 패턴: `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + 8 마이그레이션 사례)
+- 성능 baseline: `cmd/ckg/bench_server.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server --graph /tmp/ckg-h4 --iterations 50 --concurrency 4`)
