@@ -36,10 +36,12 @@ import (
 func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, cache *evidence.Cache) {
 	tool := mcp.NewTool("evidence_for_intent",
 		mcp.WithDescription("EvidencePack: BM25-rank past commit hunks against an intent, return top-K with patches + modifies neighbours. Filters AMBIGUOUS unreachable-history per §11.3."),
-		mcp.WithString("intent", mcp.Required(),
-			mcp.Description("Free-text task description. Tokenised with the bm25 splitter (camelCase + snake_case + qname-aware).")),
+		mcp.WithString("intent",
+			mcp.Description("Free-text task description. Tokenised with the bm25 splitter (camelCase + snake_case + qname-aware). Required unless issue_id is set.")),
 		mcp.WithString("seed_qname",
 			mcp.Description("Optional. Restrict to hunks whose modifies edges reach this CodeNode or its callers/callees (1-hop).")),
+		mcp.WithString("issue_id",
+			mcp.Description("Optional. Restrict to hunks whose parent commit cites this H4-extracted ticket (e.g. GH-42, INGEST-789). Use alone to browse a ticket's full footprint sorted by recency, or combine with intent for BM25-rank within the ticket subset.")),
 		mcp.WithNumber("k", mcp.DefaultNumber(5),
 			mcp.Description("Top-K commits to return. Each commit may contain multiple hunks (the adjacent edge means the Agent reads the full change).")),
 		mcp.WithNumber("budget_tokens", mcp.DefaultNumber(6000),
@@ -49,6 +51,7 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, c
 		opt := evidence.Options{
 			Intent:       req.GetString("intent", ""),
 			SeedQname:    req.GetString("seed_qname", ""),
+			IssueID:      req.GetString("issue_id", ""),
 			K:            int(req.GetFloat("k", 5)),
 			BudgetTokens: int(req.GetFloat("budget_tokens", 6000)),
 		}

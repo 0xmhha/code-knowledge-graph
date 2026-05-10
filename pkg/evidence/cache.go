@@ -72,11 +72,33 @@ func (c *Cache) BuildPack(store persist.StoreReader, opt Options) (*Pack, error)
 		return pack, nil
 	}
 
+	// IssueID filter (H4 follow-up): restrict the candidate set to
+	// hunks whose parent commit cites the requested ticket. When
+	// Intent is empty AND IssueID is set, skip BM25 entirely and
+	// rank by commit recency — the user is asking "show me everything
+	// for ticket X" rather than "find hunks matching some text".
 	queryTokens := bm25.Tokenize(opt.Intent)
-	if len(queryTokens) == 0 {
+	if opt.Intent != "" && len(queryTokens) == 0 {
+		// Intent given but tokeniser stripped it (whitespace / punct only).
 		return pack, nil
 	}
-	scored := scorer.TopK(queryTokens, bm25TopN)
+
+	var scored []bm25.ScoredDoc
+	switch {
+	case opt.IssueID != "" && len(queryTokens) == 0:
+		// Intent-free ticket browse: take every hunk in the ticket's
+		// commits as a unit-scored doc; groupByCommit's recency sort
+		// orders the resulting Hits.
+		scored = hunksForIssueID(corpus, opt.IssueID)
+	case len(queryTokens) > 0:
+		scored = scorer.TopK(queryTokens, bm25TopN)
+		if opt.IssueID != "" {
+			scored = filterByIssueID(scored, corpus, opt.IssueID)
+		}
+	default:
+		// Neither intent nor issue_id — empty result is honest.
+		return pack, nil
+	}
 
 	if opt.SeedQname != "" {
 		allowed := buildSeedAllowList(corpus, opt.SeedQname)
@@ -85,6 +107,34 @@ func (c *Cache) BuildPack(store persist.StoreReader, opt Options) (*Pack, error)
 
 	pack.Hits = groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, store)
 	return pack, nil
+}
+
+// hunksForIssueID returns every hunk whose parent commit cites the
+// requested ticket, scored 1.0 each. Used when the caller wants the
+// full ticket footprint without a text query — groupByCommit's
+// recency sort then surfaces the most recent commits first.
+func hunksForIssueID(corpus *hunkCorpus, issueID string) []bm25.ScoredDoc {
+	out := make([]bm25.ScoredDoc, 0, 64)
+	for hunkID, sha := range corpus.hunkSHA {
+		if corpus.issuesBySHA[sha][issueID] {
+			out = append(out, bm25.ScoredDoc{ID: hunkID, Score: 1.0})
+		}
+	}
+	return out
+}
+
+// filterByIssueID drops hunks whose parent commit doesn't cite the
+// requested ticket. Used to intersect the BM25 ranking with the
+// IssueID gate when both Intent and IssueID are set.
+func filterByIssueID(scored []bm25.ScoredDoc, corpus *hunkCorpus, issueID string) []bm25.ScoredDoc {
+	out := make([]bm25.ScoredDoc, 0, len(scored))
+	for _, s := range scored {
+		sha := corpus.hunkSHA[s.ID]
+		if corpus.issuesBySHA[sha][issueID] {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // ensureIndex populates / rebuilds the cached corpus + scorer when

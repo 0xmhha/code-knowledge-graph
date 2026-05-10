@@ -136,14 +136,18 @@ func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 // the source set.
 func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	intent := r.URL.Query().Get("intent")
-	if intent == "" {
-		http.Error(w, "intent query param is required", http.StatusBadRequest)
+	issueID := r.URL.Query().Get("issue_id")
+	// At least one of intent or issue_id must be set — both empty
+	// is a misconfigured caller, not a "show everything" request.
+	if intent == "" && issueID == "" {
+		http.Error(w, "at least one of intent or issue_id is required", http.StatusBadRequest)
 		return
 	}
 	k, _ := strconv.Atoi(r.URL.Query().Get("k"))
 	budget, _ := strconv.Atoi(r.URL.Query().Get("budget_tokens"))
 	pack, err := s.evidenceCache.BuildPack(s.store, evidence.Options{
 		Intent:       intent,
+		IssueID:      issueID,
 		SeedQname:    r.URL.Query().Get("seed_qname"),
 		K:            k,
 		BudgetTokens: budget,

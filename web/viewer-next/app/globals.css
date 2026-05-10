@@ -1444,3 +1444,88 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Ticket -> Patches surface (H4 → H3 EvidencePack) */
+.ticket-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 0 6px 0;
+}
+.ticket-patches-button {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid rgba(120, 160, 220, 0.4);
+  border-radius: 3px;
+  color: #8ab4d8;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10px;
+  margin-left: 14px;
+  padding: 2px 8px;
+}
+.ticket-patches-button:hover {
+  background: rgba(120, 160, 220, 0.12);
+  color: #cfe;
+}
+.ticket-patches-loading,
+.ticket-patches-empty {
+  color: #678;
+  font-size: 10px;
+  font-style: italic;
+  padding: 2px 0 2px 14px;
+}
+.ticket-patches-error {
+  color: #c66;
+  font-size: 10px;
+  padding: 2px 0 2px 14px;
+}
+.ticket-patches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 14px;
+  padding: 4px 6px;
+  background: rgba(20, 30, 50, 0.4);
+  border-radius: 3px;
+  border-left: 2px solid rgba(120, 160, 220, 0.5);
+}
+.ticket-patches-commit-header {
+  display: flex;
+  gap: 6px;
+  font-size: 10px;
+  color: #cfe;
+  font-weight: 500;
+  padding-bottom: 2px;
+}
+.ticket-patches-hunk {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 4px 0;
+  border-top: 1px dashed rgba(80, 110, 160, 0.25);
+}
+.ticket-patches-hunk:first-of-type { border-top: none; }
+.ticket-patches-hunk-header {
+  display: flex;
+  gap: 6px;
+  font-size: 9px;
+  color: #678;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.ticket-patches-file { color: #8ab4d8; }
+.ticket-patches-lines { color: #555; }
+.ticket-patches-pre {
+  margin: 0;
+  padding: 4px 6px;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  color: #ccc;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 2px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}

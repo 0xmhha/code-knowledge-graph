@@ -109,6 +109,48 @@ export interface IAPI {
   // are pre-sorted by hunk_count desc so the caller can render
   // top-N directly.
   tickets(limit?: number): Promise<TicketRow[]>;
+  // evidence returns the full EvidencePack assembled by H3 — top-K
+  // commits with patch text + modifies neighbours. The viewer's
+  // ticket-row "patches" button calls this with {issueID} only,
+  // which the server interprets as "show the ticket's full footprint
+  // sorted by recency" (no BM25 ranking needed). Combine with intent
+  // to BM25-rank inside the ticket subset.
+  evidence(opts: EvidenceQuery): Promise<EvidencePack>;
+}
+
+export interface EvidenceQuery {
+  intent?: string;
+  issueID?: string;
+  seedQname?: string;
+  k?: number;
+  budgetTokens?: number;
+}
+
+export interface EvidenceModifies {
+  qname: string;
+  type: string;
+  file_path?: string;
+  start_line?: number;
+  end_line?: number;
+}
+
+export interface EvidenceHunk {
+  id: string;
+  file_path: string;
+  start_line: number;
+  end_line: number;
+  patch_text: string;
+  modifies?: EvidenceModifies[];
+}
+
+export interface EvidenceHit {
+  commit: { sha: string; subject: string; author_time: number; issue_ids?: string[] };
+  hunks: EvidenceHunk[];
+}
+
+export interface EvidencePack {
+  intent: string;
+  hits: EvidenceHit[];
 }
 
 export interface TicketRow {
@@ -207,6 +249,19 @@ export class API implements IAPI {
     if (r.status === 404) return [];
     if (!r.ok) throw new Error(`/api/tickets ${r.status}`);
     return asArray<TicketRow>(await r.json());
+  }
+
+  async evidence(opts: EvidenceQuery): Promise<EvidencePack> {
+    const q = new URLSearchParams();
+    if (opts.intent) q.set('intent', opts.intent);
+    if (opts.issueID) q.set('issue_id', opts.issueID);
+    if (opts.seedQname) q.set('seed_qname', opts.seedQname);
+    if (opts.k != null) q.set('k', String(opts.k));
+    if (opts.budgetTokens != null) q.set('budget_tokens', String(opts.budgetTokens));
+    const r = await fetch(`${this.base}/api/evidence?${q}`);
+    if (!r.ok) throw new Error(`/api/evidence ${r.status}`);
+    const v = await r.json();
+    return { intent: v?.intent ?? '', hits: asArray<EvidenceHit>(v?.hits) };
   }
 }
 
@@ -324,6 +379,14 @@ export class StaticAPI implements IAPI {
     // the viewer hides the TicketIndex panel when the array is
     // empty so this graceful-degrade keeps the static viewer simple.
     return [];
+  }
+
+  async evidence(_opts: EvidenceQuery): Promise<EvidencePack> {
+    // EvidencePack assembly needs the BM25 corpus + per-blob lookups
+    // that only `ckg serve` can provide. Static-export mode returns an
+    // empty pack so the TicketIndex "patches" button renders a clear
+    // "use ckg serve" message instead of crashing the panel.
+    return { intent: '', hits: [] };
   }
 }
 

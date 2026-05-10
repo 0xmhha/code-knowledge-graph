@@ -230,6 +230,118 @@ func TestBuildPack_NoCorpus(t *testing.T) {
 	}
 }
 
+// TestBuildPack_IssueIDOnly covers the H4 follow-up: with IssueID set
+// and Intent empty, BuildPack returns every hunk whose parent commit
+// cites the ticket — sorted by commit recency, no BM25 ranking.
+func TestBuildPack_IssueIDOnly(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			// Two commits, each citing different tickets.
+			{ID: "c1", Type: types.NodeCommit,
+				QualifiedName: "commit:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+				Signature:     "1700000100: fix login bug GH-42",
+				Confidence:    types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit,
+				QualifiedName: "commit:bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222",
+				Signature:     "1700000200: refactor RPC retry GH-99",
+				Confidence:    types.ConfExtracted},
+			// Hunks under c1 cite GH-42; hunk under c2 cites GH-99.
+			{ID: "h1", Type: types.NodeHunk,
+				QualifiedName: "hunk:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111:login.go:0",
+				FilePath:      "login.go", DocComment: "issues:GH-42",
+				Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk,
+				QualifiedName: "hunk:aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111:auth.go:0",
+				FilePath:      "auth.go", DocComment: "issues:GH-42",
+				Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk,
+				QualifiedName: "hunk:bbbb2222bbbb2222bbbb2222bbbb2222bbbb2222:rpc.go:0",
+				FilePath:      "rpc.go", DocComment: "issues:GH-99",
+				Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("login fix patch"),
+			"h2": gz("auth fix patch"),
+			"h3": gz("rpc retry patch"),
+		},
+	}
+	pack, err := BuildPack(store, Options{IssueID: "GH-42"})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 1 {
+		t.Fatalf("issue_id=GH-42 should match exactly 1 commit, got %d", len(pack.Hits))
+	}
+	if pack.Hits[0].Commit.SHA != "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111" {
+		t.Errorf("unexpected commit: %s", pack.Hits[0].Commit.SHA[:12])
+	}
+	if got := len(pack.Hits[0].Hunks); got != 2 {
+		t.Errorf("expected both GH-42 hunks (h1, h2), got %d", got)
+	}
+}
+
+// TestBuildPack_IssueIDWithIntent covers the combined path: BM25 ranks
+// the entire corpus, but the IssueID gate filters out hits whose
+// commit doesn't cite the ticket — even strong text matches.
+func TestBuildPack_IssueIDWithIntent(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit,
+				QualifiedName: "commit:aaaa", Signature: "1700000100: panel jitter",
+				Confidence: types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit,
+				QualifiedName: "commit:bbbb", Signature: "1700000200: panel jitter again",
+				Confidence: types.ConfExtracted},
+			// Both hunks have the same patch text. Only h2's commit cites GH-7.
+			{ID: "h1", Type: types.NodeHunk,
+				QualifiedName: "hunk:aaaa:Panel.tsx:0", FilePath: "Panel.tsx",
+				DocComment: "", Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk,
+				QualifiedName: "hunk:bbbb:Panel.tsx:0", FilePath: "Panel.tsx",
+				DocComment: "issues:GH-7", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("panel jitter unmount remount"),
+			"h2": gz("panel jitter unmount remount"),
+		},
+	}
+	// Without filter both would rank — with GH-7 filter, only c2 survives.
+	pack, err := BuildPack(store, Options{Intent: "panel jitter", IssueID: "GH-7"})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 1 {
+		t.Fatalf("issue_id=GH-7 + intent should yield 1 commit, got %d", len(pack.Hits))
+	}
+	if pack.Hits[0].Commit.SHA != "bbbb" {
+		t.Errorf("filter let the wrong commit through: %s", pack.Hits[0].Commit.SHA)
+	}
+}
+
+// TestBuildPack_IssueIDNoMatch covers the empty result path: a ticket
+// nobody cites should produce 0 hits — not an error, not a fallback to
+// the unfiltered corpus.
+func TestBuildPack_IssueIDNoMatch(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit,
+				QualifiedName: "commit:aaaa", Signature: "1700000100: real commit",
+				Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk,
+				QualifiedName: "hunk:aaaa:x.go:0", FilePath: "x.go",
+				DocComment: "issues:GH-1", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{"h1": gz("body")},
+	}
+	pack, err := BuildPack(store, Options{IssueID: "GH-9999"})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 0 {
+		t.Errorf("unmatched issue_id should yield 0 hits, got %d", len(pack.Hits))
+	}
+}
+
 // TestParseHunkSHA covers the qname-format parser's edge cases.
 func TestParseHunkSHA(t *testing.T) {
 	cases := map[string]string{

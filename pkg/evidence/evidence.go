@@ -44,9 +44,17 @@ import (
 // the design §5.1 schema. Zero / negative values fall back to the
 // defaults — callers can pass an empty struct for "default behaviour
 // over the default intent" (rare but legal).
+//
+// IssueID, when set, restricts the candidate hunks to those whose
+// parent commit's H4-extracted issue set contains the requested ID.
+// Combines additively with Intent / SeedQname:
+//   - IssueID alone: returns the ticket's hunks ordered by commit recency.
+//   - IssueID + Intent: BM25-rank inside the ticket subset.
+//   - IssueID + SeedQname: filter by ticket AND by the seed neighbourhood.
 type Options struct {
 	Intent       string
 	SeedQname    string
+	IssueID      string
 	K            int
 	BudgetTokens int
 }
