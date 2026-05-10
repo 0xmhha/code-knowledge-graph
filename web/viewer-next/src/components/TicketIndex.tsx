@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '@/store/store';
 import EvidenceView from '@/components/EvidenceView';
+import { usePersistedBool } from '@/lib/usePersistedState';
 import type { IAPI, TicketRow, EvidencePack } from '@/lib/api';
 
 // TicketIndex surfaces the H4 issue-id rollup — every issue/PR ID
@@ -24,10 +25,11 @@ interface Props {
 }
 
 export default function TicketIndex({ api }: Props) {
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem(STORAGE_KEY_COLLAPSED) !== '0';
-  });
+  // collapsed defaults to `true` on SSR + first client render so the
+  // static-export HTML matches the hydrated DOM (no React #418).
+  // The hook then reads localStorage on mount and flips state if the
+  // user's last session had the panel expanded.
+  const [collapsed, setCollapsed] = usePersistedBool(STORAGE_KEY_COLLAPSED, true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<TicketRow[] | null>(null);
@@ -59,12 +61,8 @@ export default function TicketIndex({ api }: Props) {
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   const toggle = useCallback(() => {
-    setCollapsed(prev => {
-      const next = !prev;
-      try { localStorage.setItem(STORAGE_KEY_COLLAPSED, next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
+    setCollapsed(!collapsed);
+  }, [collapsed, setCollapsed]);
 
   useEffect(() => {
     if (collapsed || rows !== null || !api || loading) return;
@@ -142,7 +140,6 @@ export default function TicketIndex({ api }: Props) {
     if (!selectedIssueID) return;
     if (collapsed) {
       setCollapsed(false);
-      try { localStorage.setItem(STORAGE_KEY_COLLAPSED, '0'); } catch { /* ignore */ }
     }
   }, [selectedIssueID, collapsed]);
 

@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { GRAPH_GROUPS } from '@/lib/edges';
+import { usePersistedBool } from '@/lib/usePersistedState';
 
 interface ShapeEntry {
   shape: 'circle' | 'hex' | 'square' | 'triangle' | 'diamond' | 'star' | 'micro' | 'tri-up' | 'chevron' | 'lock' | 'asterisk';
@@ -148,28 +149,26 @@ const MIN_H = 120, MAX_H = 520;
 // box's anchor (bottom-right) so dragging it grows toward the canvas
 // centre, the natural expansion direction.
 export default function CanvasLegend() {
-  const [open, setOpen] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem(LS_OPEN) !== '0';
-  });
-  const [width, setWidth] = useState<number>(() => {
-    if (typeof localStorage === 'undefined') return 220;
-    const v = parseInt(localStorage.getItem(LS_W) ?? '', 10);
-    return Number.isFinite(v) ? Math.min(MAX_W, Math.max(MIN_W, v)) : 220;
-  });
-  const [height, setHeight] = useState<number>(() => {
-    if (typeof localStorage === 'undefined') return 220;
-    const v = parseInt(localStorage.getItem(LS_H) ?? '', 10);
-    return Number.isFinite(v) ? Math.min(MAX_H, Math.max(MIN_H, v)) : 220;
-  });
+  // SSR-safe defaults so the build-time HTML matches the client's
+  // first render. The hooks / effects below pull saved values after
+  // mount so a returning user gets the previously-resized box on
+  // their second render — one frame after the open/220×220 default.
+  const [open, setOpen] = usePersistedBool(LS_OPEN, true);
+  const [width, setWidth] = useState<number>(220);
+  const [height, setHeight] = useState<number>(220);
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      const wv = parseInt(localStorage.getItem(LS_W) ?? '', 10);
+      if (Number.isFinite(wv)) setWidth(Math.min(MAX_W, Math.max(MIN_W, wv)));
+      const hv = parseInt(localStorage.getItem(LS_H) ?? '', 10);
+      if (Number.isFinite(hv)) setHeight(Math.min(MAX_H, Math.max(MIN_H, hv)));
+    } catch { /* ignore */ }
+  }, []);
   const wRef = useRef(width); wRef.current = width;
   const hRef = useRef(height); hRef.current = height;
 
-  const toggle = () => setOpen(v => {
-    const next = !v;
-    try { localStorage.setItem(LS_OPEN, next ? '1' : '0'); } catch { /* ignore */ }
-    return next;
-  });
+  const toggle = () => setOpen(!open);
 
   // Resize handle drag — anchored at the bottom-right, the grip is at
   // the top-left of the box. Dragging the grip up/left grows the box

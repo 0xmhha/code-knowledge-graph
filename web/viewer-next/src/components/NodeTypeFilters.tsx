@@ -165,9 +165,24 @@ function GroupSection({ group, observedTypes, collapsed, onToggleCollapse }: Gro
 
 export default function NodeTypeFilters() {
   const nodes = useStore(s => s.nodes);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
+  // SSR-safe initial value (all groups collapsed). A useEffect on mount
+  // pulls the user's saved state from localStorage so the static
+  // export HTML and the hydrated DOM agree on the first render
+  // (avoids React #418).
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(DEFAULT_COLLAPSED));
+  // mounted flag prevents the post-hydrate setCollapsed from being
+  // immediately persisted back over the user's saved value — only
+  // user-driven state changes should write to localStorage.
+  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { saveCollapsed(collapsed); }, [collapsed]);
+  useEffect(() => {
+    setCollapsed(loadCollapsed());
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) saveCollapsed(collapsed);
+  }, [collapsed, mounted]);
 
   // Discover the set of node types currently in the graph. Iterating
   // a Map of 5–10K entries on every store change would be wasteful, so

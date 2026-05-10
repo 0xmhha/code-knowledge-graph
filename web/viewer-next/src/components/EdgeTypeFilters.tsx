@@ -242,9 +242,23 @@ function GroupSection({ group, collapsed, onToggleCollapse }: GroupSectionProps)
 }
 
 export default function EdgeTypeFilters() {
-  const [collapsed, setCollapsed] = useState<Set<GraphID>>(() => loadCollapsed());
+  // SSR-safe initial set: all six axes collapsed (matches the v2
+  // default). A useEffect on mount pulls the user's saved choices
+  // from localStorage, so the static export HTML and the hydrated
+  // DOM agree on the first render (no React #418).
+  const [collapsed, setCollapsed] = useState<Set<GraphID>>(() => new Set(DEFAULT_COLLAPSED));
+  // mounted gates the persist effect — without it, the post-hydrate
+  // restore would immediately write back over the user's stored value.
+  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => { saveCollapsed(collapsed); }, [collapsed]);
+  useEffect(() => {
+    setCollapsed(loadCollapsed());
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) saveCollapsed(collapsed);
+  }, [collapsed, mounted]);
 
   // graphModeIsolation hydrates synchronously from localStorage in
   // store.ts (initGraphMode), so no useEffect is needed here. Setter

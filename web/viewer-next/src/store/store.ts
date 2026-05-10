@@ -189,35 +189,48 @@ interface State {
   setTraceDepth: (n: number) => void;
   setLastRenderMs: (n: number) => void;
   setSelectedIssueID: (id: string | null) => void;
+  // hydrateFromStorage applies persisted preferences (graphModeIsolation,
+  // firstTimeSeen, nodeTypeWhitelist) onto the store. Called by App on
+  // mount; the store's create() initialiser uses SSR-safe defaults so
+  // build-time render and the client's first render agree on shape,
+  // and only the post-hydrate values diverge — by then React has
+  // committed the static markup and we can mutate state freely.
+  hydrateFromStorage: () => void;
 }
 
 let pending: CommitGraph | null = null;
 let raf: number | null = null;
 
-// Initialise the two persisted boolean flags synchronously at store
-// creation so the first paint matches the user's last session. Reading
-// in a useEffect (the previous approach) caused a one-frame flash where
-// e.g. solo mode rendered OFF, then flipped ON. SSR safety: the
-// `typeof localStorage` guard means static export (Next `output: 'export'`)
-// still builds — the HTML is generated with localStorage undefined and
-// the client hydrates from storage on first import.
-const initGraphMode = (): boolean => {
+// readGraphMode / readFirstTimeSeen / readNodeTypeWhitelist read the
+// stored preference from localStorage. Used by hydrateFromStorage()
+// AFTER the React tree commits — calling them inside the zustand
+// create() initialiser would diverge the SSR snapshot from the
+// client's first render and trigger React #418.
+//
+// All three default to the "neutral" branch on missing/corrupt storage:
+//   - graphModeIsolation defaults OFF so first-time users see the
+//     classic per-edge-type filter behaviour.
+//   - firstTimeSeen defaults TRUE so returning users (the common case)
+//     see no overlay flash; first-time users have no stored value, so
+//     hydrateFromStorage's `=== '1'` check leaves it TRUE, then the
+//     boot-time check in App.tsx flips it to FALSE if it was never set.
+//     (See App's first-time gate for the full handshake.)
+//   - nodeTypeWhitelist defaults to DEFAULT_NODE_TYPES_ON.
+const readGraphMode = (): boolean => {
   if (typeof localStorage === 'undefined') return false;
   try { return localStorage.getItem('ckg.graphMode') === '1'; }
   catch { return false; }
 };
-const initFirstTimeSeen = (): boolean => {
-  if (typeof localStorage === 'undefined') return false;
-  try { return localStorage.getItem('ckg.firstTimeSeen') === '1'; }
-  catch { return false; }
+const readFirstTimeSeen = (): boolean | null => {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('ckg.firstTimeSeen');
+    if (raw == null) return null;
+    return raw === '1';
+  } catch { return null; }
 };
-
-// initNodeTypeWhitelist hydrates the per-type render gate set from
-// localStorage. SSR-safe (typeof guard) — same idiom as initGraphMode.
-// Falls back to DEFAULT_NODE_TYPES_ON when unset or when the stored
-// payload is malformed (parse error, non-array, etc.).
-const initNodeTypeWhitelist = (): Set<string> => {
-  if (typeof localStorage === 'undefined') return new Set(DEFAULT_NODE_TYPES_ON);
+const readNodeTypeWhitelist = (): Set<string> | null => {
+  if (typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem('ckg.nodeTypeWhitelist');
     if (raw) {
@@ -227,7 +240,7 @@ const initNodeTypeWhitelist = (): Set<string> => {
       }
     }
   } catch { /* localStorage may be blocked or stored payload corrupt */ }
-  return new Set(DEFAULT_NODE_TYPES_ON);
+  return null;
 };
 
 // Persist node-type whitelist on every change so the next session boots
@@ -257,9 +270,14 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   colorMode: 'lang',
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
-  nodeTypeWhitelist: initNodeTypeWhitelist(),
-  graphModeIsolation: initGraphMode(),
-  firstTimeSeen: initFirstTimeSeen(),
+  // The three slots below are SSR-safe defaults; the real values get
+  // applied by hydrateFromStorage() after React commits the static
+  // markup. Initialising them from localStorage at create()-time would
+  // diverge build-time HTML from the client's first render and trigger
+  // React #418 (text/attribute hydration mismatch).
+  nodeTypeWhitelist: new Set(DEFAULT_NODE_TYPES_ON),
+  graphModeIsolation: false,
+  firstTimeSeen: true,
   dimmedCommunities: new Set(),
   isolatedCommunity: null,
   dimmedNodes: new Set(),
@@ -414,6 +432,22 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   setTraceDepth: (n) => set({ traceDepth: n }),
   setLastRenderMs: (n) => set({ lastRenderMs: n }),
   setSelectedIssueID: (id) => set({ selectedIssueID: id }),
+  hydrateFromStorage: () => {
+    const patch: Partial<State> = {};
+    patch.graphModeIsolation = readGraphMode();
+    const seen = readFirstTimeSeen();
+    if (seen !== null) {
+      // Returning user (or anyone who explicitly cleared the overlay).
+      patch.firstTimeSeen = seen;
+    } else {
+      // First-time visitor: no stored value yet. Drop the overlay
+      // flag so FirstTimeOverlay renders one frame after hydration.
+      patch.firstTimeSeen = false;
+    }
+    const wl = readNodeTypeWhitelist();
+    if (wl !== null) patch.nodeTypeWhitelist = wl;
+    set(patch);
+  },
 })));
 
 // computeFocusDistance: BFS undirected, capped. Pure function — callers

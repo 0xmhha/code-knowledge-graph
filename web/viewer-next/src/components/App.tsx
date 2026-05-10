@@ -34,31 +34,29 @@ export default function App() {
   const [api, setApi] = useState<IAPI | null>(null);
   const [srcInfo, setSrcInfo] = useState('');
   const [stale, setStale] = useState<{ src: string; cur: string } | null>(null);
-  // Right-panel visibility, persisted across reloads via localStorage
-  // ckg.panelOpen ∈ {'1','0'}. Default OPEN — the panel is the only way
-  // to see the visible-nodes list and the per-node detail / impact
-  // panel; defaulting closed left users with no visible affordance
-  // beyond the bare canvas. Operators who don't want it explicitly
-  // close via the 📋 Detail toggle and the choice persists.
-  // Read synchronously at first render so the first paint matches the
-  // user's stored preference (no hydration flash).
-  const [panelHidden, setPanelHidden] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return false;
-    // Only treat the panel as hidden when the user has explicitly set
-    // it to '0'. Any other value (null, '1', leftover) → open.
-    return localStorage.getItem('ckg.panelOpen') === '0';
-  });
-  // Panel column width (px). Persisted across sessions. Bounds: 240
-  // (legibility floor, matches CSS clamp min) and 800 (cap so the
-  // canvas always retains a usable share). Default 360 mirrors the
-  // CSS clamp max so first paint is identical to the pre-resize
-  // experience.
-  const [panelWidth, setPanelWidth] = useState<number>(() => {
-    if (typeof localStorage === 'undefined') return 360;
-    const raw = parseInt(localStorage.getItem('ckg.panelWidth') ?? '', 10);
-    if (!Number.isFinite(raw)) return 360;
-    return Math.min(800, Math.max(240, raw));
-  });
+  // Right-panel visibility (false = open, true = hidden). Default
+  // OPEN on SSR + first client render so static export HTML matches
+  // the hydrated DOM (avoids React #418); a useEffect below pulls the
+  // user's stored preference one frame later.
+  const [panelHidden, setPanelHidden] = useState<boolean>(false);
+  // Panel column width (px). Bounds: 240 floor / 800 cap. SSR-safe
+  // default 360 mirrors the CSS clamp max so first paint is consistent
+  // before the stored value applies.
+  const [panelWidth, setPanelWidth] = useState<number>(360);
+  useEffect(() => {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      // Only treat the panel as hidden when the user has explicitly
+      // set it to '0'. Any other value (null, '1', leftover) → open.
+      if (localStorage.getItem('ckg.panelOpen') === '0') {
+        setPanelHidden(true);
+      }
+      const raw = parseInt(localStorage.getItem('ckg.panelWidth') ?? '', 10);
+      if (Number.isFinite(raw)) {
+        setPanelWidth(Math.min(800, Math.max(240, raw)));
+      }
+    } catch { /* ignore */ }
+  }, []);
   const panelWidthRef = useRef(panelWidth);
   panelWidthRef.current = panelWidth;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -71,6 +69,17 @@ export default function App() {
   const setLastRenderMs = useStore(s => s.setLastRenderMs);
   const setViewMode = useStore(s => s.setViewMode);
   const setColorMode = useStore(s => s.setColorMode);
+  const hydrateFromStorage = useStore(s => s.hydrateFromStorage);
+
+  // Apply persisted preferences (graphModeIsolation, firstTimeSeen,
+  // nodeTypeWhitelist) AFTER React hydration commits the static
+  // markup. The store's initial values are SSR-safe defaults, so the
+  // build-time HTML matches the first client render — only the second
+  // render flips these to the user's stored values, eliminating
+  // React #418 (hydration mismatch) without sacrificing persistence.
+  useEffect(() => {
+    hydrateFromStorage();
+  }, [hydrateFromStorage]);
   const setFontSize = useStore(s => s.setFontSize);
   const setTraceDirection = useStore(s => s.setTraceDirection);
   const setTraceDepth = useStore(s => s.setTraceDepth);

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePersistedBool } from '@/lib/usePersistedState';
 import type { IAPI } from '@/lib/api';
 import type { GraphNode } from '@/types';
 
@@ -33,10 +34,9 @@ interface CommitGroup {
 }
 
 export default function RecoveryPanel({ api }: Props) {
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem(STORAGE_KEY_COLLAPSED) !== '0';
-  });
+  // collapsed defaults `true` on SSR + first render to keep static
+  // export HTML aligned with the hydrated DOM (avoids React #418).
+  const [collapsed, setCollapsed] = usePersistedBool(STORAGE_KEY_COLLAPSED, true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nodes, setNodes] = useState<GraphNode[] | null>(null);
@@ -44,12 +44,8 @@ export default function RecoveryPanel({ api }: Props) {
   const [blobs, setBlobs] = useState<Map<string, string>>(new Map());
 
   const toggle = useCallback(() => {
-    setCollapsed(prev => {
-      const next = !prev;
-      try { localStorage.setItem(STORAGE_KEY_COLLAPSED, next ? '1' : '0'); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
+    setCollapsed(!collapsed);
+  }, [collapsed, setCollapsed]);
 
   // Lazy-fetch on first expand so the panel costs nothing on graphs the
   // operator never opens it on.

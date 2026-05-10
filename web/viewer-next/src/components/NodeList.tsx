@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import { useStore } from '@/store/store';
 import { detectMode, API, StaticAPI } from '@/lib/api';
+import { usePersistedBool } from '@/lib/usePersistedState';
 import type { IAPI } from '@/lib/api';
 import type { GraphNode, NodeId } from '@/types';
 
@@ -48,24 +49,13 @@ function NodeListImpl({ onPick, apiReady }: Props) {
   // Visible Nodes). Persisted via localStorage so the user's collapse
   // preference survives reloads. Default both open so first paint
   // shows the data.
-  const [pkgSectionOpen, setPkgSectionOpen] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem('ckg.nodelist.pkgOpen') !== '0';
-  });
-  const [nodesSectionOpen, setNodesSectionOpen] = useState<boolean>(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return localStorage.getItem('ckg.nodelist.nodesOpen') !== '0';
-  });
-  const togglePkg = () => setPkgSectionOpen(v => {
-    const next = !v;
-    try { localStorage.setItem('ckg.nodelist.pkgOpen', next ? '1' : '0'); } catch { /* ignore */ }
-    return next;
-  });
-  const toggleNodes = () => setNodesSectionOpen(v => {
-    const next = !v;
-    try { localStorage.setItem('ckg.nodelist.nodesOpen', next ? '1' : '0'); } catch { /* ignore */ }
-    return next;
-  });
+  // Sections default open on SSR + first render so static export HTML
+  // matches the hydrated DOM. usePersistedBool flips the state from
+  // localStorage on mount if the user previously collapsed.
+  const [pkgSectionOpen, setPkgSectionOpen] = usePersistedBool('ckg.nodelist.pkgOpen', true);
+  const [nodesSectionOpen, setNodesSectionOpen] = usePersistedBool('ckg.nodelist.nodesOpen', true);
+  const togglePkg = () => setPkgSectionOpen(!pkgSectionOpen);
+  const toggleNodes = () => setNodesSectionOpen(!nodesSectionOpen);
 
   useEffect(() => {
     if (!apiReady) return;
