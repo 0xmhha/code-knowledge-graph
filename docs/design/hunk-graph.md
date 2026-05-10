@@ -958,6 +958,24 @@ commits are returned.
 
 ### 10.4 H4 (issue-id extraction)
 
+> **Status (2026-05-10)**: Landed. `internal/temporal/issueid.go` carries
+> the four regex patterns (`ExtractIssueIDs` + `EncodeIssueIDs` /
+> `DecodeIssueIDs`); `internal/buildpipe/temporal_hunks.go` wires the
+> extraction into `buildHunkNodes` so every Hunk's `doc_comment`
+> column ends up with `issues:GH-123;ABC-456` whenever its parent
+> commit's subject matches a pattern. `pkg/evidence/evidence.go`
+> aggregates the per-Hunk encoding into `CommitInfo.IssueIDs` so the
+> EvidencePack JSON surfaces tickets per-commit. The viewer's
+> `NodeDetail` panel renders amber pills for each issue ID.
+> Self-graph eval (go-stablenet, /tmp/ckg-h4): 8,666 of 8,967 hunks
+> (97%) carry issue links, all `GH-N` form (the codebase uses GitHub
+> PRs exclusively). Top tickets by hunk-count: GH-66 (501), GH-14
+> (449), GH-7 (381), GH-28 (374). EvidencePack JSON for an
+> arbitrary intent now includes `commit.issue_ids: ["GH-18"]` for
+> the matching commit. 11 unit tests cover regex coverage, dedup,
+> false-positive guards, encode/decode round-trips, and prefix
+> distinction from plain doc_comment.
+
 Patterns the parser recognises (regex in `internal/temporal/issueid.go`):
 
 | pattern | example | issue_ids field |

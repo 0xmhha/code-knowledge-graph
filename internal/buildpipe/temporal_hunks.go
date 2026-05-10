@@ -126,11 +126,39 @@ func emitHunkGraph(g *graph.Graph, srcRel string, commitIDByteSHA map[string]str
 	if len(relHunks) == 0 {
 		return nil, nil
 	}
-	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, types.ConfExtracted)
+	subjectBySHA := commitSubjectMapFromGraph(g)
+	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, subjectBySHA, types.ConfExtracted)
 	g.Nodes = append(g.Nodes, nodes...)
 	g.Edges = append(g.Edges, hasHunkEdges...)
 	g.Edges = append(g.Edges, adjacentEdges...)
 	return blobs, nil
+}
+
+// commitSubjectMapFromGraph extracts SHA → subject from the Commit
+// nodes already present in g (emitted by buildCommitNodes earlier in
+// emitTemporalEdges). The subject lives in Node.Signature as
+// "<unix>: <subject>" — we strip the timestamp prefix to recover the
+// bare subject text H4 needs for issue-ID extraction.
+//
+// Returns an empty (non-nil) map when no Commit nodes exist yet —
+// callers can pass directly to buildHunkNodes which treats nil and
+// empty maps the same way (no H4 enrichment for those hunks).
+func commitSubjectMapFromGraph(g *graph.Graph) map[string]string {
+	out := make(map[string]string, 256)
+	for _, n := range g.Nodes {
+		if n.Type != types.NodeCommit {
+			continue
+		}
+		sha := strings.TrimPrefix(n.QualifiedName, "commit:")
+		// Signature shape: "<unix>: <subject>".
+		idx := strings.IndexByte(n.Signature, ':')
+		if idx < 0 {
+			out[sha] = n.Signature
+			continue
+		}
+		out[sha] = strings.TrimSpace(n.Signature[idx+1:])
+	}
+	return out
 }
 
 // emitUnreachableHunkGraph adds Commit + Hunk nodes for SHAs reachable
@@ -189,7 +217,12 @@ func emitUnreachableHunkGraph(g *graph.Graph, srcRel, repoRoot string,
 	if len(relHunks) == 0 {
 		return nil, nil
 	}
-	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, types.ConfAmbiguous)
+	// Build subjectBySHA from BOTH the previously-emitted commits and
+	// the newly-discovered unreachable ones — the latter were just
+	// appended to g.Nodes via the commitNodes loop above, so they're
+	// already visible.
+	subjectBySHA := commitSubjectMapFromGraph(g)
+	nodes, hasHunkEdges, adjacentEdges, blobs := buildHunkNodes(relHunks, prefix, commitIDByteSHA, subjectBySHA, types.ConfAmbiguous)
 	g.Nodes = append(g.Nodes, nodes...)
 	g.Edges = append(g.Edges, hasHunkEdges...)
 	g.Edges = append(g.Edges, adjacentEdges...)
@@ -238,8 +271,14 @@ func remapHunksToSrcRel(hunks []temporal.HunkInfo, srcRel string) ([]temporal.Hu
 // confidence stamps both the Hunk node and the has_hunk/adjacent edges:
 // EXTRACTED for the HEAD-reachable pass, AMBIGUOUS for the unreachable
 // follow-up pass per docs/design/hunk-graph.md §11.3.
+//
+// subjectBySHA maps each commit SHA → its subject line; used by H4
+// (§10.4) to extract issue/ticket IDs into the Hunk node's
+// doc_comment column with the `issues:ID1;ID2` prefix. Pass nil for
+// the empty map — H4 enrichment silently no-ops.
 func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 	commitIDByteSHA map[string]string,
+	subjectBySHA map[string]string,
 	confidence types.Confidence) ([]types.Node, []types.Edge, []types.Edge, map[string][]byte) {
 	// Group by (sha, file) so adjacent edges only fire within one commit-
 	// file pair, in line-order. We sort each group by NewStart so the
@@ -282,8 +321,20 @@ func buildHunkNodes(hunks []temporal.HunkInfo, _ string,
 		}
 
 		var prevHunkID string
+		// Pre-compute the parent commit's issue IDs once per (commit, file)
+		// group — every hunk in the group inherits the same encoding
+		// since the source is the commit subject (§10.4).
+		commitDocComment := ""
+		if subjectBySHA != nil {
+			if subj, ok := subjectBySHA[k.sha]; ok && subj != "" {
+				commitDocComment = temporal.EncodeIssueIDs(temporal.ExtractIssueIDs(subj))
+			}
+		}
 		for _, h := range grp {
 			node := makeHunkNode(*h, confidence)
+			if commitDocComment != "" {
+				node.DocComment = commitDocComment
+			}
 			nodes = append(nodes, node)
 			hasHunk = append(hasHunk, types.Edge{
 				Src:        commitID,

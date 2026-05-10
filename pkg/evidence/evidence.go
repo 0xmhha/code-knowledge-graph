@@ -166,6 +166,13 @@ type hunkCorpus struct {
 	nodeByID      map[string]types.Node
 	hunkSHA       map[string]string // hunk ID → parent commit SHA
 	hunkModifyIDs map[string]map[string]bool
+	// issuesBySHA: H4 §10.4 aggregation. Hunks store their commit's
+	// issue IDs in DocComment with the `issues:` prefix; we union
+	// per-SHA so the EvidencePack's CommitInfo.IssueIDs reflects the
+	// full set seen across that commit's hunks. (In practice all hunks
+	// of one commit share the same set, but we union defensively in
+	// case a future change varies it per-hunk.)
+	issuesBySHA map[string]map[string]bool
 }
 
 // indexCorpus builds the hunkCorpus from the raw nodes + edges slices.
@@ -183,6 +190,7 @@ func indexCorpus(nodes []types.Node, edges []types.Edge) *hunkCorpus {
 		nodeByID:      make(map[string]types.Node),
 		hunkSHA:       make(map[string]string),
 		hunkModifyIDs: make(map[string]map[string]bool),
+		issuesBySHA:   make(map[string]map[string]bool),
 	}
 	for _, n := range nodes {
 		c.nodeByID[n.ID] = n
@@ -191,7 +199,20 @@ func indexCorpus(nodes []types.Node, edges []types.Edge) *hunkCorpus {
 			if n.Confidence == types.ConfExtracted {
 				c.hunks = append(c.hunks, n)
 				c.hunkByID[n.ID] = n
-				c.hunkSHA[n.ID] = parseHunkSHA(n.QualifiedName)
+				sha := parseHunkSHA(n.QualifiedName)
+				c.hunkSHA[n.ID] = sha
+				// H4: parse `issues:` prefix from doc_comment and
+				// union into the per-SHA aggregate.
+				if ids := decodeIssuesFromDocComment(n.DocComment); len(ids) > 0 {
+					set, hit := c.issuesBySHA[sha]
+					if !hit {
+						set = make(map[string]bool, len(ids))
+						c.issuesBySHA[sha] = set
+					}
+					for _, id := range ids {
+						set[id] = true
+					}
+				}
 			}
 		case types.NodeCommit:
 			if n.Confidence == types.ConfExtracted {
@@ -231,6 +252,31 @@ func indexCorpus(nodes []types.Node, edges []types.Edge) *hunkCorpus {
 		}
 	}
 	return c
+}
+
+// decodeIssuesFromDocComment extracts the H4 §10.4 issue list from a
+// Hunk's doc_comment column (formatted `issues:ID1;ID2`). Inlined
+// here rather than imported from internal/temporal because pkg/
+// evidence is a public package and shouldn't depend on internal/.
+// Returns nil for any input lacking the prefix.
+func decodeIssuesFromDocComment(docComment string) []string {
+	const prefix = "issues:"
+	if !strings.HasPrefix(docComment, prefix) {
+		return nil
+	}
+	body := docComment[len(prefix):]
+	if body == "" {
+		return nil
+	}
+	parts := strings.Split(body, ";")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // parseHunkSHA pulls the commit SHA out of a hunk's QualifiedName,
@@ -448,6 +494,7 @@ func groupByCommit(scored []bm25.ScoredDoc, c *hunkCorpus, k, budgetTokens int, 
 					SHA:        p.sha,
 					Subject:    stripCommitTimestamp(commitNode.Signature),
 					AuthorTime: commitTimestamp(commitNode.Signature),
+					IssueIDs:   sortedIssueIDs(c.issuesBySHA[p.sha]),
 				},
 				Hunks: []HunkRow{},
 			}
@@ -486,6 +533,21 @@ func groupByCommit(scored []bm25.ScoredDoc, c *hunkCorpus, k, budgetTokens int, 
 		out = append(out, *hit)
 		usedTokens += commitTokens
 	}
+	return out
+}
+
+// sortedIssueIDs flattens the per-SHA issue set into a deterministic
+// slice. Returns nil for empty/missing sets so JSON serialisation
+// elides the IssueIDs field via its `omitempty` tag.
+func sortedIssueIDs(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
 

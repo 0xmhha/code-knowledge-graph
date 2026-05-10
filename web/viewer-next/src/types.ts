@@ -12,6 +12,10 @@ export interface GraphNode {
   language?: string;
   confidence?: Confidence;
   signature?: string;
+  // doc_comment carries free-text annotations for code symbols
+  // (function docstrings, etc) AND, for Hunk nodes per design §10.4,
+  // the H4 issue-id encoding `issues:GH-123;ABC-456`.
+  doc_comment?: string;
   in_degree?: number;
   out_degree?: number;
   usage_score?: number;

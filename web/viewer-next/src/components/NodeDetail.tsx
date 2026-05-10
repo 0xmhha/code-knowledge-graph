@@ -12,6 +12,20 @@ interface Props { api: IAPI; }
 // etc.). Used by onImpactItemClick to compute "everything outside this
 // impact subgraph" for dimming. The seed itself + the user-clicked
 // impact item are added too so they stay full-opacity.
+// parseIssueIDs decodes the H4 §10.4 storage shape: doc_comment formatted
+// `issues:ID1;ID2`. Returns empty array for plain-text doc_comments
+// (function docstrings, etc.) so the badge row only renders when the
+// node actually carries issue links.
+function parseIssueIDs(docComment: string | undefined): string[] {
+  if (!docComment) return [];
+  const prefix = 'issues:';
+  if (!docComment.startsWith(prefix)) return [];
+  return docComment.slice(prefix.length)
+    .split(';')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 function collectImpactIds(buckets: ImpactBuckets | undefined): Set<NodeId> {
   const out = new Set<NodeId>();
   if (!buckets) return out;
@@ -217,6 +231,30 @@ export default function NodeDetail({ api }: Props) {
           {node.signature}
         </div>
       )}
+      {/* H4 (§10.4): Hunk doc_comment encodes "issues:GH-123;ABC-456".
+          Render each ID as an amber pill so the operator can see at a
+          glance which tickets a hunk relates to. Skips silently for
+          plain-text doc_comment on non-Hunk nodes. */}
+      {(() => {
+        const ids = parseIssueIDs(node.doc_comment);
+        if (ids.length === 0) return null;
+        return (
+          <div style={{ marginTop: 6, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <strong style={{ color: '#ccc', fontSize: 11 }}>Issues:</strong>
+            {ids.map(id => (
+              <span key={id} style={{
+                background: 'rgba(212, 148, 92, 0.18)',
+                color: '#d4945c',
+                padding: '1px 6px',
+                borderRadius: 3,
+                fontSize: 10,
+                fontFamily: 'ui-monospace,monospace',
+                border: '1px solid rgba(212, 148, 92, 0.4)',
+              }}>{id}</span>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="impact-actions">
         <button

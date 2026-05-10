@@ -31,7 +31,7 @@ func TestBuildHunkNodes_StableIDs(t *testing.T) {
 	commitIDs := map[string]string{
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "fakeCommit00000a",
 	}
-	nodes, hasHunk, adjacent, blobs := buildHunkNodes(hunks, "", commitIDs, types.ConfExtracted)
+	nodes, hasHunk, adjacent, blobs := buildHunkNodes(hunks, "", commitIDs, nil, types.ConfExtracted)
 
 	if len(nodes) != 2 {
 		t.Fatalf("expected 2 hunk nodes, got %d", len(nodes))
@@ -122,7 +122,7 @@ func TestBuildHunkNodes_LanguageInference(t *testing.T) {
 		hunks := []temporal.HunkInfo{
 			{SHA: "a", FilePath: path, Index: 0, NewStart: 1, NewLines: 1, Added: 1, Patch: []byte("@@ -0,0 +1,1 @@\n+x\n")},
 		}
-		nodes, _, _, _ := buildHunkNodes(hunks, "", commitIDs, types.ConfExtracted)
+		nodes, _, _, _ := buildHunkNodes(hunks, "", commitIDs, nil, types.ConfExtracted)
 		if len(nodes) != 1 {
 			t.Errorf("%s: expected 1 node, got %d", path, len(nodes))
 			continue
@@ -141,7 +141,7 @@ func TestBuildHunkNodes_BinaryProducesNoBlob(t *testing.T) {
 	hunks := []temporal.HunkInfo{
 		{SHA: "b", FilePath: "logo.png", Index: 0, Binary: true},
 	}
-	nodes, hasHunk, _, blobs := buildHunkNodes(hunks, "", commitIDs, types.ConfExtracted)
+	nodes, hasHunk, _, blobs := buildHunkNodes(hunks, "", commitIDs, nil, types.ConfExtracted)
 	if len(nodes) != 1 {
 		t.Fatalf("nodes = %d, want 1", len(nodes))
 	}
