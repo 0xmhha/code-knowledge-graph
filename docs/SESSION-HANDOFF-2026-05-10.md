@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `51cd1c7` (feat: top_files hint per sample commit).
+기준점: branch `main`, HEAD `1dbe2e0` (chore: cleanup x3 — null hits / mode coverage / pill tooltip).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `1dbe2e0` | chore(evidence,viewer): cleanup x3 — null hits / mode coverage / pill tooltip | (1) BuildPack nil → `[]Hit{}` (외부 client JSON 호환) (2) AND+SeedQname / issue-only ignores mode 단위 (3) MCP evidence_for_intent in-process mode propagation 검증 (4) pill `title` tooltip. 5 tests / 라이브 OK |
 | `51cd1c7` | feat(evidence): top_files hint per sample commit in TicketIndex | `CommitInfo.TopFiles` (omitempty) + `topFilesForCommit` count-desc/name-asc top-3 directory rollup. viewer ticket panel pill 렌더 + (root) 폴백. HTTP + Playwright 라이브 검증, GH-66 → ["crypto/secp256k1/...", "consensus/qbft/core", ...] |
 | `f1e2609` | docs: verification checklist + viewer hydration pattern guide | `docs/VERIFICATION-CHECKLIST.md` (4축 surface / 조합 매트릭스 / negative path / PR-ready checklist) + `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + `usePersistedState` 사용법 + 1-frame flash 트레이드오프) |
 | `85af082` | test(evidence,server): close mode=and verification gaps | AND+IssueID 조합 단위 + HTTP `/api/evidence?mode=and\|invalid\|empty` 3종 wiring 테스트. 라이브 재검증 HTTP AND=0 / OR=5 / invalid=400 |
@@ -157,9 +158,9 @@ H4/H3 cross-panel loop:
 | ✅ | ~~#10 OR/AND mode~~ | 완료 (`2982864` + `85af082`) — Options.Mode + BM25 post-filter, AND+IssueID 조합까지 lock-in |
 | ✅ | ~~검증 체크리스트 + hydration 패턴 docs~~ | 완료 (`f1e2609`) — `docs/VERIFICATION-CHECKLIST.md` + `docs/HYDRATION-PATTERN.md` |
 | ✅ | ~~#9 sample_commits top-files 메타~~ | 완료 (`51cd1c7`) — TopFiles + viewer pill, VERIFICATION-CHECKLIST §1 첫 적용 사례 |
-| 1 | `/api/evidence` `hits=null` → `[]` cleanup | Low (~10분) — offset past end 시 외부 client 호환 |
-| 2 | mode=and 남은 3 검증 (MCP live / AND+SeedQname / issue-only+mode) | Low |
-| 3 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+| ✅ | ~~그룹 A cleanup × 3~~ | 완료 (`1dbe2e0`) — hits=null cleanup + mode 남은 3 검증 + pill tooltip 모두 한 commit |
+| 1 | #7 성능 baseline | Mid — go-stablenet 1.9M edges 위에서 모든 `/api/*` + 8 MCP tools p50/p95/p99 + memory snapshot |
+| 2 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
 
@@ -189,7 +190,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `51cd1c7`): 23/23 패키지 PASS. `51cd1c7` top_files HTTP+Playwright 라이브 통과 (3+2+3 pills on GH-66 / GH-7 commits). H3+H4 통합 테스트 5회 연속 deterministic ~700ms. `ckg evidence` 9 시나리오 라이브 통과. MCP §11.3 boundary 12 method × 8 tool 정적+동적 lock-in. mode=and HTTP/CLI 라이브 (AND=0 / OR=5 / invalid=400).
+직전 회귀 (HEAD `1dbe2e0`): 23/23 패키지 PASS. cleanup x3 commit으로 5 신규 테스트 추가. `1dbe2e0` 라이브 검증: hits=null→[] / AND+seed strict / pill tooltip. 누적: H3+H4 통합 ~700ms, `ckg evidence` 9 시나리오, MCP §11.3 boundary 12-method × 8-tool, mode=and HTTP/CLI/MCP all wired, top_files pill tooltip OK.
 
 ---
 
