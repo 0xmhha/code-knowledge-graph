@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `302b703` (perf: debounce computeStaleness git spawn).
+기준점: branch `main`, HEAD `1a79cbc` (perf: cache + pre-warm /api/edges/counts).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `1a79cbc` | perf(server): cache + pre-warm /api/edges/counts | EXPLAIN QUERY PLAN: 이미 covering index 사용 — 1.98M row scan 자체가 비용. cachedManifestStore에 lazy `EdgeCountsByType` cache + boot goroutine prewarm. edges.counts p50: 152→**0.10ms** (−99.9%) / p99: 755→**0.31ms** (−99.96%). 3 unit |
 | `302b703` | perf(server): debounce computeStaleness git spawn | 5s TTL `stalenessCache` (sync.Mutex + key/expires). manifest p50: 235→64→**26ms** (baseline 대비 −89%). 3 unit (HitWithinTTL / RefreshAfterTTL / KeyInvalidation) |
 | `473f839` | perf(server): manifest caching + ticket-index pre-warm | `cachedManifestStore` wrapper + boot goroutine. before/after: manifest p50 −73% / tickets p50 −90% & p99 −99.4% / evidence.intent p50 −97% / evidence.and p50 −98%. 2 unit |
 | `1d175a8` | feat(cmd): bench-server — /api/* p50/p95/p99 baseline harness | `ckg bench-server` 신규 (in-process httptest, 12 probes). `docs/PERF-BASELINE-2026-05-10.md` 첫 측정 결과 (manifest 235ms hottest slow / search 0.6ms hottest fast / tickets p99 5.7s = cold start). 4 unit + 라이브 |
@@ -166,9 +167,9 @@ H4/H3 cross-panel loop:
 | ✅ | ~~manifest 캐싱~~ | 완료 (`473f839`) — `cachedManifestStore` wrapper, p50 −73% (235ms→64ms) |
 | ✅ | ~~tickets cache 사전 워밍~~ | 완료 (`473f839`) — boot goroutine, p50 −90% & p99 −99.4% (5775ms→34ms). evidence 모든 surface 부수 효과로 -97%까지 |
 | ✅ | ~~computeStaleness 디바운스~~ | 완료 (`302b703`) — 5s TTL stalenessCache, manifest p50 64→26ms |
-| 1 | edges.counts p99 jitter 조사 | Mid — SQLite EXPLAIN + covering index. p99 755→397ms (cache pressure 부수 효과)이지만 단발 outlier 잔존 |
-| 2 | bench-mcp (stdio tool latency) | Mid — MCP tool 별 latency 가시화 |
-| 3 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
+| ✅ | ~~edges.counts cache + pre-warm~~ | 완료 (`1a79cbc`) — cachedManifestStore.EdgeCountsByType + prewarmEdgeCounts. p50 152→0.1ms / p99 755→0.31ms |
+| 1 | bench-mcp (stdio tool latency) | Mid — MCP tool 별 latency 가시화 |
+| 2 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
 
@@ -198,7 +199,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `302b703`): 23/23 패키지 PASS. `302b703` 3 신규 단위 테스트 + manifest p50 64→26ms (-59%, baseline 대비 누적 -89%). 누적 perf: manifest -89%, tickets -91% & p99 -99.7%, evidence.intent -98%, evidence.and -98%, evidence.issue -73%. PERF-BASELINE doc에 3-column 측정 표 (baseline / cache+prewarm / +debounce).
+직전 회귀 (HEAD `1a79cbc`): 23/23 패키지 PASS. `1a79cbc` 3 신규 단위 테스트 + edges.counts p50 152→0.1ms (-99.9%) / p99 755→0.31ms (-99.96%). 누적 perf: manifest -89%, tickets -91% & p99 -99.6%, evidence.intent -97%, evidence.and -99%, evidence.issue -76%, edges.counts -99.9%. PERF-BASELINE doc에 4-column 측정 표.
 
 ---
 
