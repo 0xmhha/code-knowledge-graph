@@ -155,6 +155,35 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, pack)
 }
 
+// handleTickets returns the H4 issue-id index aggregated from the
+// cached BM25 corpus: ticket IDs sorted by hunk count, with a few
+// most-recent commit subjects per ticket. Powers the viewer's
+// TicketIndex panel.
+//
+// Response shape: `[{issue_id, hunk_count, commit_count,
+// sample_commits: [{sha, subject, author_time}]}]`. Empty array
+// when the graph has no Hunks with `issues:…` doc_comment (a fresh
+// repo or a build with H4 disabled).
+//
+// limit query param caps the result; default 100 strikes a balance
+// between "browse the project's whole ticket footprint" and
+// "shouldn't return 5K rows on huge codebases".
+func (s *Server) handleTickets(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if v, _ := strconv.Atoi(r.URL.Query().Get("limit")); v > 0 && v <= 5000 {
+		limit = v
+	}
+	rows, err := s.evidenceCache.TicketIndex(s.store, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []evidence.TicketRow{}
+	}
+	writeJSON(w, rows)
+}
+
 // handleAmbiguousNodes returns Hunk + Commit rows with confidence='AMBIGUOUS'
 // — the §11.3 unreachable-history track populated by reflog/fsck. Used
 // by the viewer's Recovery panel; deliberately stays unfiltered at the

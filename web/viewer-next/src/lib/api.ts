@@ -103,6 +103,19 @@ export interface IAPI {
   // Returns [] on backends that don't expose /api/nodes/ambiguous
   // (pre-§11.3 builds) so callers can hide the panel gracefully.
   ambiguousNodes(): Promise<GraphNode[]>;
+  // tickets returns the H4 issue-id index aggregated by the server's
+  // evidence cache: rows of {issue_id, hunk_count, commit_count,
+  // sample_commits}. Powers the viewer's TicketIndex panel; rows
+  // are pre-sorted by hunk_count desc so the caller can render
+  // top-N directly.
+  tickets(limit?: number): Promise<TicketRow[]>;
+}
+
+export interface TicketRow {
+  issue_id: string;
+  hunk_count: number;
+  commit_count: number;
+  sample_commits?: Array<{ sha: string; subject: string; author_time: number }>;
 }
 
 export class API implements IAPI {
@@ -187,6 +200,13 @@ export class API implements IAPI {
     if (r.status === 404) return [];
     if (!r.ok) throw new Error(`/api/nodes/ambiguous ${r.status}`);
     return asArray<GraphNode>(await r.json());
+  }
+
+  async tickets(limit: number = 100): Promise<TicketRow[]> {
+    const r = await fetch(`${this.base}/api/tickets?limit=${limit}`);
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`/api/tickets ${r.status}`);
+    return asArray<TicketRow>(await r.json());
   }
 }
 
@@ -297,6 +317,13 @@ export class StaticAPI implements IAPI {
     const all = await this.allNodes();
     return all.filter(n =>
       (n.type === 'Hunk' || n.type === 'Commit') && n.confidence === 'AMBIGUOUS');
+  }
+
+  async tickets(_limit: number = 100): Promise<TicketRow[]> {
+    // Static-export mode does not ship an aggregated ticket index;
+    // the viewer hides the TicketIndex panel when the array is
+    // empty so this graceful-degrade keeps the static viewer simple.
+    return [];
   }
 }
 

@@ -1352,3 +1352,95 @@ html, body {
   font-family: ui-monospace, Menlo, monospace;
 }
 .recovery-empty { color: #886; font-style: italic; padding: 2px 0; }
+
+/* TicketIndex — H4 issue-id rollup. Distinct purple/blue accent so it
+   reads as "navigate by tickets" surface, separate from the amber
+   Recovery (unreachable history) panel. */
+.ticket-index {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid #3a4f7a;
+  background: rgba(60, 90, 140, 0.08);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.ticket-header {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #7aa9d4;
+  border: none;
+  padding: 2px 0;
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ticket-header:hover { color: #aacef0; }
+.ticket-arrow { width: 10px; }
+.ticket-title { flex: 1; }
+.ticket-meta { color: #678; font-weight: 400; font-size: 10px; }
+.ticket-loading, .ticket-error {
+  padding: 4px 0;
+  color: #888;
+  font-style: italic;
+}
+.ticket-error { color: #c66; }
+.ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ticket-row { border-top: 1px solid rgba(80, 110, 160, 0.3); }
+.ticket-row:first-child { border-top: none; }
+.ticket-row-button {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  background: transparent;
+  border: none;
+  color: #ccc;
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+}
+.ticket-row-button:hover { color: #fff; }
+.ticket-id {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #7aa9d4;
+  flex: 1;
+}
+.ticket-counts {
+  color: #678;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.ticket-commits {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px 14px;
+}
+.ticket-commit {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+  font-size: 10px;
+  color: #aaa;
+}
+.ticket-sha {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #678;
+  flex-shrink: 0;
+}
+.ticket-subject {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

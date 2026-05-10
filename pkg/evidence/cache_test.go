@@ -54,6 +54,75 @@ func (c *countingStore) setKey(key string) {
 	c.mu.Unlock()
 }
 
+// TestCache_TicketIndexAggregation verifies the cache-backed ticket
+// rollup: each issue ID gets one row with hunk_count summed across
+// its commits, sorted descending. Covers the read-side branch of
+// the Cache that powers the viewer's TicketIndex panel.
+func TestCache_TicketIndexAggregation(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			// Two commits, one ticket each.
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: hot fix (#42)", Confidence: types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit, QualifiedName: "commit:bbbb",
+				Signature: "1700000200: tier two (#7)", Confidence: types.ConfExtracted},
+			// 3 hunks under c1 (#42), 1 hunk under c2 (#7).
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:f.go:0",
+				DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:g.go:0",
+				DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:h.go:0",
+				DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h4", Type: types.NodeHunk, QualifiedName: "hunk:bbbb:i.go:0",
+				DocComment: "issues:GH-7", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("h1"), "h2": gz("h2"), "h3": gz("h3"), "h4": gz("h4"),
+		},
+	}
+	cache := NewCache()
+	rows, err := cache.TicketIndex(store, 0)
+	if err != nil {
+		t.Fatalf("TicketIndex: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 ticket rows, got %d", len(rows))
+	}
+	// Sorted desc by hunk count → GH-42 first.
+	if rows[0].IssueID != "GH-42" || rows[0].HunkCount != 3 {
+		t.Errorf("row[0] = %+v, want IssueID=GH-42 HunkCount=3", rows[0])
+	}
+	if rows[1].IssueID != "GH-7" || rows[1].HunkCount != 1 {
+		t.Errorf("row[1] = %+v, want IssueID=GH-7 HunkCount=1", rows[1])
+	}
+	// SampleCommits attached.
+	if len(rows[0].SampleCommits) != 1 || rows[0].SampleCommits[0].SHA != "aaaa" {
+		t.Errorf("row[0].SampleCommits = %v, want [aaaa]", rows[0].SampleCommits)
+	}
+}
+
+// TestCache_TicketIndexEmptyOnNoIssues — a graph without any
+// `issues:…` doc_comment on Hunk rows yields an empty slice (not nil
+// is acceptable; we just check len==0).
+func TestCache_TicketIndexEmptyOnNoIssues(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:zzzz",
+				Signature: "1700000900: just a commit", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:zzzz:f.go:0",
+				Confidence: types.ConfExtracted}, // no DocComment
+		},
+		blobs: map[string][]byte{"h1": gz("body")},
+	}
+	rows, err := NewCache().TicketIndex(store, 0)
+	if err != nil {
+		t.Fatalf("TicketIndex: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("expected 0 rows on issueless graph, got %d", len(rows))
+	}
+}
+
 // TestCache_HitSkipsHeavyWork covers the core promise: two BuildPack
 // calls with an unchanged manifest should fire the heavy AllNodes /
 // AllEdges / GetBlob exactly once between them.

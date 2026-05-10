@@ -138,6 +138,145 @@ func (c *Cache) ensureIndex(store persist.StoreReader) error {
 	return nil
 }
 
+// TicketRow is one entry in the TicketIndex output: an issue/PR ID
+// the H4 extractor recognised + how many hunks / commits cite it +
+// up to 3 most-recent commit subjects for context. The Coding Agent
+// or a human reviewer uses this to navigate "what tickets does this
+// codebase track most heavily" without round-tripping to GitHub.
+type TicketRow struct {
+	IssueID       string       `json:"issue_id"`
+	HunkCount     int          `json:"hunk_count"`
+	CommitCount   int          `json:"commit_count"`
+	SampleCommits []CommitInfo `json:"sample_commits,omitempty"`
+}
+
+// TicketIndex returns ticket statistics aggregated from the cached
+// hunk corpus. Rebuilds the corpus on the first call (or after a
+// graph.db rebuild); subsequent calls are pure in-memory walks over
+// already-indexed data.
+//
+// limit ≤ 0 returns the full sorted list; otherwise the top N rows
+// by HunkCount descending. SampleCommits is capped at 3 per ticket
+// (most-recent first by author timestamp).
+//
+// §11.3 boundary: only EXTRACTED Hunks/Commits feed indexCorpus, so
+// AMBIGUOUS unreachable-history tickets — even if a force-pushed
+// commit's subject mentioned a ticket — never surface here. The
+// Recovery panel is the dedicated surface for that data.
+func (c *Cache) TicketIndex(store persist.StoreReader, limit int) ([]TicketRow, error) {
+	if err := c.ensureIndex(store); err != nil {
+		return nil, err
+	}
+	c.mu.RLock()
+	corpus := c.corpus
+	c.mu.RUnlock()
+	if corpus == nil || len(corpus.issuesBySHA) == 0 {
+		return nil, nil
+	}
+
+	// Per-ticket stats: hunk count, commit set, and sample commits.
+	hunksByID := make(map[string]int, 64)
+	commitsByID := make(map[string]map[string]bool, 64)
+	for hunkID, sha := range corpus.hunkSHA {
+		_ = hunkID
+		for id := range corpus.issuesBySHA[sha] {
+			hunksByID[id]++
+			set, ok := commitsByID[id]
+			if !ok {
+				set = make(map[string]bool, 4)
+				commitsByID[id] = set
+			}
+			set[sha] = true
+		}
+	}
+
+	rows := make([]TicketRow, 0, len(hunksByID))
+	for id, hunkCount := range hunksByID {
+		shas := commitsByID[id]
+		row := TicketRow{
+			IssueID:       id,
+			HunkCount:     hunkCount,
+			CommitCount:   len(shas),
+			SampleCommits: pickSampleCommits(shas, corpus, 3),
+		}
+		rows = append(rows, row)
+	}
+	sortTicketRows(rows)
+	if limit > 0 && limit < len(rows) {
+		rows = rows[:limit]
+	}
+	return rows, nil
+}
+
+// pickSampleCommits returns up to n most-recent commits from the SHA
+// set, decorated with their CommitInfo. Used by TicketIndex to attach
+// a few context-rich examples to each ticket without forcing the
+// caller to round-trip /api/evidence.
+func pickSampleCommits(shas map[string]bool, corpus *hunkCorpus, n int) []CommitInfo {
+	if len(shas) == 0 {
+		return nil
+	}
+	infos := make([]CommitInfo, 0, len(shas))
+	for sha := range shas {
+		commitNode, ok := corpus.commitBySHA[sha]
+		if !ok {
+			continue
+		}
+		infos = append(infos, CommitInfo{
+			SHA:        sha,
+			Subject:    stripCommitTimestamp(commitNode.Signature),
+			AuthorTime: commitTimestamp(commitNode.Signature),
+		})
+	}
+	sortCommitsByRecency(infos)
+	if n > 0 && len(infos) > n {
+		infos = infos[:n]
+	}
+	return infos
+}
+
+func sortTicketRows(rows []TicketRow) {
+	sortInPlace(rows, func(i, j int) bool {
+		if rows[i].HunkCount != rows[j].HunkCount {
+			return rows[i].HunkCount > rows[j].HunkCount
+		}
+		// Tie-break by commit count, then by ticket id (lexical) for
+		// determinism.
+		if rows[i].CommitCount != rows[j].CommitCount {
+			return rows[i].CommitCount > rows[j].CommitCount
+		}
+		return rows[i].IssueID < rows[j].IssueID
+	})
+}
+
+func sortCommitsByRecency(infos []CommitInfo) {
+	sortInPlaceCommits(infos, func(i, j int) bool {
+		return infos[i].AuthorTime > infos[j].AuthorTime
+	})
+}
+
+// Tiny generic-free sort wrappers to avoid pulling in "sort" at
+// package scope (the file already does in evidence.go but in a
+// different translation unit; we duplicate the minimal helper here
+// rather than refactor the import surface). Both inputs are small
+// (per-ticket SampleCommits is ≤ N, the rows slice is one row per
+// observed ticket — typically < 200).
+func sortInPlace(rows []TicketRow, less func(i, j int) bool) {
+	for i := 1; i < len(rows); i++ {
+		for j := i; j > 0 && less(j, j-1); j-- {
+			rows[j-1], rows[j] = rows[j], rows[j-1]
+		}
+	}
+}
+
+func sortInPlaceCommits(infos []CommitInfo, less func(i, j int) bool) {
+	for i := 1; i < len(infos); i++ {
+		for j := i; j > 0 && less(j, j-1); j-- {
+			infos[j-1], infos[j] = infos[j], infos[j-1]
+		}
+	}
+}
+
 // Invalidate clears the cached state, forcing the next BuildPack to
 // rebuild from scratch. Used by tests; production code shouldn't need
 // this — manifest-based invalidation handles the common rebuild case.
