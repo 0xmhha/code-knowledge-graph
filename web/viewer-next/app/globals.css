@@ -1225,3 +1225,130 @@ html, body {
   text-align: center;
   font-style: italic;
 }
+
+/* RecoveryPanel — §11.3 unreachable-history surface. Amber/red accent
+   so the operator immediately knows this is rolled-back code, distinct
+   from the EXTRACTED data the rest of the panel shows. */
+.recovery-panel {
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid #6b3a2c;
+  background: rgba(120, 60, 40, 0.08);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.recovery-header {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #d4945c;
+  border: none;
+  padding: 2px 0;
+  font-weight: 600;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.recovery-header:hover { color: #ffb86b; }
+.recovery-arrow { width: 10px; }
+.recovery-title { flex: 1; }
+.recovery-meta { color: #886; font-weight: 400; font-size: 10px; }
+.recovery-disclaimer {
+  margin: 6px 0 4px;
+  padding: 4px 6px;
+  background: rgba(120, 60, 40, 0.12);
+  border-left: 2px solid #d4945c;
+  color: #c4a89c;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.recovery-loading, .recovery-error {
+  padding: 4px 0;
+  color: #888;
+  font-style: italic;
+}
+.recovery-error { color: #c66; }
+.recovery-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.recovery-commit { border-top: 1px solid rgba(150, 90, 60, 0.3); }
+.recovery-commit:first-child { border-top: none; }
+.recovery-commit-row {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  background: transparent;
+  border: none;
+  color: #ccc;
+  padding: 4px 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+}
+.recovery-commit-row:hover { color: #fff; }
+.recovery-sha {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #d4945c;
+  flex-shrink: 0;
+}
+.recovery-subject {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recovery-hunk-count {
+  color: #886;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.recovery-hunks {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 4px 14px;
+}
+.recovery-hunk { padding: 1px 0; }
+.recovery-hunk-row {
+  width: 100%;
+  display: flex;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #aaa;
+  padding: 1px 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 10px;
+}
+.recovery-hunk-row:hover { color: #fff; }
+.recovery-file {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.recovery-line {
+  color: #886;
+  flex-shrink: 0;
+}
+.recovery-blob {
+  margin: 4px 0;
+  padding: 6px;
+  background: #1a1310;
+  color: #c4a89c;
+  border-radius: 3px;
+  max-height: 200px;
+  overflow: auto;
+  font-size: 10px;
+  white-space: pre;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.recovery-empty { color: #886; font-style: italic; padding: 2px 0; }

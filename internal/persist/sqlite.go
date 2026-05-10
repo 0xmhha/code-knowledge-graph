@@ -910,6 +910,27 @@ func (s *sqliteStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	return scanNodes(rows)
 }
 
+// AmbiguousMetaNodes returns Hunk + Commit rows with confidence='AMBIGUOUS'.
+// Sorted by start_line DESC so the viewer Recovery panel surfaces the most
+// recent unreachable commits first (start_line on Commit rows holds the
+// timestamp in their signature column — the SQL ORDER BY is on a column
+// the schema enforces NOT NULL).
+//
+// The dual-type scope (Hunk + Commit) matches the §11.3 contract — other
+// AMBIGUOUS rows (TS resolve multi-candidate, Track C unresolvable
+// dispatch) are precision signals the LLM should still see and stay
+// out of the recovery panel.
+func (s *sqliteStore) AmbiguousMetaNodes() ([]types.Node, error) {
+	rows, err := s.db.Query(`SELECT ` + nodeColumns + ` FROM nodes
+		WHERE confidence = 'AMBIGUOUS' AND type IN ('Hunk', 'Commit')
+		ORDER BY type, qualified_name`)
+	if err != nil {
+		return nil, fmt.Errorf("ambiguous meta nodes: %w", err)
+	}
+	defer rows.Close()
+	return scanNodes(rows)
+}
+
 // AllNodes returns every node in the graph. Order is unspecified — callers
 // (validate) sort if needed. Used by `ckg validate` to reconstruct the
 // in-memory graph for SchemaValidator.

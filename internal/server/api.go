@@ -1,8 +1,11 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -119,6 +122,20 @@ func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.decorateNodes(nodes))
 }
 
+// handleAmbiguousNodes returns Hunk + Commit rows with confidence='AMBIGUOUS'
+// — the §11.3 unreachable-history track populated by reflog/fsck. Used
+// by the viewer's Recovery panel; deliberately stays unfiltered at the
+// HTTP layer (the §11.3 retrieval boundary lives at the MCP layer for
+// LLM consumers — humans browsing the viewer are the intended audience).
+func (s *Server) handleAmbiguousNodes(w http.ResponseWriter, r *http.Request) {
+	nodes, err := s.store.AmbiguousMetaNodes()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, s.decorateNodes(nodes))
+}
+
 // handleEdgeCounts returns total edge count per type across the whole
 // graph. The viewer's EdgeFilters renders one count badge per CKS group
 // pill (G1..G6) so users see axis weight without manually toggling and
@@ -159,6 +176,13 @@ func (s *Server) handleEdges(w http.ResponseWriter, r *http.Request) {
 
 // handleBlob streams the raw source slice persisted for a node. The blob is
 // served as text/plain so curl / browser preview just works.
+//
+// Hunk nodes (schema 1.8) get a gzip-decompression pass on the way out
+// because the H1 design stores their unified-diff text gzipped to keep
+// the blob table compact (~70% reduction). The compressed bytes are
+// useless to a viewer / agent / curl session — decompress before send.
+// Other node types (Function / Method / Struct / etc.) have raw source
+// in the table, so they pass through untouched.
 func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	src, err := s.store.GetBlob(id)
@@ -166,8 +190,39 @@ func (s *Server) handleBlob(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	if isHunkBlob(src) {
+		if decompressed, dErr := gunzipBytes(src); dErr == nil {
+			src = decompressed
+		}
+		// On gzip-decompress error fall through with the raw bytes — the
+		// caller still sees something rather than a 500, and the only way
+		// to land here in practice is a legacy Hunk row written by a
+		// pre-H1 build.
+	}
 	w.Header().Set("content-type", "text/plain; charset=utf-8")
 	_, _ = w.Write(src)
+}
+
+// isHunkBlob detects gzip-compressed payloads via the standard 1f 8b 08
+// magic. Used by handleBlob to decide whether to invoke the gunzip pass.
+// We don't peek at the persisted node row to check Type=Hunk because the
+// magic-byte check is both cheaper and forward-compatible: any future
+// node kind that stores a gzipped blob gets the same treatment for free.
+func isHunkBlob(b []byte) bool {
+	return len(b) >= 3 && b[0] == 0x1f && b[1] == 0x8b && b[2] == 0x08
+}
+
+// gunzipBytes is the inverse of internal/buildpipe/temporal_hunks.go's
+// gzipPatch — wraps a bytes.Reader in a gzip.Reader and reads to EOF.
+// Errors propagate unchanged so handleBlob can fall back to the raw
+// payload on malformed gzip headers.
+func gunzipBytes(b []byte) ([]byte, error) {
+	gr, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	defer gr.Close()
+	return io.ReadAll(gr)
 }
 
 // handleNodesByIDs returns full node records for a caller-supplied id list.

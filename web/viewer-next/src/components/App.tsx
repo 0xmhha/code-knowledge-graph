@@ -20,6 +20,7 @@ import NodeTypeFilters from './NodeTypeFilters';
 import TraceControls from './TraceControls';
 import CanvasLegend from './CanvasLegend';
 import CallFlow from './CallFlow';
+import RecoveryPanel from './RecoveryPanel';
 import { DEFAULT_EDGE_TYPES, GRAPH_GROUPS, edgeToGroup } from '@/lib/edges';
 import type { NodeId, ViewMode, ColorMode, TraceDirection } from '@/types';
 import type { HistorySnapshot } from '@/store/store';
@@ -577,6 +578,7 @@ export default function App() {
         <NodeTypeFilters />
         <EdgeTypeFilters />
         <Legend />
+        <RecoveryPanel api={apiBox} />
       </div>
       <BottomBar
         onDepthIn={onDepthIn}

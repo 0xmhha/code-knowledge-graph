@@ -681,6 +681,20 @@ func (s *pgStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	return scanPGEdges(rows)
 }
 
+// AmbiguousMetaNodes mirrors sqlite.go's AmbiguousMetaNodes — returns
+// Hunk + Commit rows with confidence='AMBIGUOUS' for the viewer
+// Recovery panel.
+func (s *pgStore) AmbiguousMetaNodes() ([]types.Node, error) {
+	rows, err := s.pool.Query(background, `SELECT `+pgNodeColumns+` FROM nodes
+		WHERE confidence = 'AMBIGUOUS' AND type IN ('Hunk', 'Commit')
+		ORDER BY type, qualified_name`)
+	if err != nil {
+		return nil, fmt.Errorf("ambiguous meta nodes: %w", err)
+	}
+	defer rows.Close()
+	return scanPGNodes(rows)
+}
+
 // AllNodes returns every node in the graph. Used by `ckg validate` for
 // in-memory reconstruction. Order is unspecified.
 func (s *pgStore) AllNodes() ([]types.Node, error) {

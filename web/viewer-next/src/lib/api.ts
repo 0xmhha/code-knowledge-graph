@@ -95,6 +95,14 @@ export interface IAPI {
   // export bundle does not include the SQLite store needed for arbitrary
   // qname lookups.
   impact(seedQname: string, depth: number): Promise<ImpactResult>;
+  // ambiguousNodes returns Hunk + Commit rows whose confidence is
+  // AMBIGUOUS — the §11.3 unreachable-history track populated by
+  // reflog/fsck. Powers the viewer's Recovery panel; deliberately
+  // unfiltered at the HTTP layer so a human operator can browse
+  // force-pushed-away commits when an agent overwrites code.
+  // Returns [] on backends that don't expose /api/nodes/ambiguous
+  // (pre-§11.3 builds) so callers can hide the panel gracefully.
+  ambiguousNodes(): Promise<GraphNode[]>;
 }
 
 export class API implements IAPI {
@@ -172,6 +180,13 @@ export class API implements IAPI {
     const r = await fetch(`${this.base}/api/impact?${q}`);
     if (!r.ok) throw new Error(`/api/impact ${r.status}`);
     return await r.json() as ImpactResult;
+  }
+
+  async ambiguousNodes(): Promise<GraphNode[]> {
+    const r = await fetch(`${this.base}/api/nodes/ambiguous`);
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`/api/nodes/ambiguous ${r.status}`);
+    return asArray<GraphNode>(await r.json());
   }
 }
 
@@ -272,6 +287,16 @@ export class StaticAPI implements IAPI {
     // NodeDetail can surface a clear "use ckg serve" message instead of
     // silently returning empty buckets.
     throw new Error('impact_of_change unavailable in static export mode (use `ckg serve`)');
+  }
+
+  async ambiguousNodes(): Promise<GraphNode[]> {
+    // Filter the cached node set client-side — there's no separate
+    // ambiguous chunk in the static export bundle. Same shape as the
+    // serve API so the Recovery panel doesn't need a mode-aware code
+    // path. Returns [] on graphs with no AMBIGUOUS rows.
+    const all = await this.allNodes();
+    return all.filter(n =>
+      (n.type === 'Hunk' || n.type === 'Commit') && n.confidence === 'AMBIGUOUS');
   }
 }
 

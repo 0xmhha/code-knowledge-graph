@@ -109,6 +109,14 @@ type StoreReader interface {
 	// OpenReadOnly, which proves it doesn't need write access to the DB.
 	ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int) error
 
+	// AmbiguousMetaNodes returns Hunk + Commit nodes whose confidence is
+	// AMBIGUOUS — the §11.3 unreachable-history track populated by
+	// LoadUnreachableHunks. Powers the viewer's Recovery panel; deliberately
+	// scoped to meta-node types so other AMBIGUOUS rows (e.g. multi-candidate
+	// TS resolutions on Function nodes) don't pollute the recovery view.
+	// Returns nil + nil when no AMBIGUOUS rows exist (fresh graph).
+	AmbiguousMetaNodes() ([]types.Node, error)
+
 	// AllNodes / AllEdges return the full graph. Added for `ckg validate`
 	// which reconstructs the in-memory graph from a built DB so it can
 	// run validators (schema, future LLM) against persisted state. Avoid
