@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `5f2cf21` (feat: ckg evidence CLI).
+기준점: branch `main`, HEAD `85af082` (test: close mode=and verification gaps).
 
 ---
 
@@ -10,6 +10,9 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `85af082` | test(evidence,server): close mode=and verification gaps | AND+IssueID 조합 단위 + HTTP `/api/evidence?mode=and\|invalid\|empty` 3종 wiring 테스트. 라이브 재검증 HTTP AND=0 / OR=5 / invalid=400 |
+| `2982864` | feat(evidence): mode=and toggle for precise term-match queries | `Options.Mode` ("or" default / "and") + BM25 후 `containsAll` 후처리. /api/evidence + MCP + CLI `--mode` 모두 wired. 단위 테스트 2 + 라이브 OR/AND 차이 확인 |
+| `5df3ed8` | test(mcp): lock §11.3 boundary across all 8 MCP tools | 12 wrapper 메서드 AMBIGUOUS leak guard (table-driven) + Run() 8 register* 정적 scan. fakeStore 10 method 확장. negative case 검증 |
 | `5f2cf21` | feat(cmd): ckg evidence — H3 EvidencePack assembler from the CLI | `ckg evidence --graph DIR (--intent T \| --issue ID) [--seed-qname Q] [-k N] [--budget N] [--offset N] [--format text\|json]` — `ckg serve` 없이 shell/CI에서 EvidencePack 생성. text/json 출력, 5 unit tests + 9 시나리오 라이브 검증 |
 | `72ea194` | test(buildpipe,temporal): H3+H4 regression nets | 실제 git fixture 위에 `BuildPack` 통합 테스트 (intent / issue_id / offset paging / §11.3 leak guard) + 30-subject H4 corpus precision/recall 100% lock-in |
 | `fa59535` | fix: eliminate React #418 hydration mismatch | `usePersistedBool/Number/JSON` 신규 hook, 8 컴포넌트 + store `hydrateFromStorage()` 마이그레이션 — SSR-safe default + mount-effect로 stored value 적용 |
@@ -147,13 +150,15 @@ H4/H3 cross-panel loop:
 |------|------|------|
 | ✅ | ~~#4 EvidenceView 컴포넌트 분리~~ | 완료 (`da4af1d`) — diff coloring 동봉 |
 | ✅ | ~~#3 eval harness H3+H4 시나리오~~ | 완료 (`72ea194`) — 위치는 `internal/buildpipe/` + `internal/temporal/`, eval/은 LLM benchmark 전용이라 schema 불일치 |
-| ✅ | ~~#6 `ckg evidence` CLI subcommand~~ | 완료 (`5f2cf21`) — 9 시나리오 라이브 검증 (offset paging / k / budget cap / seed-qname modifies-reach / 모든 에러 경로 exit=1) |
-| 1 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
-| 2 | #10 OR/AND mode | Low. |
-| 3 | #9 sample_commits 메타 확장 | Low. |
-| 4 | `/api/evidence` `hits=null` → `[]` cleanup | Low (~10분) — offset past end 시 외부 client 호환 |
-| 5 | docs/ 에 hydration 패턴 가이드 1줄 | Low — `usePersistedBool/Number/JSON` + `hydrateFromStorage` 패턴 docs |
-| 6 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+| ✅ | ~~#6 `ckg evidence` CLI subcommand~~ | 완료 (`5f2cf21`) — 9 시나리오 라이브 검증 |
+| ✅ | ~~#5 MCP 8 tools 통합 테스트~~ | 완료 (`5df3ed8`) — 12-method wrapper boundary + 8-tool register static scan |
+| ✅ | ~~#10 OR/AND mode~~ | 완료 (`2982864` + `85af082`) — Options.Mode + BM25 post-filter, AND+IssueID 조합까지 lock-in |
+| 1 | **검증 체크리스트 docs 화** | Low (~30분) — **신규**. `docs/VERIFICATION-CHECKLIST.md`: surface fan-out (Options/HTTP/MCP/CLI) + 조합 매트릭스 + negative paths. 이번 세션 5종 누락 패턴 학습 자료 충분 |
+| 2 | #9 sample_commits top-files 메타 | Low |
+| 3 | `/api/evidence` `hits=null` → `[]` cleanup | Low (~10분) — offset past end 시 외부 client 호환 |
+| 4 | docs/ 에 hydration 패턴 가이드 1줄 | Low — `usePersistedBool/Number/JSON` + `hydrateFromStorage` 패턴 docs |
+| 5 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+| 6 | mode=and 남은 3 검증 (MCP live / AND+SeedQname / issue-only+mode) | Low — #1 체크리스트 작업과 묶음 처리 권장 |
 
 ---
 
@@ -183,7 +188,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `5f2cf21`): 23/23 패키지 PASS. H3+H4 통합 테스트는 5회 연속 deterministic, ~700ms. `ckg evidence` 9 시나리오 라이브 통과 (offset / k / budget / seed-qname / 4종 에러 경로).
+직전 회귀 (HEAD `85af082`): 23/23 패키지 PASS. H3+H4 통합 테스트 5회 연속 deterministic ~700ms. `ckg evidence` 9 시나리오 라이브 통과. MCP §11.3 boundary 12 method × 8 tool 정적+동적 lock-in. mode=and HTTP/CLI 라이브 (AND=0 / OR=5 / invalid=400).
 
 ---
 
@@ -195,4 +200,5 @@ cd web/viewer-next && npx tsc --noEmit
 - 스키마: `docs/SCHEMA.md` (schema 1.8 정의)
 - 새 hydration 패턴: `web/viewer-next/src/lib/usePersistedState.ts` (`usePersistedBool/Number/JSON`)
 - H3+H4 회귀 안전망: `internal/buildpipe/h3h4_integration_test.go` + `internal/temporal/issueid_test.go::TestExtractIssueIDs_CorpusPrecisionRecall`
-- evidence CLI: `cmd/ckg/evidence.go` (사용 예: `ckg evidence --graph /tmp/ckg-h4 --issue GH-66 -k 5 --budget 1000000 --format text`)
+- evidence CLI: `cmd/ckg/evidence.go` (사용 예: `ckg evidence --graph /tmp/ckg-h4 --issue GH-66 -k 5 --budget 1000000 --format text`, `--mode and` 정밀 검색)
+- MCP boundary 회귀 안전망: `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta` + `internal/mcp/server_test.go::TestRunRegistersAllEightTools`
