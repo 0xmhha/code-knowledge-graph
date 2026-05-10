@@ -77,6 +77,42 @@ same shape so future runs diff mechanically.
 
 ---
 
+## MCP tool latency (bench-mcp)
+
+In-process MCP tool measurements via `ckg bench-mcp` — same harness
+shape, no HTTP, no stdio, no JSON-RPC framing. Tools that need a
+Function seed (find_callers / find_callees / get_subgraph /
+impact_of_change) are skipped on graphs whose root has no Function
+node, which is the current /tmp/ckg-h4 case.
+
+| Tool | n | p50 | p95 | p99 | mean |
+|------|---|----:|----:|----:|-----:|
+| find_symbol             | 200 |  0.07ms |  0.26ms |  0.94ms |  0.10ms |
+| search_text             | 200 |  0.75ms |  1.25ms |  1.74ms |  0.78ms |
+| get_context_for_task    | 200 |  6.71ms |  9.98ms | 12.25ms |  7.01ms |
+| evidence_for_intent     | 200 | 172.36ms | 209.62ms | 248.58ms | 174.96ms |
+
+Each probe runs a single warmup call before the timed loop so
+cold-start costs (the BM25 corpus build) don't pollute the
+measurement. Without the warmup, evidence_for_intent's first call
+shows the ~5s `ensureIndex` build (mirrors the cold start that
+prewarmTicketIndex absorbs in bench-server).
+
+**Observation**: `evidence_for_intent` is 40× more expensive
+in-process than the same `/api/evidence?intent=...` HTTP call after
+the perf passes (172ms vs 4.3ms). Both routes use the same
+`evidence.Cache`, so the gap is somewhere in the per-call setup —
+likely the structured-content envelope built by `textResult`, or a
+cache instance that's not the one bench-server's
+`prewarmTicketIndex` warmed. Worth a follow-up trace; for now the
+honest signal is that the BM25 ranking + commit grouping is *not*
+free, and bench-mcp surfaces that cost where bench-server's HTTP
+view doesn't.
+
+Raw: `/tmp/ckg-bench/mcp.json`.
+
+---
+
 ## Improvement candidates
 
 1. ✅ **Manifest caching** — landed (commit 473f839).
@@ -97,9 +133,18 @@ same shape so future runs diff mechanically.
    matching `prewarmEdgeCounts` boot goroutine. p50 152ms → 0.10ms
    (−99.9%); p99 755ms → 0.31ms (−99.96%). Trade-off identical to
    manifest: build-time-fixed data, restart on rebuild.
-5. **bench-mcp** — measure each MCP tool's stdio round-trip latency.
-   Not in this baseline because MCP latency is dominated by stdio
-   framing + JSON-RPC, not graph reads. Future enhancement.
+5. ✅ **bench-mcp (in-process)** — landed in the same session.
+   `cmd/ckg/bench_mcp.go` + `internal/mcp/bench.go::NewBenchHandlers`
+   exposes the eight tool handlers for direct invocation. Reveals
+   that `evidence_for_intent` graph-layer cost is ~170ms even with
+   a warm cache — the HTTP path's 4ms p50 (after the perf passes)
+   includes some still-unexplained shortcut. Worth a follow-up.
+6. **bench-mcp-stdio** — measure the same handlers through a real
+   `ckg mcp` subprocess to attribute the JSON-RPC + framing cost
+   independently. Deferred — in-process numbers above already
+   confirm the graph layer dominates the warm-cache path; framing
+   measurement is a "decide if stdio is worth optimising" question
+   for a future session.
 
 ---
 
