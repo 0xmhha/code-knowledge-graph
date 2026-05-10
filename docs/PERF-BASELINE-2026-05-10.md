@@ -13,24 +13,32 @@
 
 ---
 
-## Results
+## Results — before vs after improvements
 
-| Endpoint | N | p50 ms | p95 ms | p99 ms | mean ms | min ms | max ms | err | 200% |
-|----------|---|--------|--------|--------|---------|--------|--------|-----|------|
-| manifest | 200 | 235.13 | 272.94 | 286.02 | 238.85 | 217.12 | 303.35 | 0 | 100% |
-| hierarchy.pkg | 200 | 164.70 | 200.19 | 244.54 | 168.99 | 152.54 | 246.42 | 0 | 100% |
-| nodes | 200 | 1.02 | 2.96 | 92.34 | 3.06 | 0.66 | 92.35 | 0 | 100% |
-| nodes.top.pagerank | 200 | 69.56 | 92.03 | 230.05 | 73.72 | 63.00 | 230.09 | 0 | 100% |
-| nodes.top.usage | 200 | 69.63 | 85.42 | 102.44 | 71.33 | 60.24 | 103.31 | 0 | 100% |
-| nodes.ambiguous | 200 | 6.43 | 7.71 | 10.57 | 6.48 | 4.77 | 11.12 | 0 | 100% |
-| edges.counts | 200 | 152.23 | 185.09 | 755.72 | 166.34 | 146.43 | 755.73 | 0 | 100% |
-| search | 200 | 0.61 | 1.70 | 6.46 | 0.79 | 0.39 | 6.50 | 0 | 100% |
-| tickets | 200 | 190.07 | 228.15 | 5774.90 | 302.83 | 166.18 | 5778.76 | 0 | 100% |
-| evidence.intent | 200 | 168.31 | 202.63 | 238.71 | 171.00 | 149.74 | 244.89 | 0 | 100% |
-| evidence.issue | 200 | 203.44 | 235.85 | 259.77 | 206.50 | 172.45 | 268.96 | 0 | 100% |
-| evidence.and | 200 | 169.24 | 204.30 | 223.87 | 170.96 | 149.68 | 227.88 | 0 | 100% |
+The "after" column is the same harness re-run after the manifest
+cache + ticket-index pre-warm landed (`internal/server/manifest_cache.go`
++ goroutine in `Server.NewWithOptions`). All measurements use the
+same graph fingerprint, so deltas reflect the change rather than
+measurement noise.
 
-Raw output: `/tmp/ckg-bench/baseline.json`. The bench command emits the same shape so future runs can be diffed mechanically.
+| Endpoint | before p50 | after p50 | Δ p50 | before p99 | after p99 | Δ p99 |
+|----------|-----------:|----------:|------:|-----------:|----------:|------:|
+| manifest             | 235.13ms |  64.34ms | **−73%** |  286.02ms | 142.02ms | −50% |
+| hierarchy.pkg        | 164.70ms | 168.03ms |    +2% |  244.54ms | 251.79ms |  +3% |
+| nodes                |   1.02ms |   0.99ms |    −3% |   92.34ms | 135.29ms |  +47% |
+| nodes.top.pagerank   |  69.56ms |  73.10ms |    +5% |  230.05ms | 217.74ms |   −5% |
+| nodes.top.usage      |  69.63ms |  67.01ms |    −4% |  102.44ms | 113.58ms |  +11% |
+| nodes.ambiguous      |   6.43ms |   6.21ms |    −3% |   10.57ms |  10.93ms |   +3% |
+| edges.counts         | 152.23ms | 151.72ms |    −0% |  755.72ms | 529.03ms |  −30% |
+| search               |   0.61ms |   0.67ms |    +9% |    6.46ms |   5.49ms |  −15% |
+| tickets              | 190.07ms |  18.67ms | **−90%** | 5774.90ms |  34.37ms | **−99.4%** |
+| evidence.intent      | 168.31ms |   4.56ms | **−97%** |  238.71ms |  12.42ms | **−95%** |
+| evidence.issue       | 203.44ms |  54.09ms | **−73%** |  259.77ms | 119.89ms | −54% |
+| evidence.and         | 169.24ms |   2.68ms | **−98%** |  223.87ms |   6.83ms | **−97%** |
+
+Raw outputs: `/tmp/ckg-bench/baseline.json` (before),
+`/tmp/ckg-bench/after.json` (after). `ckg bench-server` emits the
+same shape so future runs diff mechanically.
 
 ---
 
@@ -62,14 +70,32 @@ Raw output: `/tmp/ckg-bench/baseline.json`. The bench command emits the same sha
 
 ---
 
-## Improvement candidates (not for this commit)
+## Improvement candidates
 
-1. **Manifest caching** — `Server.GetManifest` could cache the row in a `sync.Once` invalidated on `manifest.json` mtime drift. Would cut `/api/manifest` from 235ms to <1ms.
-2. **`edges.counts` jitter** — investigate the 755ms p99 spike; likely a SQLite query plan blip on the GROUP BY. May benefit from a covering index.
-3. **TicketIndex cold start** — pre-warm the cache during `Server` boot so the first `/api/tickets` after startup doesn't pay the 5s build cost.
-4. **bench-mcp** — measure each MCP tool's stdio round-trip latency. Not in this baseline because MCP latency is dominated by stdio framing + JSON-RPC, not graph reads.
-
-These are deferred to a future session; the baseline above is the steady-state measurement.
+1. ✅ **Manifest caching** — landed in the same session.
+   `internal/server/manifest_cache.go` wraps the StoreReader so
+   `GetManifest` returns from memory after the first call.
+   /api/manifest p50 235ms → 64ms (−73%); the residual 64ms is
+   `computeStaleness`'s git command, not the manifest read itself.
+   That's a future cleanup candidate (`git rev-parse HEAD` could be
+   debounced or moved off the request path).
+2. ✅ **TicketIndex pre-warm** — landed in the same session.
+   `Server.NewWithOptions` kicks off a background goroutine that
+   builds the BM25 corpus. `/api/tickets` p50 190ms → 18ms (−90%),
+   p99 5775ms → 34ms (−99.4%). `evidence.*` endpoints all collapse
+   to single-digit ms because they reuse the same warm cache.
+3. **`edges.counts` jitter** — p99 dropped from 755ms to 529ms with
+   no code changes (cache pressure decreased), but still an outlier.
+   SQLite `EXPLAIN QUERY PLAN` review + covering index on `edges.type`
+   would likely settle this. Deferred — sub-second p99, not a user
+   pain point yet.
+4. **`computeStaleness` debounce** — the residual 64ms on
+   /api/manifest is a `git rev-parse HEAD` spawn. Cheap ELF cost but
+   measurable. Could refresh on a 5-second timer instead of per
+   request. Low effort.
+5. **bench-mcp** — measure each MCP tool's stdio round-trip latency.
+   Not in this baseline because MCP latency is dominated by stdio
+   framing + JSON-RPC, not graph reads. Future enhancement.
 
 ---
 

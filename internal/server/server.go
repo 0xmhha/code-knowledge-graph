@@ -55,18 +55,49 @@ func New(store persist.StoreReader, log *slog.Logger) *Server {
 }
 
 // NewWithOptions is the configurable constructor. See Options.
+//
+// Manifest caching: the underlying SQLite kv-read for /api/manifest
+// measured at p50=235ms on the go-stablenet baseline. Because the
+// manifest only changes on a fresh `ckg build`, we read it once at
+// construction time and serve every subsequent caller from memory via
+// the cachedManifestStore wrapper. Trade-off: external graph rebuild
+// while serve is up will produce stale manifest reads (and stale
+// evidence-cache invalidation) — `ckg serve` has always been "stop
+// and restart on rebuild" in practice, so this matches the existing
+// operational contract.
+//
+// TicketIndex pre-warm: the evidence cache's first BuildPack /
+// TicketIndex call materialises the BM25 corpus + per-hunk virtual
+// docs (~5s on the same graph). Kicking it off in a background
+// goroutine at boot pushes that cost off the user's first request.
+// Subsequent calls hit the warm cache (sync.RWMutex double-check
+// locked) and land at ~190ms p50.
 func NewWithOptions(store persist.StoreReader, log *slog.Logger, opts Options) *Server {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
+	cached := newCachedManifestStore(store, log)
 	s := &Server{
-		store:         store,
+		store:         cached,
 		mux:           http.NewServeMux(),
 		log:           log,
 		evidenceCache: evidence.NewCache(),
 	}
 	s.routes(opts)
+	go s.prewarmTicketIndex()
 	return s
+}
+
+// prewarmTicketIndex kicks the BM25 corpus build off the user's first
+// /api/evidence or /api/tickets call. The result is discarded — the
+// cache populates as a side effect of TicketIndex's ensureIndex.
+// Errors are logged at debug level only; a graph without H4 issues
+// returns no rows but populates the corpus all the same, which is
+// the actual goal.
+func (s *Server) prewarmTicketIndex() {
+	if _, err := s.evidenceCache.TicketIndex(s.store, 0); err != nil {
+		s.log.Debug("server: ticket index pre-warm failed (non-fatal)", "err", err)
+	}
 }
 
 // routes registers the API + static viewer surfaces. The Go 1.22+ ServeMux
