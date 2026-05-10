@@ -100,6 +100,14 @@ type CommitInfo struct {
 	// empty by H3 so the schema is stable now and the Agent doesn't
 	// crash on a missing field once H4 lands.
 	IssueIDs []string `json:"issue_ids,omitempty"`
+	// TopFiles is populated by TicketIndex's pickSampleCommits — the
+	// top-3 most-frequently-touched directory paths across the
+	// commit's hunks (e.g. ["crypto/secp256k1", "consensus", "core"]).
+	// Lets the viewer's TicketIndex panel hint at a ticket's reach
+	// before the user pays the cost of fetching the full EvidencePack.
+	// Left empty (omitempty) by EvidencePack's BuildPack flow because
+	// hunk file_path is already surfaced per-HunkRow there.
+	TopFiles []string `json:"top_files,omitempty"`
 }
 
 type HunkRow struct {

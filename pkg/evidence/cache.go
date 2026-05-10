@@ -23,6 +23,8 @@ package evidence
 
 import (
 	"fmt"
+	"path"
+	"sort"
 	"sync"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
@@ -332,6 +334,7 @@ func pickSampleCommits(shas map[string]bool, corpus *hunkCorpus, n int) []Commit
 			SHA:        sha,
 			Subject:    stripCommitTimestamp(commitNode.Signature),
 			AuthorTime: commitTimestamp(commitNode.Signature),
+			TopFiles:   topFilesForCommit(corpus, sha, 3),
 		})
 	}
 	sortCommitsByRecency(infos)
@@ -339,6 +342,63 @@ func pickSampleCommits(shas map[string]bool, corpus *hunkCorpus, n int) []Commit
 		infos = infos[:n]
 	}
 	return infos
+}
+
+// topFilesForCommit returns the top-N most-frequently-touched
+// directory paths (dirname of FilePath) across the commit's hunks.
+// Used by TicketIndex to give the viewer a "this ticket touched
+// crypto/ + consensus/" hint before the user has to fetch the full
+// EvidencePack.
+//
+// Ordering: count DESC, then dirname ASC for determinism. Hunks
+// without a FilePath are skipped (defensive — they shouldn't exist in
+// emitHunkGraph output, but a stale or hand-injected row shouldn't
+// crash the panel). FilePath at the repo root collapses to "(root)"
+// so the viewer renders a non-empty pill.
+func topFilesForCommit(corpus *hunkCorpus, sha string, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	counts := map[string]int{}
+	for hunkID, s := range corpus.hunkSHA {
+		if s != sha {
+			continue
+		}
+		h, ok := corpus.hunkByID[hunkID]
+		if !ok || h.FilePath == "" {
+			continue
+		}
+		dir := path.Dir(h.FilePath)
+		if dir == "." || dir == "" {
+			dir = "(root)"
+		}
+		counts[dir]++
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	type entry struct {
+		dir   string
+		count int
+	}
+	entries := make([]entry, 0, len(counts))
+	for d, c := range counts {
+		entries = append(entries, entry{d, c})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].count != entries[j].count {
+			return entries[i].count > entries[j].count
+		}
+		return entries[i].dir < entries[j].dir
+	})
+	if len(entries) > n {
+		entries = entries[:n]
+	}
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.dir
+	}
+	return out
 }
 
 func sortTicketRows(rows []TicketRow) {

@@ -1428,10 +1428,34 @@ html, body {
 }
 .ticket-commit {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
   padding: 1px 0;
   font-size: 10px;
   color: #aaa;
+}
+.ticket-commit-line {
+  display: flex;
+  gap: 6px;
+}
+.ticket-commit-files {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+  margin-left: 14px; /* aligns under subject, indented past the SHA column */
+}
+.ticket-file-pill {
+  background: rgba(70, 100, 140, 0.20);
+  color: #8ab4d8;
+  border: 1px solid rgba(70, 100, 140, 0.35);
+  border-radius: 2px;
+  padding: 0 4px;
+  font-size: 9px;
+  font-family: ui-monospace, Menlo, monospace;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ticket-sha {
   font-family: ui-monospace, Menlo, monospace;

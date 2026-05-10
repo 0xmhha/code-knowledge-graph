@@ -162,7 +162,18 @@ export interface TicketRow {
   issue_id: string;
   hunk_count: number;
   commit_count: number;
-  sample_commits?: Array<{ sha: string; subject: string; author_time: number }>;
+  sample_commits?: Array<{
+    sha: string;
+    subject: string;
+    author_time: number;
+    // top_files surfaces the top-3 most-touched directories of the
+    // commit's hunks (e.g. ["crypto/secp256k1", "consensus"]). Lets
+    // the viewer hint a ticket's reach before the user fetches the
+    // full EvidencePack via the "patches" button. Optional because
+    // older backends (pre-9-top-files commit) don't emit it; the UI
+    // skips the pill row when the array is empty/undefined.
+    top_files?: string[];
+  }>;
 }
 
 export class API implements IAPI {

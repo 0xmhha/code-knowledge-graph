@@ -205,8 +205,17 @@ export default function TicketIndex({ api }: Props) {
                           <ul className="ticket-commits">
                             {row.sample_commits.map(c => (
                               <li key={c.sha} className="ticket-commit">
-                                <span className="ticket-sha">{c.sha.slice(0, 12)}</span>
-                                <span className="ticket-subject">{c.subject}</span>
+                                <div className="ticket-commit-line">
+                                  <span className="ticket-sha">{c.sha.slice(0, 12)}</span>
+                                  <span className="ticket-subject">{c.subject}</span>
+                                </div>
+                                {c.top_files && c.top_files.length > 0 && (
+                                  <div className="ticket-commit-files">
+                                    {c.top_files.map(f => (
+                                      <span key={f} className="ticket-file-pill">{f}</span>
+                                    ))}
+                                  </div>
+                                )}
                               </li>
                             ))}
                           </ul>

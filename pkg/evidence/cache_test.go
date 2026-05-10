@@ -101,6 +101,81 @@ func TestCache_TicketIndexAggregation(t *testing.T) {
 	}
 }
 
+// TestCache_TicketIndexTopFiles locks in the top-files surface added
+// for the TicketIndex viewer panel: each sample commit reports up to
+// 3 directories that its hunks touched, ranked by hunk count and
+// tie-broken on dirname (deterministic). Hunks with no FilePath are
+// skipped; commits whose files all live at the repo root collapse
+// to "(root)" so the viewer always renders a non-empty pill.
+func TestCache_TicketIndexTopFiles(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: multi-touch (#42)", Confidence: types.ConfExtracted},
+			// 4 hunks under c1, dirname distribution:
+			//   crypto/secp256k1 → 2
+			//   consensus        → 1
+			//   core/types       → 1
+			// Top-3 expected: [crypto/secp256k1, consensus, core/types]
+			// (counts 2, 1, 1; alphabetical tie-break on the 1-count tier).
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:crypto/secp256k1/a.go:0",
+				FilePath: "crypto/secp256k1/a.go", DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:crypto/secp256k1/b.go:0",
+				FilePath: "crypto/secp256k1/b.go", DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:consensus/x.go:0",
+				FilePath: "consensus/x.go", DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			{ID: "h4", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:core/types/y.go:0",
+				FilePath: "core/types/y.go", DocComment: "issues:GH-42", Confidence: types.ConfExtracted},
+			// Second commit — single hunk at the repo root → "(root)".
+			{ID: "c2", Type: types.NodeCommit, QualifiedName: "commit:bbbb",
+				Signature: "1700000200: top-level fix (#7)", Confidence: types.ConfExtracted},
+			{ID: "h5", Type: types.NodeHunk, QualifiedName: "hunk:bbbb:main.go:0",
+				FilePath: "main.go", DocComment: "issues:GH-7", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("h1"), "h2": gz("h2"), "h3": gz("h3"),
+			"h4": gz("h4"), "h5": gz("h5"),
+		},
+	}
+	rows, err := NewCache().TicketIndex(store, 0)
+	if err != nil {
+		t.Fatalf("TicketIndex: %v", err)
+	}
+	byID := map[string]TicketRow{}
+	for _, r := range rows {
+		byID[r.IssueID] = r
+	}
+	gh42 := byID["GH-42"]
+	if len(gh42.SampleCommits) != 1 {
+		t.Fatalf("GH-42: want 1 sample commit, got %d", len(gh42.SampleCommits))
+	}
+	got := gh42.SampleCommits[0].TopFiles
+	want := []string{"crypto/secp256k1", "consensus", "core/types"}
+	if !equalSlice(got, want) {
+		t.Errorf("GH-42 top_files = %v, want %v", got, want)
+	}
+	// Repo-root collapse for GH-7.
+	gh7 := byID["GH-7"]
+	if len(gh7.SampleCommits) != 1 {
+		t.Fatalf("GH-7: want 1 sample commit, got %d", len(gh7.SampleCommits))
+	}
+	if got, want := gh7.SampleCommits[0].TopFiles, []string{"(root)"}; !equalSlice(got, want) {
+		t.Errorf("GH-7 top_files = %v, want %v", got, want)
+	}
+}
+
+func equalSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestCache_TicketIndexEmptyOnNoIssues — a graph without any
 // `issues:…` doc_comment on Hunk rows yields an empty slice (not nil
 // is acceptable; we just check len==0).
