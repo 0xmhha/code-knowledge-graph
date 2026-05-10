@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `fa59535` (fix: eliminate React #418 hydration mismatch).
+기준점: branch `main`, HEAD `72ea194` (test: H3+H4 regression nets).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `72ea194` | test(buildpipe,temporal): H3+H4 regression nets | 실제 git fixture 위에 `BuildPack` 통합 테스트 (intent / issue_id / offset paging / §11.3 leak guard) + 30-subject H4 corpus precision/recall 100% lock-in |
 | `fa59535` | fix: eliminate React #418 hydration mismatch | `usePersistedBool/Number/JSON` 신규 hook, 8 컴포넌트 + store `hydrateFromStorage()` 마이그레이션 — SSR-safe default + mount-effect로 stored value 적용 |
 | `da4af1d` | refactor: extract EvidenceView component + diff line colouring | `EvidenceView.tsx` 신규 분리, `+`/`-`/`@` 첫 char 기반 라인 color (green/red/blue) — `<pre>` 안 `<span>` 으로 monospace+copy 유지 |
 | `693c643` | pagination + NodeDetail pill → ticket EvidencePack loop | `Options.Offset` + viewer "load more" 버튼; NodeDetail amber pill → store 시그널 → TicketIndex 자동 expand+scroll+load |
@@ -144,12 +145,12 @@ H4/H3 cross-panel loop:
 | 순위 | 항목 | 비고 |
 |------|------|------|
 | ✅ | ~~#4 EvidenceView 컴포넌트 분리~~ | 완료 (`da4af1d`) — diff coloring 동봉 |
-| 1 | #3 eval/ harness H3+H4 시나리오 | 회귀 안전망. Mid. |
-| 2 | #6 `ckg evidence` CLI subcommand | shell/CI 워크플로. Mid. |
-| 3 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
-| 4 | #10 OR/AND mode | Low. |
-| 5 | #9 sample_commits 메타 확장 | Low. |
-| 6 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
+| ✅ | ~~#3 eval harness H3+H4 시나리오~~ | 완료 (`72ea194`) — 위치는 `internal/buildpipe/` + `internal/temporal/`, eval/은 LLM benchmark 전용이라 schema 불일치 |
+| 1 | #6 `ckg evidence` CLI subcommand | shell/CI 워크플로. Mid. |
+| 2 | #5 MCP 8 tools end-to-end 통합 테스트 | Mid. |
+| 3 | #10 OR/AND mode | Low. |
+| 4 | #9 sample_commits 메타 확장 | Low. |
+| 5 | #7 성능 baseline | graph 더 커질 때 가치 ↑ |
 
 ---
 
@@ -179,7 +180,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `fa59535`): 23/23 패키지 PASS.
+직전 회귀 (HEAD `72ea194`): 23/23 패키지 PASS. H3+H4 통합 테스트는 5회 연속 deterministic, ~700ms.
 
 ---
 
@@ -190,3 +191,4 @@ cd web/viewer-next && npx tsc --noEmit
 - 설계 문서: `docs/design/hunk-graph.md` (H1-H4, §11 결정 원본)
 - 스키마: `docs/SCHEMA.md` (schema 1.8 정의)
 - 새 hydration 패턴: `web/viewer-next/src/lib/usePersistedState.ts` (`usePersistedBool/Number/JSON`)
+- H3+H4 회귀 안전망: `internal/buildpipe/h3h4_integration_test.go` + `internal/temporal/issueid_test.go::TestExtractIssueIDs_CorpusPrecisionRecall`
