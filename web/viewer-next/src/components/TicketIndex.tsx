@@ -212,7 +212,10 @@ export default function TicketIndex({ api }: Props) {
                                 {c.top_files && c.top_files.length > 0 && (
                                   <div className="ticket-commit-files">
                                     {c.top_files.map(f => (
-                                      <span key={f} className="ticket-file-pill">{f}</span>
+                                      // title surfaces the full dirname when
+                                      // the pill's max-width clips it (deep
+                                      // paths like crypto/secp256k1/libsecp256k1/include).
+                                      <span key={f} className="ticket-file-pill" title={f}>{f}</span>
                                     ))}
                                   </div>
                                 )}

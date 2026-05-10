@@ -112,7 +112,17 @@ func (c *Cache) BuildPack(store persist.StoreReader, opt Options) (*Pack, error)
 		scored = filterByModifiesReach(scored, corpus, allowed)
 	}
 
-	pack.Hits = groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, opt.Offset, store)
+	hits := groupByCommit(scored, corpus, opt.K, opt.BudgetTokens, opt.Offset, store)
+	// Coerce nil → []Hit{} so the JSON shape is always `"hits":[]`,
+	// not `"hits":null`. Frontend's asArray() already tolerates null,
+	// but external clients (curl + python json.load) hit
+	// `len(None)` if the value escapes as null. groupByCommit returns
+	// nil on empty input or when offset >= len(commits) — both legal
+	// shapes that should serialise as an empty array.
+	if hits == nil {
+		hits = []Hit{}
+	}
+	pack.Hits = hits
 	return pack, nil
 }
 

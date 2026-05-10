@@ -416,6 +416,120 @@ func TestBuildPack_AndMode_WithIssueID(t *testing.T) {
 	}
 }
 
+// TestBuildPack_AndMode_WithSeedQname locks in the three-stage filter
+// chain: BM25 → IssueID (n/a here) → AND → SeedQname. A hit must
+// clear all enabled gates. Documents the contract that combining
+// Mode=and with SeedQname gives the strictest possible search —
+// useful when the agent is trying to find "hunks reaching pkg.Foo
+// AND mentioning RetryPolicy AND Backoff". Future refactors that
+// reorder the filters will surface here as h2 surviving alone (the
+// AND-only result, missing the SeedQname gate).
+func TestBuildPack_AndMode_WithSeedQname(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: misc work", Confidence: types.ConfExtracted},
+			// h1: AND fails (only "panel"), modifies Foo
+			// h2: AND passes, modifies Foo            ← survivor
+			// h3: AND passes, modifies Bar (no Foo reach)
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:foo.go:0",
+				FilePath: "foo.go", Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:foo.go:1",
+				FilePath: "foo.go", Confidence: types.ConfExtracted},
+			{ID: "h3", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:bar.go:0",
+				FilePath: "bar.go", Confidence: types.ConfExtracted},
+			{ID: "fnFoo", Type: types.NodeFunction, QualifiedName: "pkg.Foo",
+				Confidence: types.ConfExtracted},
+			{ID: "fnBar", Type: types.NodeFunction, QualifiedName: "pkg.Bar",
+				Confidence: types.ConfExtracted},
+		},
+		edges: []types.Edge{
+			{Src: "h1", Dst: "fnFoo", Type: types.EdgeModifies, Confidence: types.ConfExtracted},
+			{Src: "h2", Dst: "fnFoo", Type: types.EdgeModifies, Confidence: types.ConfExtracted},
+			{Src: "h3", Dst: "fnBar", Type: types.EdgeModifies, Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("panel only"),
+			"h2": gz("panel jitter remount"),
+			"h3": gz("panel jitter elsewhere"),
+		},
+	}
+	pack, err := BuildPack(store, Options{
+		Intent: "panel jitter", Mode: "and", SeedQname: "pkg.Foo",
+	})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 1 {
+		t.Fatalf("AND+Seed: want 1 commit, got %d", len(pack.Hits))
+	}
+	hunkIDs := []string{}
+	for _, h := range pack.Hits[0].Hunks {
+		hunkIDs = append(hunkIDs, h.ID)
+	}
+	if len(hunkIDs) != 1 || hunkIDs[0] != "h2" {
+		t.Errorf("AND+Seed: surviving hunks = %v, want [h2]", hunkIDs)
+	}
+}
+
+// TestBuildPack_IssueIDOnly_IgnoresMode locks in the documented branch
+// where IssueID is set without an Intent: BuildPack takes the
+// hunksForIssueID path and never enters the BM25 ranking, so Mode is
+// irrelevant. A naive future refactor that hoists the AND post-filter
+// outside the BM25 branch would empty this case (no query tokens →
+// no hunk has all of them) and break the ticket-browse contract.
+func TestBuildPack_IssueIDOnly_IgnoresMode(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: anything (#42)", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:f.go:0",
+				FilePath: "f.go", DocComment: "issues:GH-42",
+				Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{"h1": gz("anything")},
+	}
+	for _, mode := range []string{"", "or", "and"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			pack, err := BuildPack(store, Options{IssueID: "GH-42", Mode: mode})
+			if err != nil {
+				t.Fatalf("BuildPack: %v", err)
+			}
+			if len(pack.Hits) != 1 {
+				t.Errorf("issue-only mode=%q should yield 1 hit (mode ignored), got %d",
+					mode, len(pack.Hits))
+			}
+		})
+	}
+}
+
+// TestBuildPack_OffsetPastEnd_NotNullJSON locks in the JSON contract:
+// even when offset skips past every commit, BuildPack returns an
+// empty `[]Hit{}` slice, not a nil that would marshal to `null`.
+// External clients (curl + python json.load) hit `len(None)` errors
+// when this leaks through. Frontend asArray() already tolerates it.
+func TestBuildPack_OffsetPastEnd_NotNullJSON(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: x", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:f.go:0",
+				FilePath: "f.go", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{"h1": gz("body")},
+	}
+	pack, err := BuildPack(store, Options{Intent: "body", Offset: 99})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if pack.Hits == nil {
+		t.Errorf("Hits should be non-nil empty slice for JSON []; got nil")
+	}
+	if len(pack.Hits) != 0 {
+		t.Errorf("expected 0 hits, got %d", len(pack.Hits))
+	}
+}
+
 // TestBuildPack_AndMode_NoSurvivors covers the empty-survivor path:
 // AND mode with a query no doc fully contains yields 0 hits, not a
 // fallback to OR. Important contract — the caller asked for precise
