@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `1a79cbc` (perf: cache + pre-warm /api/edges/counts).
+기준점: branch `main`, HEAD `218008a` (feat: bench-mcp — in-process MCP tool latency baseline).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `218008a` | feat(cmd,mcp): bench-mcp — in-process MCP tool latency baseline | `mcp.NewBenchHandlers` + `cmd/ckg/bench-mcp` 신규. 8 tools 측정. Live: find_symbol 0.07ms / search_text 0.75ms / get_context 7ms / evidence 172ms p50. HTTP vs in-process 40x discrepancy (evidence) flagged for trace |
 | `1a79cbc` | perf(server): cache + pre-warm /api/edges/counts | EXPLAIN QUERY PLAN: 이미 covering index 사용 — 1.98M row scan 자체가 비용. cachedManifestStore에 lazy `EdgeCountsByType` cache + boot goroutine prewarm. edges.counts p50: 152→**0.10ms** (−99.9%) / p99: 755→**0.31ms** (−99.96%). 3 unit |
 | `302b703` | perf(server): debounce computeStaleness git spawn | 5s TTL `stalenessCache` (sync.Mutex + key/expires). manifest p50: 235→64→**26ms** (baseline 대비 −89%). 3 unit (HitWithinTTL / RefreshAfterTTL / KeyInvalidation) |
 | `473f839` | perf(server): manifest caching + ticket-index pre-warm | `cachedManifestStore` wrapper + boot goroutine. before/after: manifest p50 −73% / tickets p50 −90% & p99 −99.4% / evidence.intent p50 −97% / evidence.and p50 −98%. 2 unit |
@@ -168,8 +169,10 @@ H4/H3 cross-panel loop:
 | ✅ | ~~tickets cache 사전 워밍~~ | 완료 (`473f839`) — boot goroutine, p50 −90% & p99 −99.4% (5775ms→34ms). evidence 모든 surface 부수 효과로 -97%까지 |
 | ✅ | ~~computeStaleness 디바운스~~ | 완료 (`302b703`) — 5s TTL stalenessCache, manifest p50 64→26ms |
 | ✅ | ~~edges.counts cache + pre-warm~~ | 완료 (`1a79cbc`) — cachedManifestStore.EdgeCountsByType + prewarmEdgeCounts. p50 152→0.1ms / p99 755→0.31ms |
-| 1 | bench-mcp (stdio tool latency) | Mid — MCP tool 별 latency 가시화 |
-| 2 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
+| ✅ | ~~bench-mcp (in-process)~~ | 완료 (`218008a`) — 8 tools p50/p99 측정. evidence HTTP vs in-process 40x 격차 발견 (follow-up trace) |
+| 1 | evidence_for_intent HTTP vs in-process 격차 trace | Low — `218008a` 가 발견. 동일 cache인데 HTTP 4ms / in-process 172ms 원인 미상 |
+| 2 | bench-mcp-stdio (JSON-RPC framing) | Mid — stdio framing 비용 attribution. in-process 결과로 graph layer dominated 확인됐으니 framing 측정 가치 낮음 |
+| 3 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
 
@@ -199,7 +202,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `1a79cbc`): 23/23 패키지 PASS. `1a79cbc` 3 신규 단위 테스트 + edges.counts p50 152→0.1ms (-99.9%) / p99 755→0.31ms (-99.96%). 누적 perf: manifest -89%, tickets -91% & p99 -99.6%, evidence.intent -97%, evidence.and -99%, evidence.issue -76%, edges.counts -99.9%. PERF-BASELINE doc에 4-column 측정 표.
+직전 회귀 (HEAD `218008a`): 23/23 패키지 PASS. `218008a` bench-mcp 신규 (in-process 측정). MCP tools live: find_symbol 0.07ms / search_text 0.75ms / get_context 7ms / evidence 172ms p50. PERF-BASELINE doc에 MCP tool latency 섹션 추가. 누적 perf 안정.
 
 ---
 
@@ -215,4 +218,5 @@ cd web/viewer-next && npx tsc --noEmit
 - MCP boundary 회귀 안전망: `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta` + `internal/mcp/server_test.go::TestRunRegistersAllEightTools`
 - 검증 체크리스트: `docs/VERIFICATION-CHECKLIST.md` (PR-ready 워크플로 + 5종 누락 패턴 카탈로그)
 - viewer hydration 패턴: `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + 8 마이그레이션 사례)
-- 성능 baseline: `cmd/ckg/bench_server.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server --graph /tmp/ckg-h4 --iterations 50 --concurrency 4`)
+- 성능 baseline: `cmd/ckg/bench_server.go` + `cmd/ckg/bench_mcp.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server` 또는 `ckg bench-mcp --graph /tmp/ckg-h4 --iterations 50 --concurrency 4`)
+- MCP in-process bench: `internal/mcp/bench.go::NewBenchHandlers` (8 tools handler map exposed for cmd/ckg)
