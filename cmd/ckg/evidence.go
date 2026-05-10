@@ -40,6 +40,7 @@ func newEvidenceCmd() *cobra.Command {
 		budget    int
 		offset    int
 		format    string
+		mode      string
 	)
 	cmd := &cobra.Command{
 		Use:   "evidence",
@@ -65,6 +66,9 @@ Output formats:
 			if format != "json" && format != "text" {
 				return fmt.Errorf("--format must be json or text, got %q", format)
 			}
+			if mode != "" && mode != "or" && mode != "and" {
+				return fmt.Errorf("--mode must be or or and, got %q", mode)
+			}
 			db := filepath.Join(graph, "graph.db")
 			store, err := persist.OpenReadOnly(db)
 			if err != nil {
@@ -79,6 +83,7 @@ Output formats:
 				K:            k,
 				BudgetTokens: budget,
 				Offset:       offset,
+				Mode:         mode,
 			})
 			if err != nil {
 				return fmt.Errorf("BuildPack: %w", err)
@@ -105,6 +110,8 @@ Output formats:
 	cmd.Flags().IntVar(&offset, "offset", 0,
 		"skip the first N commits in the recency-sorted result (paging)")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text | json")
+	cmd.Flags().StringVar(&mode, "mode", "",
+		"term-match strategy: or (default) — BM25 any-term-match; and — require every query token in the doc")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
 }

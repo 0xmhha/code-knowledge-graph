@@ -95,6 +95,11 @@ func (c *Cache) BuildPack(store persist.StoreReader, opt Options) (*Pack, error)
 		if opt.IssueID != "" {
 			scored = filterByIssueID(scored, corpus, opt.IssueID)
 		}
+		if opt.Mode == "and" {
+			// AND post-filter: BM25 already ranked any-term-match;
+			// keep only the docs that contain every query token.
+			scored = filterByAllTokensPresent(scored, c.docs, queryTokens)
+		}
 	default:
 		// Neither intent nor issue_id — empty result is honest.
 		return pack, nil
@@ -135,6 +140,57 @@ func filterByIssueID(scored []bm25.ScoredDoc, corpus *hunkCorpus, issueID string
 		}
 	}
 	return out
+}
+
+// filterByAllTokensPresent enforces Mode="and": drop scored hits whose
+// virtual document is missing any query token. Reads token sets from
+// the cached docs slice (built in ensureIndex via hunkDocTokens), so
+// the per-call cost is O(|scored| × |query|) — negligible next to the
+// BM25 ranking that produced `scored`.
+//
+// A doc that BM25 couldn't find at all (rare — would only happen if
+// docs got out of sync with scorer) is treated as missing tokens and
+// dropped, matching the strict semantics of AND.
+func filterByAllTokensPresent(scored []bm25.ScoredDoc, docs []bm25.Document, query []string) []bm25.ScoredDoc {
+	if len(query) == 0 {
+		return scored
+	}
+	docByID := make(map[string][]string, len(docs))
+	for _, d := range docs {
+		docByID[d.ID] = d.Tokens
+	}
+	out := make([]bm25.ScoredDoc, 0, len(scored))
+	for _, s := range scored {
+		toks, ok := docByID[s.ID]
+		if !ok {
+			continue
+		}
+		if containsAll(toks, query) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// containsAll reports whether every token in query appears in doc.
+// Builds a set from doc once (the doc tends to be ≫ |query|), then
+// linear-checks each query term. The doc tokens come from
+// bm25.Tokenize so any "alpha" in the query has been lowercased to
+// match the indexed form already.
+func containsAll(doc, query []string) bool {
+	if len(query) == 0 {
+		return true
+	}
+	set := make(map[string]struct{}, len(doc))
+	for _, t := range doc {
+		set[t] = struct{}{}
+	}
+	for _, q := range query {
+		if _, ok := set[q]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // ensureIndex populates / rebuilds the cached corpus + scorer when

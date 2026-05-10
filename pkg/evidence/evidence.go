@@ -64,6 +64,20 @@ type Options struct {
 	// inflate the per-call payload). Stable across calls because
 	// commit recency tie-breaks on SHA in groupByCommit's sort.
 	Offset int
+	// Mode picks the term-match strategy applied on top of the BM25
+	// ranking:
+	//   - "" or "or" (default): keep BM25's any-term-match behaviour.
+	//     A high-scoring hit only needs to share one query token with
+	//     the candidate doc; useful for fuzzy semantic search.
+	//   - "and": after BM25 ranking, drop hits whose virtual document
+	//     doesn't contain *every* query token. Useful for precise
+	//     agent queries like "all hunks mentioning RetryPolicy AND
+	//     Backoff" where OR's looser fuzzy match would surface noise.
+	//
+	// AND is purely a post-filter: the BM25 ranking still computes
+	// across the full corpus, so the relative scoring among AND-mode
+	// survivors matches what they would have been in OR mode.
+	Mode string
 }
 
 // Pack is the EvidencePack JSON shape (§1.5). Stable field names so the

@@ -318,6 +318,73 @@ func TestBuildPack_IssueIDWithIntent(t *testing.T) {
 	}
 }
 
+// TestBuildPack_AndMode covers the precise-search follow-up: Mode="and"
+// keeps only the hits whose virtual document contains every query
+// token. OR mode (default) ranks hits that share any token, so both
+// hunks score; AND mode drops the one that's only got "panel" without
+// "jitter".
+func TestBuildPack_AndMode(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: panel render", Confidence: types.ConfExtracted},
+			{ID: "c2", Type: types.NodeCommit, QualifiedName: "commit:bbbb",
+				Signature: "1700000200: panel jitter remount", Confidence: types.ConfExtracted},
+			// h1: only "panel" matches; h2: both "panel" + "jitter".
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:Panel.tsx:0",
+				FilePath: "Panel.tsx", Confidence: types.ConfExtracted},
+			{ID: "h2", Type: types.NodeHunk, QualifiedName: "hunk:bbbb:Panel.tsx:0",
+				FilePath: "Panel.tsx", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{
+			"h1": gz("panel mounts and unmounts"),
+			"h2": gz("panel jitter on remount fixed"),
+		},
+	}
+	// OR (default): both hunks pass the BM25 ranking.
+	or, err := BuildPack(store, Options{Intent: "panel jitter"})
+	if err != nil {
+		t.Fatalf("OR: %v", err)
+	}
+	if len(or.Hits) != 2 {
+		t.Errorf("OR mode: want 2 hits (h1+h2 commits), got %d", len(or.Hits))
+	}
+	// AND: only h2's commit survives — h1 lacks "jitter".
+	and, err := BuildPack(store, Options{Intent: "panel jitter", Mode: "and"})
+	if err != nil {
+		t.Fatalf("AND: %v", err)
+	}
+	if len(and.Hits) != 1 {
+		t.Fatalf("AND mode: want 1 hit (only the bbbb commit), got %d", len(and.Hits))
+	}
+	if and.Hits[0].Commit.SHA != "bbbb" {
+		t.Errorf("AND mode: surviving commit = %s, want bbbb", and.Hits[0].Commit.SHA)
+	}
+}
+
+// TestBuildPack_AndMode_NoSurvivors covers the empty-survivor path:
+// AND mode with a query no doc fully contains yields 0 hits, not a
+// fallback to OR. Important contract — the caller asked for precise
+// match and gets honest emptiness rather than fuzzy noise.
+func TestBuildPack_AndMode_NoSurvivors(t *testing.T) {
+	store := &fakeStore{
+		nodes: []types.Node{
+			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:aaaa",
+				Signature: "1700000100: only foo", Confidence: types.ConfExtracted},
+			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:aaaa:foo.go:0",
+				FilePath: "foo.go", Confidence: types.ConfExtracted},
+		},
+		blobs: map[string][]byte{"h1": gz("foo content only")},
+	}
+	pack, err := BuildPack(store, Options{Intent: "foo bar baz", Mode: "and"})
+	if err != nil {
+		t.Fatalf("BuildPack: %v", err)
+	}
+	if len(pack.Hits) != 0 {
+		t.Errorf("AND with no full-match doc should yield 0 hits, got %d", len(pack.Hits))
+	}
+}
+
 // TestBuildPack_OffsetPaging covers the pagination follow-up: with
 // Offset>0 we skip the first N commits in the recency-sorted result.
 // Verifies that page 0 + page 1 together cover the full set with no

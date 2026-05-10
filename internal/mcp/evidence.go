@@ -48,6 +48,8 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, c
 			mcp.Description("Stop emitting commits once cumulative patch text exceeds this many tokens (4 chars/token approx).")),
 		mcp.WithNumber("offset", mcp.DefaultNumber(0),
 			mcp.Description("Skip the first N commits in the recency-sorted result. Used for paging through a large ticket without raising budget_tokens; pair with `k` to walk back through history page by page.")),
+		mcp.WithString("mode",
+			mcp.Description("Term-match strategy applied on top of BM25. 'or' (default) keeps BM25's any-term-match — fuzzy semantic search. 'and' drops hits whose virtual document is missing any query token — useful for precise queries like \"hunks mentioning RetryPolicy AND Backoff\".")),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		opt := evidence.Options{
@@ -57,6 +59,7 @@ func registerEvidenceForIntent(s *server.MCPServer, store persist.StoreReader, c
 			K:            int(req.GetFloat("k", 5)),
 			BudgetTokens: int(req.GetFloat("budget_tokens", 6000)),
 			Offset:       int(req.GetFloat("offset", 0)),
+			Mode:         req.GetString("mode", ""),
 		}
 		pack, err := cache.BuildPack(store, opt)
 		if err != nil {

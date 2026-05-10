@@ -149,6 +149,11 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
+	mode := r.URL.Query().Get("mode")
+	if mode != "" && mode != "or" && mode != "and" {
+		http.Error(w, "mode must be 'or' or 'and'", http.StatusBadRequest)
+		return
+	}
 	pack, err := s.evidenceCache.BuildPack(s.store, evidence.Options{
 		Intent:       intent,
 		IssueID:      issueID,
@@ -156,6 +161,7 @@ func (s *Server) handleEvidence(w http.ResponseWriter, r *http.Request) {
 		K:            k,
 		BudgetTokens: budget,
 		Offset:       offset,
+		Mode:         mode,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
