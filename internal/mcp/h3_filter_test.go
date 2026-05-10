@@ -134,6 +134,120 @@ func TestLLMSafeStoreReader_FilterAt_AllMethods(t *testing.T) {
 	}
 }
 
+// TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta locks in the
+// §11.3 boundary across every read method llmSafeStoreReader overrides.
+// Each method receives the same fake store containing one AMBIGUOUS
+// Hunk + one AMBIGUOUS Commit + one EXTRACTED Function; we assert that
+// the AMBIGUOUS rows never make it past the wrapper while the
+// EXTRACTED row always does.
+//
+// Adding a new read method to llmSafeStoreReader without extending this
+// test should fail compilation (the method becomes part of the
+// boundary contract — if it doesn't filter, the §11.3 promise breaks).
+// The AddTool wiring inside server.go uses the wrapper for every tool
+// (registerFindSymbol/Callers/Callees/GetSubgraph/SearchText/
+// GetContextForTask/ImpactOfChange/EvidenceForIntent), so this single
+// table-driven test exercises the boundary for all 8 tools at once.
+func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
+	fake := &fakeStore{
+		nodes: []types.Node{
+			{ID: "h_amb", Type: types.NodeHunk, Confidence: types.ConfAmbiguous, Name: "ambiguous-hunk"},
+			{ID: "c_amb", Type: types.NodeCommit, Confidence: types.ConfAmbiguous, Name: "ambiguous-commit"},
+			{ID: "fn", Type: types.NodeFunction, Confidence: types.ConfExtracted, Name: "Foo"},
+		},
+		edges: []types.Edge{
+			{Src: "fn", Dst: "h_amb", Type: types.EdgeHasHunk},
+			{Src: "fn", Dst: "c_amb", Type: types.EdgeChangedIn},
+		},
+	}
+	safe := newLLMSafeStoreReader(fake)
+
+	// table-driven: every wrapper method that returns []types.Node must
+	// drop the AMBIGUOUS Hunk + Commit while keeping the EXTRACTED
+	// Function. Each entry is the wrapper invocation; we assert the
+	// returned slice respects the boundary.
+	type call struct {
+		name string
+		run  func() ([]types.Node, error)
+	}
+	calls := []call{
+		{"FindSymbol", func() ([]types.Node, error) { return safe.FindSymbol("Foo", "", false) }},
+		{"NodesByIDs", func() ([]types.Node, error) { return safe.NodesByIDs([]string{"h_amb", "c_amb", "fn"}) }},
+		{"QueryNodes", func() ([]types.Node, error) { return safe.QueryNodes("", 100) }},
+		{"TopNodes", func() ([]types.Node, error) { return safe.TopNodes("pagerank", 100) }},
+		{"Search", func() ([]types.Node, error) { return safe.Search("anything", 100) }},
+		{"SearchFTS", func() ([]types.Node, error) { return safe.SearchFTS("anything", 100) }},
+		{"NodesByFilePath", func() ([]types.Node, error) { return safe.NodesByFilePath("anywhere.go") }},
+		{"AllNodes", func() ([]types.Node, error) { return safe.AllNodes() }},
+	}
+	for _, c := range calls {
+		nodes, err := c.run()
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", c.name, err)
+			continue
+		}
+		ids := map[string]bool{}
+		for _, n := range nodes {
+			ids[n.ID] = true
+		}
+		if ids["h_amb"] {
+			t.Errorf("%s leaked AMBIGUOUS Hunk h_amb", c.name)
+		}
+		if ids["c_amb"] {
+			t.Errorf("%s leaked AMBIGUOUS Commit c_amb", c.name)
+		}
+		if !ids["fn"] {
+			t.Errorf("%s dropped EXTRACTED Function fn (over-filtering)", c.name)
+		}
+	}
+
+	// Methods returning ([]Node, []Edge): boundary must apply to both
+	// the node list AND any edges that touched a dropped node.
+	type subgraphCall struct {
+		name string
+		run  func() ([]types.Node, []types.Edge, error)
+	}
+	subgraphCalls := []subgraphCall{
+		{"NeighborhoodByQname", func() ([]types.Node, []types.Edge, error) {
+			return safe.NeighborhoodByQname("Foo", 1, false)
+		}},
+		{"SubgraphByQname", func() ([]types.Node, []types.Edge, error) {
+			return safe.SubgraphByQname("Foo", 1)
+		}},
+	}
+	for _, c := range subgraphCalls {
+		nodes, edges, err := c.run()
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", c.name, err)
+			continue
+		}
+		for _, n := range nodes {
+			if isAmbiguousMeta(n) {
+				t.Errorf("%s leaked AMBIGUOUS node %s", c.name, n.ID)
+			}
+		}
+		for _, e := range edges {
+			if e.Dst == "h_amb" || e.Dst == "c_amb" || e.Src == "h_amb" || e.Src == "c_amb" {
+				t.Errorf("%s returned edge touching AMBIGUOUS meta: %+v", c.name, e)
+			}
+		}
+	}
+
+	// GetBlob is the defensive backstop — even with a stale ID for an
+	// AMBIGUOUS Hunk, the wrapper refuses the patch text. Both Hunks
+	// and Commits get this protection because each kind has its own
+	// blob in the unreachable-history track.
+	for _, ambID := range []string{"h_amb", "c_amb"} {
+		_, err := safe.GetBlob(ambID)
+		if !errors.Is(err, sql.ErrNoRows) {
+			t.Errorf("GetBlob(%s) should refuse with sql.ErrNoRows, got %v", ambID, err)
+		}
+	}
+	if _, err := safe.GetBlob("fn"); err != nil {
+		t.Errorf("GetBlob(fn) should pass through, got %v", err)
+	}
+}
+
 // --- fake store ---
 
 type fakeStore struct {
@@ -160,8 +274,40 @@ func (f *fakeStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	return out, nil
 }
 
+func (f *fakeStore) QueryNodes(parent string, limit int) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) TopNodes(metric string, limit int, excludeTypes ...string) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
+	return f.nodes, f.edges, nil
+}
+
 func (f *fakeStore) SubgraphByQname(qname string, depth int) ([]types.Node, []types.Edge, error) {
 	return f.nodes, f.edges, nil
+}
+
+func (f *fakeStore) Search(q string, limit int) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) SearchFTS(q string, limit int) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) NodesByFilePath(path string) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) AllNodes() ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) AllEdges() ([]types.Edge, error) {
+	return f.edges, nil
 }
 
 func (f *fakeStore) GetBlob(id string) ([]byte, error) {
