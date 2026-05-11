@@ -114,14 +114,16 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
-// EdgeType enumerates the 36 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 38 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
 // cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation;
 // schema 1.8 appended has_hunk / adjacent for the Hunk-graph H1 stage,
 // then `modifies` for the H2 AST-overlap stage; schema 1.9 W2 appended
-// `http_calls` — caller Function → Endpoint (HTTP client call sites)).
+// `http_calls` — caller Function → Endpoint (HTTP client call sites);
+// schema 1.9 W3b appended `grpc_listens_on` + `grpc_calls` — Go gRPC
+// server/client detection).
 type EdgeType string
 
 const (
@@ -258,9 +260,35 @@ const (
 	// Appended at the end so existing edge-type hash positions / test
 	// snapshots stay stable.
 	EdgeHTTPCalls EdgeType = "http_calls"
+	// Schema 1.9 W3b (CKS G5 Distributed cross-language interop expansion —
+	// Go gRPC server/client detection):
+	//   grpc_listens_on: server impl Method → Endpoint when the file calls
+	//                    `pb.RegisterXXXServer(s, &impl{})`. Each method on
+	//                    the impl receiver type whose name matches an rpc
+	//                    method on the generated XServer interface emits
+	//                    one edge to a `grpc:Service.Method` Endpoint
+	//                    (language="go", sub_kind="grpc").
+	//   grpc_calls:      caller Function/Method → Endpoint when the body
+	//                    calls `<stub>.RpcMethod(ctx, req)` where `stub`
+	//                    was assigned from `pb.NewXXXClient(conn)`. Like
+	//                    http_calls, on miss the matcher synthesises an
+	//                    AMBIGUOUS placeholder Endpoint (language="external")
+	//                    so external-API call sites stay surfaceable.
+	//
+	// Confidence split (schema-1.9-spec §6.5 (C) Both with split confidence):
+	//   - typesInfo available + method matches generated XServer interface
+	//     → EXTRACTED.
+	//   - AST-only (no typesInfo) suffix-matcher on RegisterXXXServer →
+	//     INFERRED.
+	//   - Miss / unresolved stub var type → AMBIGUOUS placeholder.
+	//
+	// Appended at the end so existing edge-type hash positions / test
+	// snapshots stay stable.
+	EdgeGRPCListensOn EdgeType = "grpc_listens_on"
+	EdgeGRPCCalls     EdgeType = "grpc_calls"
 )
 
-// AllEdgeTypes returns all 36 edge types in stable order.
+// AllEdgeTypes returns all 38 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -275,6 +303,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeTimeoutPath, EdgeCancellationPath,
 		EdgeHasHunk, EdgeAdjacent, EdgeModifies,
 		EdgeHTTPCalls,
+		EdgeGRPCListensOn, EdgeGRPCCalls,
 	}
 }
 

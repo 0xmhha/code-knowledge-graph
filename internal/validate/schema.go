@@ -190,6 +190,47 @@ func (v *SchemaValidator) Validate(ctx context.Context, g *graph.Graph, store pe
 					FilePath: e.FilePath,
 				})
 			}
+		case types.EdgeGRPCListensOn:
+			// W3b (schema 1.9): grpc_listens_on points server-impl Method →
+			// Endpoint (`grpc:Service.Method`). Free functions cannot listen
+			// on gRPC RPCs — a gRPC server impl is always a method on a
+			// receiver registered via pb.RegisterXXXServer.
+			if src.Type != types.NodeMethod {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "grpc-listens-on-bad-src",
+					Message:  "grpc_listens_on src is not a Method (got " + string(src.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
+			if dst.Type != types.NodeEndpoint {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "grpc-listens-on-bad-dst",
+					Message:  "grpc_listens_on dst is not an Endpoint (got " + string(dst.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
+		case types.EdgeGRPCCalls:
+			// W3b (schema 1.9): grpc_calls points caller Function/Method →
+			// Endpoint (real grpc Endpoint or AMBIGUOUS placeholder for
+			// unresolved external services). Mirror http_calls shape.
+			if src.Type != types.NodeFunction && src.Type != types.NodeMethod {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "grpc-calls-bad-src",
+					Message:  "grpc_calls src is not a Function/Method (got " + string(src.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
+			if dst.Type != types.NodeEndpoint {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "grpc-calls-bad-dst",
+					Message:  "grpc_calls dst is not an Endpoint (got " + string(dst.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
 		case types.EdgeCalls, types.EdgeInvokes:
 			if !isCallable(src.Type) {
 				report.Issues = append(report.Issues, Issue{

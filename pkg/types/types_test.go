@@ -14,7 +14,7 @@ func TestAllNodeTypes_Count(t *testing.T) {
 }
 
 func TestAllEdgeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllEdgeTypes()), 36; got != want {
+	if got, want := len(types.AllEdgeTypes()), 38; got != want {
 		t.Fatalf("AllEdgeTypes count = %d, want %d", got, want)
 	}
 }
@@ -43,6 +43,7 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 		types.EdgeTimeoutPath, types.EdgeCancellationPath,
 		types.EdgeHasHunk, types.EdgeAdjacent, types.EdgeModifies,
 		types.EdgeHTTPCalls,
+		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 	}
 	have := make(map[types.EdgeType]struct{}, len(types.AllEdgeTypes()))
 	for _, e := range types.AllEdgeTypes() {
@@ -85,8 +86,8 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 
 // TestAllEdgeTypes_Stable mirrors the node-stability check for edges.
 // Lock edges, distributed edges, temporal edges, context-path edges,
-// hunk-graph edges, and the W2 http_calls edge are appended at the end —
-// never interleaved.
+// hunk-graph edges, the W2 http_calls edge, and the W3b grpc_listens_on /
+// grpc_calls edges are appended at the end — never interleaved.
 func TestAllEdgeTypes_Stable(t *testing.T) {
 	want := []types.EdgeType{
 		types.EdgeContains, types.EdgeDefines, types.EdgeCalls, types.EdgeInvokes, types.EdgeUsesType,
@@ -100,6 +101,7 @@ func TestAllEdgeTypes_Stable(t *testing.T) {
 		types.EdgeTimeoutPath, types.EdgeCancellationPath,
 		types.EdgeHasHunk, types.EdgeAdjacent, types.EdgeModifies,
 		types.EdgeHTTPCalls,
+		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 	}
 	if !reflect.DeepEqual(types.AllEdgeTypes(), want) {
 		t.Fatalf("AllEdgeTypes order changed:\n got=%v\nwant=%v", types.AllEdgeTypes(), want)
