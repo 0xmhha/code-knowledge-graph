@@ -69,6 +69,11 @@ func (v *declVisitor) visit() {
 	v.runEmits()
 	v.runHasModifier()
 	v.runInheritance()
+	// W3 (interface dispatch): walks body member_expression nodes that
+	// fit the `IFoo(addr).bar()` shape and queues EdgeInvokes PendingRefs
+	// resolved in Pass 2 (resolveInterfaceDispatch). Confidence is always
+	// ConfAmbiguous per §5.0 Q5 — see dispatch.go preamble.
+	v.runDispatch()
 	v.collectABI()
 }
 

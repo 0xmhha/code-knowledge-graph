@@ -27,6 +27,16 @@ import (
 // `override(A, B)` looks up "Parent.method" directly. Both paths emit
 // EdgeOverrides (child → parent) at ConfExtracted (same-file) or
 // ConfInferred (cross-file).
+//
+// W3 (Sol interface dispatch, 2026-05-11): adds resolution for
+// `IFoo(addr).bar()` PendingRefs (DispatchKind="interface_dispatch").
+// Two-step lookup: (1) TypeName must resolve to a NodeInterface; (2)
+// `TypeName.MethodName` must resolve to a Function declared on that
+// interface. Both hits → emit EdgeInvokes at ConfAmbiguous (§5.0 Q5 —
+// confidence is constant regardless of file boundary; runtime dispatch
+// makes the resolved target an over-approximation). Any miss → drop
+// (V0 strict-purge — keeps the AMBIGUOUS bucket scoped to real
+// interface dispatch only).
 func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, error) {
 	out := &parse.ResolvedGraph{}
 
@@ -134,6 +144,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 					pr, funcByQName, containerNameByID, parents, nodeFile,
 				)
 				out.Edges = append(out.Edges, edges...)
+				continue
+			}
+			// W3 interface-dispatch branch — resolves IFoo(addr).bar()
+			// against the Interface index. Confidence is fixed at
+			// ConfAmbiguous per §5.0 Q5 regardless of cross-file boundary.
+			if pr.DispatchKind == dispatchKindInterfaceDispatch {
+				if edge, ok := resolveInterfaceDispatchRef(
+					pr, byName, funcByQName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
 				continue
 			}
 			var targetType types.NodeType
@@ -416,5 +437,79 @@ func resolveInheritanceRef(
 	return types.Edge{
 		Src: pr.SrcID, Dst: dstID, Type: edgeType,
 		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveInterfaceDispatchRef resolves one W3 PendingRef (an
+// `IFoo(addr).bar(...)` invocation) into a single EdgeInvokes edge.
+//
+// pr.TargetQName carries `TypeName.MethodName` (set in dispatch.go).
+// Two predicates must hold for emission:
+//
+//  1. The leading `TypeName` must be a known NodeInterface in the build —
+//     filters out plain identifier casts (`address(addr).foo`,
+//     `MyContract(addr).foo`) which are not interface dispatch by the
+//     spec definition.
+//  2. The fully-qualified `TypeName.MethodName` must resolve to a
+//     Function node — i.e. the interface declares a `bar(...)` method.
+//     Unknown methods on a known interface (typos, evolving APIs across
+//     branch builds) drop, matching W1/W2's strict-purge policy.
+//
+// Confidence is *constant* ConfAmbiguous (§5.0 Q5). This differs from
+// W1 (file-boundary tagged) and W2 (file-boundary tagged) because the
+// runtime address determines actual dispatch — the resolver can only
+// identify the interface-method declaration, never the live target.
+// The `llmSafeStoreReader` wrapper (hunk-graph §11.3) filters
+// AMBIGUOUS edges from LLM-facing queries automatically.
+//
+// When multiple Function nodes share the same `TypeName.MethodName`
+// qname (rare — would require duplicate interface declarations across
+// files), pick the first candidate. Disambiguation could be sharpened
+// by preferring same-file or the interface's own file, but with no
+// real-world impact in the V0 corpus (validated against
+// testdata/dispatch fixtures).
+func resolveInterfaceDispatchRef(
+	pr parse.PendingRef,
+	byName map[types.NodeType]map[string][]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// Split TargetQName on the first "." into (typeName, methodName).
+	// dispatch.go always emits exactly one "." — no qualified parent
+	// names in V0 (matches W1's known limitation: leading-identifier
+	// only).
+	dot := strings.IndexByte(pr.TargetQName, '.')
+	if dot <= 0 || dot == len(pr.TargetQName)-1 {
+		return types.Edge{}, false
+	}
+	typeName := pr.TargetQName[:dot]
+	// Predicate 1: the leading type must be a NodeInterface. Plain
+	// identifiers (variables, free functions, primitive type tokens
+	// like `address`) miss the index and drop.
+	if ids := byName[types.NodeInterface][typeName]; len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	// Predicate 2: the interface must declare the named method. Look
+	// up by fully-qualified name (`Interface.method`).
+	candidates := funcByQName[pr.TargetQName]
+	if len(candidates) == 0 {
+		return types.Edge{}, false
+	}
+	// Disambiguation: when multiple interfaces share the same name
+	// across files (homonym across fixtures), prefer the candidate in
+	// the source function's file, then any same-file as one of the
+	// interface IDs. Fall back to candidates[0] when neither rule fires.
+	srcFile := nodeFile[pr.SrcID]
+	dstID := candidates[0]
+	for _, fid := range candidates {
+		if nodeFile[fid] == srcFile {
+			dstID = fid
+			break
+		}
+	}
+	// AMBIGUOUS is the *fixed* confidence — see preamble + §5.0 Q5.
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeInvokes,
+		Line: pr.Line, Count: 1, Confidence: types.ConfAmbiguous,
 	}, true
 }
