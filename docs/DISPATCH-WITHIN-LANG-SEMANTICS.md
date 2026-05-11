@@ -31,7 +31,7 @@
 | **W-D** | (cross) | `pkg/types/enums.go` stale comment 정정 | XS (~30 LOC) | P2 (but first) | 코드는 land 됨, commit 만 pending |
 | **W-A** | Go | Cross-function lock propagation (D1) | M (~300-400 LOC) | P1 | Spec 합의 완료, 구현 미시작 |
 | **W-B** | TS | async/await + heritage (extends/implements) | M (~700 LOC) | **P0** | Spec 합의 완료, 구현 미시작 |
-| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1/W2/W3/W6 미시작 |
+| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1 (inheritance / is-clause) ✅ 2026-05-11 land; W2/W3/W6 미시작 |
 
 ### 1.1 참조 문서 경로
 
@@ -107,10 +107,17 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-A (Go lock 전파) | 없음 | ✅ 단독 진행 가능 |
 | W-B W1 (TS heritage) | 없음 (schema bump 후) | ✅ W-A 와 병렬 |
 | W-B W2 (TS async) | W-B W1 완료 권장 | 순차 |
-| W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ |
+| W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | 순차 |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | 순차 |
 | W-C W6 (Sol using For) | W-C W1 완료 | 순차 또는 마지막 |
+
+**Status — 2026-05-11**: W-C W1 (Sol inheritance `is`-clause) ✅ landed.
+`internal/parse/solidity/inheritance.go` + 5 fixture + resolver 확장.
+같은 빌드에서 EdgeExtends 8 / EdgeImplements 5 emit (cross-file 2건은
+INFERRED, 나머지 EXTRACTED). 상세는
+`docs/design/solidity-inheritance-and-interface-dispatch.md` §4.1 Status
+블록 참조. W-C W2 (virtual/override) 진입 unblock.
 
 ### Phase 6 — 측정 + 핸드오프
 - 각 spec 의 `§4 측정` 단계 (self-graph / 실세계 corpus 빌드)

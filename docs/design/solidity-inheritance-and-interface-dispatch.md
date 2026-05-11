@@ -296,6 +296,47 @@ WHERE e.type = 'implements' AND e.dst = (
 
 추정 사이즈: 250~350 LOC + 4 fixture.
 
+**Status — 2026-05-11**: ✅ **LANDED**. 실제 변경:
+- `internal/parse/solidity/inheritance.go` (신규, ~100 LOC) — `is`-clause
+  detector + PendingRef emit. 모든 parent reference 를 Pass 1 에서
+  provisional `EdgeExtends` 로 큐잉하고 Pass 2 에서 reclassify.
+- `internal/parse/solidity/inheritance_test.go` (신규, ~200 LOC) — 3 test
+  function (single-file table-driven, cross-file, interface emit
+  regression). 7 subtest PASS.
+- `internal/parse/solidity/queries.go` — `queryInterface` +
+  `queryInheritance` alt-branch query (contract_declaration /
+  interface_declaration 양쪽 매치).
+- `internal/parse/solidity/abstract_library.go` — `runInterfaceDecl()`
+  추가 (NodeInterface emit, SubKind="interface"). 기존 emit 헬퍼 재사용.
+- `internal/parse/solidity/declarations.go` — `visit()` 에
+  `runInterfaceDecl()` + `runInheritance()` 호출 wire.
+- `internal/parse/solidity/resolve.go` — Pass 2 에 `resolveInheritanceRef`
+  추가. Contract/Interface 양쪽 by-name index 사용, (childType,
+  parentType) 조합으로 edge type 결정. Interface 우선 lookup 으로 solc
+  네임스페이스 의미 모방.
+- `internal/parse/solidity/testdata/inheritance/*.sol` (5 fixture):
+  `simple_extends.sol` / `multiple_inheritance.sol` /
+  `interface_implements.sol` / `abstract_extends.sol` (same-file) +
+  `cross_file_parent.sol` + `cross_file_child.sol` (cross-file pair).
+
+**KPI (build --lang=sol on `testdata/inheritance/`)**:
+- 47 nodes / 54 edges total
+- Contract nodes: 12 plain + 1 abstract; Interface nodes: 7
+- `EdgeExtends` = 8 (7 EXTRACTED, 1 INFERRED = ChildToken→BaseToken)
+- `EdgeImplements` = 5 (4 EXTRACTED, 1 INFERRED = ChildToken→IExternal)
+- Multiple inheritance (Mixed extends BaseContract + implements IFoo +
+  implements IBar) 정상 분리 emit
+- Interface-to-interface (IB extends IA) 는 EdgeExtends (NOT EdgeImplements)
+  — solc 와 동일 분류 의미
+
+**Verification**:
+- `go test ./internal/parse/solidity/... -count 1` 전 PASS (golden 포함)
+- `go test ./... -count 1` 전 PASS
+- `go vet ./...` clean
+- §7.0 Go regression — `--lang=go` baseline diff = 0 (Go-only 빌드는
+  Sol 작업 영향 없음, 8개 edge type 카운트 그대로)
+- Cross-file resolution 정상 (ChildToken→{BaseToken,IExternal} INFERRED)
+
 ### 4.2 W2 — Virtual / Override / Super
 
 1. function definition 시 virtual/override modifier 캡처 → SubKind

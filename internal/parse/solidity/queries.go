@@ -16,6 +16,7 @@ package solidity
 const (
 	queryContract    = `(contract_declaration name: (identifier) @name) @decl`
 	queryLibrary     = `(library_declaration name: (identifier) @name) @decl`
+	queryInterface   = `(interface_declaration name: (identifier) @name) @decl`
 	queryFunction    = `(function_definition name: (identifier) @name) @decl`
 	queryModifier    = `(modifier_definition name: (identifier) @name) @decl`
 	queryEvent       = `(event_definition name: (identifier) @name) @decl`
@@ -27,4 +28,20 @@ const (
 	queryStateVarAll = `(state_variable_declaration) @decl`
 	queryEmit        = `(emit_statement name: (expression (identifier) @event)) @stmt`
 	queryHasModifier = `(modifier_invocation (identifier) @mod) @stmt`
+	// W1 (Sol inheritance) — the `is`-clause exposes each parent as its own
+	// inheritance_specifier sibling under contract_declaration /
+	// interface_declaration (verified via AST dump 2026-05-11). Each
+	// specifier wraps a user_defined_type whose first identifier is the
+	// parent name (qualified names like `pkg.Type` are nested deeper but
+	// the leading identifier still drives resolution).
+	queryInheritance = `[
+		(contract_declaration
+			name: (identifier) @child
+			(inheritance_specifier
+				(user_defined_type (identifier) @parent)))
+		(interface_declaration
+			name: (identifier) @child
+			(inheritance_specifier
+				(user_defined_type (identifier) @parent)))
+	]`
 )

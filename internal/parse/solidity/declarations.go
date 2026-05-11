@@ -44,8 +44,16 @@ func (v *declVisitor) visit() {
 	// graph distinguishes plain / abstract / library variants. See
 	// abstract_library.go and docs/design/solidity-inheritance-and-
 	// interface-dispatch.md §2.1 / §4.4.
+	//
+	// W1: interface_declaration gets its own emit path so it lands as
+	// NodeInterface (Q1: reuse the existing NodeInterface enum, shared
+	// with TS/Go idiom). Inheritance / implementation detection runs
+	// after contract / interface decls have been emitted — the W1
+	// PendingRefs are name-resolved in Pass 2 (resolveInheritance) so
+	// they can see nodes from other files.
 	v.runContractDecl()
 	v.runLibraryDecl()
+	v.runInterfaceDecl()
 	v.runDecl(queryFunction, types.NodeFunction)
 	v.runDecl(queryModifier, types.NodeModifier)
 	v.runDecl(queryEvent, types.NodeEvent)
@@ -54,6 +62,7 @@ func (v *declVisitor) visit() {
 	v.runStateVarDecl()
 	v.runEmits()
 	v.runHasModifier()
+	v.runInheritance()
 	v.collectABI()
 }
 

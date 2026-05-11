@@ -70,6 +70,54 @@ func (v *declVisitor) runContractDecl() {
 	}
 }
 
+// runInterfaceDecl walks every `interface_declaration` match and emits
+// an Interface node (Q1: reuse the existing pkg/types.NodeInterface enum
+// — same idiom as Go/TS, no new node type, no schema bump).
+//
+// Interfaces in Solidity carry function signatures but no bodies; the
+// existing queryFunction matches them globally, and nearestContractName
+// (already extended in W4 to walk interface_declaration) supplies the
+// qualified "IFoo.bar" prefix so interface methods are addressable as
+// PendingRef targets in W3 (interface dispatch — separate dispatch).
+//
+// Per §2.1 SubKind extension table, plain interfaces get
+// SubKind="interface" (mirrors the explicit "contract" / "abstract" /
+// "library" labelling so consumers can filter by SubKind without
+// inferring from NodeType).
+func (v *declVisitor) runInterfaceDecl() {
+	query, qErr := sitter.NewQuery(v.lang, queryInterface)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var nameNode *sitter.Node
+		var declNode *sitter.Node
+		for _, c := range m.Captures {
+			switch names[c.Index] {
+			case "name":
+				n := c.Node
+				nameNode = &n
+			case "decl":
+				n := c.Node
+				declNode = &n
+			}
+		}
+		if nameNode == nil || declNode == nil {
+			continue
+		}
+		v.emitContractLikeNode(*nameNode, *declNode, types.NodeInterface, "interface")
+	}
+}
+
 // runLibraryDecl walks every `library_declaration` match and emits a
 // Contract node with SubKind="library". Per §5.0 Q2: libraries are a
 // syntactic variant of contracts, so we re-use NodeContract instead of
