@@ -2,7 +2,7 @@
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
-기준점: branch `main`, HEAD `9151746` (perf: debounce per-BuildPack manifest fetch).
+기준점: branch `main`, HEAD `a729cd2` (feat: bench-mcp-stdio — JSON-RPC framing latency attribution).
 
 ---
 
@@ -10,6 +10,7 @@
 
 | SHA | 제목 | 핵심 |
 |------|------|------|
+| `a729cd2` | feat(cmd): bench-mcp-stdio — JSON-RPC framing latency attribution | `ckg bench-mcp-stdio` 신규. subprocess + NDJSON JSON-RPC. 발견: stdio framing overhead **0.03~0.44ms** (sub-millisecond). "stdio dominated" 가설 무효 — neither dominates after manifest debounce |
 | `9151746` | perf(evidence): debounce per-BuildPack manifest fetch | bench-mcp의 40x evidence 격차 trace → 원인 발견: `Cache.ensureIndex`가 매 BuildPack에 `store.GetManifest()` 호출. 1s TTL mini-cache로 해결. evidence_for_intent p50: 172→**8.76ms** (-95%) |
 | `218008a` | feat(cmd,mcp): bench-mcp — in-process MCP tool latency baseline | `mcp.NewBenchHandlers` + `cmd/ckg/bench-mcp` 신규. 8 tools 측정. Live: find_symbol 0.07ms / search_text 0.75ms / get_context 7ms / evidence 172ms p50. HTTP vs in-process 40x discrepancy (evidence) flagged for trace |
 | `1a79cbc` | perf(server): cache + pre-warm /api/edges/counts | EXPLAIN QUERY PLAN: 이미 covering index 사용 — 1.98M row scan 자체가 비용. cachedManifestStore에 lazy `EdgeCountsByType` cache + boot goroutine prewarm. edges.counts p50: 152→**0.10ms** (−99.9%) / p99: 755→**0.31ms** (−99.96%). 3 unit |
@@ -172,8 +173,8 @@ H4/H3 cross-panel loop:
 | ✅ | ~~edges.counts cache + pre-warm~~ | 완료 (`1a79cbc`) — cachedManifestStore.EdgeCountsByType + prewarmEdgeCounts. p50 152→0.1ms / p99 755→0.31ms |
 | ✅ | ~~bench-mcp (in-process)~~ | 완료 (`218008a`) — 8 tools p50/p99 측정. evidence HTTP vs in-process 40x 격차 발견 (follow-up trace) |
 | ✅ | ~~evidence 40x 격차 trace~~ | 완료 (`9151746`) — 원인: `ensureIndex`가 매 호출 manifest read. 1s TTL mini-cache. p50 172→8.76ms |
-| 1 | bench-mcp-stdio (JSON-RPC framing) | Mid — stdio framing attribution. graph layer 측정값 안정됨 |
-| 2 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
+| ✅ | ~~bench-mcp-stdio (JSON-RPC framing)~~ | 완료 (`a729cd2`) — stdio overhead 0.03~0.44ms. "stdio dominated" 가설 wrong. perf 후속 종결 |
+| 1 | schema 1.9 design / next-gen surfaces | High — 별도 세션 권장 |
 
 ---
 
@@ -203,7 +204,7 @@ go test ./pkg/evidence/... ./internal/server/... ./internal/mcp/... -count 1
 cd web/viewer-next && npx tsc --noEmit
 ```
 
-직전 회귀 (HEAD `9151746`): 23/23 패키지 PASS. evidence 40x 격차 trace + fix 완료. bench-mcp evidence_for_intent p50 172→**8.76ms** (-95%). HTTP route 4.4ms 와 ~2x 이내로 수렴. evidence.Cache 자체에 1s TTL manifest mini-cache 추가 — bench-mcp / `ckg evidence` CLI / 모든 evidence 소비자 동시 효과. PERF-BASELINE doc에 trace finding 기록.
+직전 회귀 (HEAD `a729cd2`): 23/23 패키지 PASS. `a729cd2` bench-mcp-stdio 신규. stdio framing overhead 0.03~0.44ms 측정. "stdio dominated" 가설 무효 확인. **이번 세션 perf 후속 모두 종결** — 8 후보 모두 ✅. graph layer + stdio 모두 sub-ms 수준.
 
 ---
 
@@ -219,5 +220,5 @@ cd web/viewer-next && npx tsc --noEmit
 - MCP boundary 회귀 안전망: `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta` + `internal/mcp/server_test.go::TestRunRegistersAllEightTools`
 - 검증 체크리스트: `docs/VERIFICATION-CHECKLIST.md` (PR-ready 워크플로 + 5종 누락 패턴 카탈로그)
 - viewer hydration 패턴: `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + 8 마이그레이션 사례)
-- 성능 baseline: `cmd/ckg/bench_server.go` + `cmd/ckg/bench_mcp.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server` 또는 `ckg bench-mcp --graph /tmp/ckg-h4 --iterations 50 --concurrency 4`)
+- 성능 baseline: `cmd/ckg/bench_server.go` + `cmd/ckg/bench_mcp.go` + `cmd/ckg/bench_mcp_stdio.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server` / `ckg bench-mcp` / `ckg bench-mcp-stdio --graph /tmp/ckg-h4 --iterations 50`)
 - MCP in-process bench: `internal/mcp/bench.go::NewBenchHandlers` (8 tools handler map exposed for cmd/ckg)
