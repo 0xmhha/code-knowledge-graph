@@ -244,6 +244,93 @@ func TestDistributed_RPCCalls_NetRPC(t *testing.T) {
 	}
 }
 
+// TestDistributed_HTTP_ClientCalls asserts the W2 client detector emits
+// placeholder Endpoints + http_calls edges for Go HTTP client call sites
+// in testdata/distributed/http_clients.go. The placeholders use
+// Language="external" so the downstream link pass (internal/link/http_match.go)
+// can locate them for cascade resolution.
+func TestDistributed_HTTP_ClientCalls(t *testing.T) {
+	root := "testdata/distributed"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	placeholders := map[string]types.Node{}
+	for _, n := range g.Nodes {
+		if n.Type != types.NodeEndpoint || n.Language != "external" {
+			continue
+		}
+		if n.SubKind != "http" {
+			t.Errorf("placeholder %q sub_kind=%q, want http", n.QualifiedName, n.SubKind)
+		}
+		if n.Confidence != types.ConfAmbiguous {
+			t.Errorf("placeholder %q confidence=%q, want AMBIGUOUS",
+				n.QualifiedName, n.Confidence)
+		}
+		placeholders[n.QualifiedName] = n
+	}
+	wantPlaceholders := []string{
+		"http:GET /users",
+		"http:POST /admin",
+		"http:HEAD /health",
+		"http:PUT /method-a",
+		"http:GET /external/endpoint",
+	}
+	for _, want := range wantPlaceholders {
+		if _, ok := placeholders[want]; !ok {
+			t.Errorf("missing client placeholder %q (saw %v)",
+				want, mapKeysNode(placeholders))
+		}
+	}
+	httpCalls := edgesByType(g.Edges, types.EdgeHTTPCalls)
+	// Fixture has 7 detectable client call sites (DynamicURLSkipped is
+	// intentionally dropped by V0).
+	if len(httpCalls) < 6 {
+		t.Errorf("http_calls edge count: got %d, want ≥ 6", len(httpCalls))
+	}
+	// Each http_calls edge must point at a placeholder Endpoint.
+	placeholderIDs := map[string]bool{}
+	for _, n := range placeholders {
+		placeholderIDs[n.ID] = true
+	}
+	for _, e := range httpCalls {
+		if !placeholderIDs[e.Dst] {
+			t.Errorf("http_calls edge dst=%q not a placeholder Endpoint", e.Dst)
+		}
+	}
+}
+
+// TestDistributed_HTTP_ClientCalls_DynamicSkipped pins down that a variable
+// URL produces no http_calls edge (V0 string-literal restriction).
+func TestDistributed_HTTP_ClientCalls_DynamicSkipped(t *testing.T) {
+	root := "testdata/distributed"
+	g, err := gop.LoadAndResolve(root)
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	// No client placeholder Endpoint should target a route that came from
+	// the DynamicURLSkipped function — V0 detector drops variable URLs.
+	// Indirectly verified: no placeholder with qname containing "target"
+	// (the variable name) should exist.
+	for _, n := range g.Nodes {
+		if n.Type != types.NodeEndpoint {
+			continue
+		}
+		if n.Language == "external" && strings.Contains(n.QualifiedName, "target") {
+			t.Errorf("dynamic URL leaked into placeholder Endpoint: %q",
+				n.QualifiedName)
+		}
+	}
+}
+
+func mapKeysNode(m map[string]types.Node) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 // TestDistributed_NoRegression confirms E3's pass doesn't disturb the B1
 // concurrency emission or the existing call-graph wiring on the same
 // fixture (the testdata is HTTP/RPC-heavy but should still report 0 Mutex
