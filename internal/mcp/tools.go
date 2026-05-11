@@ -18,7 +18,13 @@ import (
 // registerFindSymbol resolves an exact-or-suffix qname / name to nodes.
 func registerFindSymbol(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_symbol",
-		mcp.WithDescription("Find symbols by name or qualified name."),
+		// Description rewritten 2026-05-11 (VERIFICATION_REPORT §3.1 B2):
+		// the prior phrasing "Find symbols by name or qualified name" implied
+		// either could be passed with exact=true, but the underlying
+		// FindSymbol always matches qualified_name — bare names work ONLY
+		// with exact=false (suffix match). Spelling that contract out so
+		// LLM agents don't false-empty on `{"name":"NewBlockChain","exact":true}`.
+		mcp.WithDescription("Find symbols by qualified_name. With exact=true (default), the input must match qualified_name exactly (e.g. \"core.NewBlockChain\"). With exact=false, the input is treated as a suffix — a bare symbol name (\"NewBlockChain\") matches every qualified_name ending in that segment. Use exact=false when you only know the symbol's short name."),
 		mcp.WithString("name", mcp.Required()),
 		mcp.WithString("language"),
 		mcp.WithBoolean("exact", mcp.DefaultBool(true)),

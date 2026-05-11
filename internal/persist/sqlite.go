@@ -648,13 +648,15 @@ func rewriteFTSQuery(q string) string {
 		return q
 	}
 	if len(fields) == 1 {
-		if len(fields[0]) >= 2 {
-			return fields[0] + "*"
+		t := trimFTSToken(fields[0])
+		if len(t) >= 2 {
+			return t + "*"
 		}
 		return q
 	}
 	parts := make([]string, 0, len(fields))
 	for _, t := range fields {
+		t = trimFTSToken(t)
 		if len(t) < 3 {
 			continue
 		}
@@ -668,6 +670,22 @@ func rewriteFTSQuery(q string) string {
 		return q
 	}
 	return strings.Join(parts, " OR ")
+}
+
+// trimFTSToken strips leading/trailing characters that would confuse FTS5's
+// prefix syntax. Keeps alnum + `_`; everything else is treated as boundary
+// punctuation. Reported 2026-05-11 in go-stablenet VERIFICATION_REPORT
+// §3.1 B1: natural-language task_description ending in `.` would produce
+// tokens like "validated." → after `+ "*"` → "validated.*", which FTS5
+// rejects with `syntax error near "."`. Stripping trailing punctuation
+// (the dominant trigger in prose) restores the well-formed `validated*`
+// prefix while leaving identifier-internal characters alone — callers
+// passing intentional sigils (`*`, `"`, `(`, `)`, `:`) still bypass
+// rewriteFTSQuery entirely via the early-return at line 643.
+func trimFTSToken(t string) string {
+	return strings.TrimFunc(t, func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_')
+	})
 }
 
 // SearchSubstr is a non-FTS fallback for queries the FTS5 unicode61
