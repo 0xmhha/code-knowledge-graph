@@ -11,8 +11,9 @@
 > ✅ landed 2026-05-11 (commit `f7a8515`). Schema 1.10 slot for
 > `EdgeOverrides` reserved 2026-05-11 (appended to `pkg/types/enums.go`;
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
-> W1 / W2 / W3 / W6 detector implementation is **not yet started** —
-> Phase 5 entry point.
+> W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 (using For) — spec §4.6 본문 +
+> 결정 항목 (Q9-1/2/3) 작성 완료 2026-05-12; 사용자 입력 후 구현 진입
+> 예정.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -502,6 +503,163 @@ sqlite3 /tmp/ckg-sol-oz/graph.db "
   GROUP BY type;
 "
 ```
+
+### 4.6 W6 — `using For` (library extension)
+
+W6 는 Q9 (§5.0) 결정으로 신설된 단계. `using SafeMath for uint;` 같은
+library extension 을 인식해 `a.add(b)` 가 `SafeMath.add(a, b)` 로
+dispatch 되는 의미를 그래프에 반영. 실세계 Sol 코드의 30% 이상이
+OpenZeppelin SafeMath / Address / EnumerableSet 류를 쓰므로 이걸 처리
+못하면 method call 의 상당 비율이 unresolved 됨 (§3.5 한계 그대로).
+
+W4 가 이미 library 자체를 `NodeContract + SubKind="library"` 로 emit
+하므로 W6 는 *binding + dispatch* 만 추가하면 됨 (library declaration
+emit 은 재발명 안 함).
+
+#### 4.6.1 목표 동작
+
+세 가지 using directive 형태를 모두 처리:
+
+```solidity
+using SafeMath for uint256;        // 특정 타입 binding (가장 흔함)
+using SafeMath for *;              // 모든 타입 (전역 binding)
+using {SafeMath.add, SafeMath.sub} for uint256;  // Solidity 0.8.13+ free function form
+```
+
+기대 동작:
+
+```solidity
+library SafeMath {
+  function add(uint a, uint b) internal pure returns (uint) { ... }
+}
+
+contract Vault {
+  using SafeMath for uint256;
+
+  function deposit(uint256 amount) external {
+    uint256 total = balance.add(amount);  // ← 본 spec W6 의 핵심 target
+    // graph: Vault.deposit  --calls-->  SafeMath.add  (EXTRACTED)
+    //        (receiver 'balance' 타입이 uint256 → SafeMath.add binding)
+  }
+}
+```
+
+비교 — 기존 (W6 land 전):
+
+```
+Vault.deposit  --[no edge]-->  ???  (.add 미해결, drop)
+```
+
+#### 4.6.2 검출 알고리즘
+
+3-stage:
+
+1. **Using directive parsing** — tree-sitter `using_directive` 노드를
+   queries.go 의 새 query 로 캡처. 세 변형 모두 `library_name` +
+   `type_name` (또는 `*`) 페어로 정규화.
+
+2. **Per-contract binding map** — Resolve 초기에 (contractID,
+   typeName) → libraryID 매핑 구축. `for *` 는 type 자리에 sentinel
+   `*` 토큰 저장 후 lookup 시 fallback.
+
+3. **Method call resolution** — body walk 에서 method call
+   `<receiver>.<method>(...)` 발견 시:
+   - receiver 의 타입 추론 (V0 한계 §4.6.6 참조 — 단순 식별자만)
+   - (현재 contractID, receiverType) 으로 binding map lookup
+   - hit → `library.method` 가 funcByQName 에 있는지 확인 → EdgeCalls
+     emit (Src=enclosing function, Dst=library function, EXTRACTED)
+   - miss → 기존 V0 동작 그대로 (drop)
+
+알고리즘 의도: library extension binding 은 *contract-scoped*. 같은
+type 이 다른 contract 에서 다른 library 에 bind 될 수 있음. binding map
+은 contractID 별로 분리.
+
+#### 4.6.3 결정 필요 — Q9 후속
+
+W6 의 graph 표현 방법 두 갈래:
+
+| 옵션 | 그래프 표현 | schema | LOC | trade-off |
+|------|-----------|--------|-----|-----------|
+| **(b) 별도 EdgeUsesFor** | (Contract→Library) `uses_for` + dispatch 는 `calls` | EdgeUsesFor 추가 (1.10 append 또는 1.11) | +50 | 명시적 binding 가시화. 다만 schema bump 필요 + viewer 새 edge 처리 |
+| **(c) EdgeCalls 재사용** | dispatch 는 기존 `calls`. binding 은 detector 내부 (graph 미표시) | 변경 없음 | +200 | 사용자 query "이 library 가 어디 binding 됐나" 어려움. graph clean. schema 안정 |
+
+**권장**: **(c)**. 이유:
+- schema 1.10 이미 NodeAwaitPoint / EdgeAwaits / EdgeOverrides 로
+  bump 됐고, W6 만 위해 추가 EdgeType 도입은 cost > benefit.
+- using directive 자체는 *parsing artifact* 라 그래프에서 별도 노출
+  안 해도 됨. 실용적 가치는 dispatch resolution (어디서 SafeMath.add
+  호출되나) — 이건 EdgeCalls 로 충분.
+- "binding 어디?" query 는 SQL 으로 contractID + library 의
+  has-method via funcByQName 으로 재구성 가능 (별도 패널 필요시).
+- viewer 통합 비용 0 (기존 EdgeCalls 색상/그룹 그대로 사용).
+
+**결정 요청 항목**:
+- Q9-1: 권장안 (c) 채택 vs (b) 채택?
+- Q9-2: receiver type 추론의 V0 한계 — 단순 식별자만 (state variable
+  / parameter) vs return value chaining (`foo().bar.add(1)`) 도?
+  권장: 식별자만 (V0 단순화, chaining 은 별도 spec).
+- Q9-3: `using for *` (wildcard binding) 의 fallback 우선순위 —
+  특정 타입 binding 우선, 없으면 `*` fallback. 권장: 위 순서대로.
+
+#### 4.6.4 구현 sketch (권장안 (c) 가정)
+
+```
+internal/parse/solidity/
+  using_for.go         (신규 ~150 LOC)
+    - runUsingFor()                      ← visit() 에서 호출
+    - parse using_directive subtree
+    - emit PendingRef (DispatchKind="using_for_bind", SrcID=contractID,
+      TargetQName="library|type")        ← Pass 2 가 binding map 구축
+  queries.go
+    - queryUsingFor 추가
+
+  resolve.go
+    - Pass 2 분기: dispatchKindUsingForBind → bindingMap 채움
+    - bindingMap: map[string]map[string]string  // contractID → type → libraryName
+    - statements.go 또는 body walk 에서 method call 처리 시 bindingMap
+      참조 → 기존 calls PendingRef 의 TargetQName 을 "Library.method"
+      로 재작성 후 resolve
+
+internal/parse/solidity/testdata/using_for/
+  specific_binding.sol      (1 type binding)
+  wildcard_binding.sol      (`for *` form)
+  multi_library.sol         (한 contract 에 여러 binding)
+  cross_contract.sol        (binding 이 contract 별로 분리됨 검증)
+  no_binding_negative.sol   (using 없이 method 호출 → drop 유지)
+
+internal/parse/solidity/using_for_test.go
+  - TestUsingFor_SpecificBinding
+  - TestUsingFor_WildcardFallback
+  - TestUsingFor_MultiLibrary
+  - TestUsingFor_ContractScoped       ← 같은 type 이 다른 contract 에서
+                                        다른 library binding 임을 검증
+  - TestUsingFor_NegativeNoBinding    ← drop 검증 (false positive 가드)
+```
+
+추정 사이즈: 200~250 LOC + 5 fixture + 5 test. resolve.go Pass 2 에
+한 분기 추가 + body walk receiver-type 추론 헬퍼.
+
+#### 4.6.5 §3.5 갱신 예정
+
+본 W6 land 시 §3.5 noise control 의 "Library call ... V0 에서는 단순
+calls (resolve 실패 → drop) ... 별도 spec" 항목 → "W6 로 처리됨" 으로
+갱신.
+
+#### 4.6.6 V0 한계
+
+- **Receiver type 추론**: state variable 의 declared type, function
+  parameter type 만 V0 지원. return value chaining (`a.b().c.add(1)`)
+  은 type info 없이 정적 추론 불가 → drop. solc 가 type 검사하므로
+  실제 빌드 시 명확하지만 tree-sitter 만으로는 어려움.
+- **Free function using (`using {f1, f2} for T`)**: Solidity 0.8.13+
+  문법. V0 에서는 단순 `using Lib for T` 만 처리, free function 형식은
+  drop 또는 follow-up.
+- **`using for *` 와 stdlib types (uint, address)**: 매우 광범위
+  binding. 같은 method name 이 여러 library 에 있으면 ambiguous → drop
+  (V0 strict, AMBIGUOUS 도입 안 함).
+- **Inherited using directive**: Solidity 0.8.13+ `internal using` 은
+  base contract 에서 child 로 상속됨. V0 에서는 contract 자체의
+  binding 만 집계, 상속 binding 무시 → drop. follow-up.
 
 ---
 
