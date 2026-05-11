@@ -273,7 +273,41 @@ V0 limitations (W3b):
   matching between the two surfaces is left to the same future linker.
 - Streaming, bidirectional, and per-message recursion are out-of-scope.
 
-TS gRPC-web client (W3c) is deferred to a separate dispatch.
+**W3c status (2026-05-11 land)**: TS gRPC-web / Connect-web client
+detection shipped. `internal/parse/typescript/grpc_client.go` runs as the
+final sub-pass of `declVisitor.visit()` (after `runHTTPClients`). Two
+patterns:
+
+- `new <Svc>Client(host)` then `client.method(req, cb)` (grpc-web
+  Improbable Engineering / Google grpc-web). The stub variable is
+  scoped per enclosing function ID — `client` in fn A and `client` in
+  fn B bound to different services don't collide.
+- `createPromiseClient(Svc, transport)` / `createClient(Svc, transport)`
+  (Buf Connect-web / Connect-ES) then `await client.method(req)`. Same
+  per-function scope key.
+- `grpc.unary(Service.Method, { request, host, onEnd })` — service +
+  method extracted from the first argument's MemberExpression.
+
+Each match emits an `grpc_calls` edge from the enclosing Function to an
+AMBIGUOUS placeholder Endpoint (language="external", sub_kind="grpc",
+qname `grpc:Service.Method`). Per §6.5 (c), every TS gRPC edge is
+INFERRED — tree-sitter parses don't carry typesInfo, so the EXTRACTED
+lane is reserved for the Go-side W3b. Same-file placeholder Endpoints
+dedup by qname; cross-file / cross-language linking stays in placeholder
+form until a future linker pass.
+
+V0 limitations (W3c, additive to W3b):
+
+- Method-name camelCase ↔ proto PascalCase mismatch is observed (TS
+  emits `grpc:UserService.getUser` while proto declares `GetUser`). The
+  future linker pass that rewires placeholders to real Endpoints will
+  normalise. Method-name comparison should be case-insensitive on first
+  letter at least.
+- Nested-scope stub shadowing within one function (a `client` inside an
+  `if` block re-bound) retains the outermost binding — V0 doesn't model
+  block scopes. Documented; rare in real codebases.
+- Streaming method types (server-streaming, client-streaming, bidi) emit
+  identically to unary. Stream semantics are not surfaced in V0.
 
 ### 3.5 W4: Message queue pub/sub
 
@@ -694,7 +728,16 @@ graph에 공존할 때 client `fetch('/api/users')` (method=GET default) 또는
    INFERRED, unresolved targets AMBIGUOUS placeholders. Cross-file
    server↔client resolution to real Endpoint deferred to a future
    linker pass.
-10. W3c (TS gRPC-web client) — separate dispatch, follows W3b.
+10. ~~**W3c TS gRPC-web client dispatch**~~ → **land 2026-05-11** —
+    `internal/parse/typescript/grpc_client.go` + fixtures in
+    `testdata/distributed/grpc/{grpcweb,connectweb}_client.ts`. No new
+    edge types (reuses `grpc_calls` from W3b). Per §6.5 (c) all TS gRPC
+    edges are INFERRED (typesInfo unavailable in tree-sitter). Per
+    §6.3 (B) unmatched clients keep AMBIGUOUS placeholder Endpoints
+    (language="external"). Per-function stub-name scoping handles the
+    common case of `client` re-bound across functions. §7.0 Go
+    regression guard PASS (synthetic baseline diff = 0). W3 series
+    complete.
 11. W4 (message queue) 진행은 W3 완료 후 사용자 추가 결정 (§6.4~§6.6)
     따라 분기.
 

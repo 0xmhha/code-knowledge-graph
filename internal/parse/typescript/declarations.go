@@ -30,6 +30,19 @@ type declVisitor struct {
 	// link pass (internal/link/http_match.go) resolves them (W2,
 	// schema 1.9 §6.3 (B), §6.9).
 	httpClientPlaceholderIDs map[string]string
+	// grpcClientStubsTS maps a local stub variable name to the gRPC
+	// service name it was bound to via `new XxxClient(...)` /
+	// `createPromiseClient(Svc, ...)` / `createClient(Svc, ...)`.
+	// Populated by collectGRPCClientStubs (W3c, schema 1.9 §3.4).
+	// Flat per-file scope — V0 doesn't model nested-scope shadowing.
+	grpcClientStubsTS map[string]string
+	// grpcClientPlaceholderIDsTS maps a gRPC-client target qname
+	// (`grpc:Service.Method`) to the AMBIGUOUS placeholder Endpoint
+	// emitted in grpc_client.go. Distinct ID space (Language="external")
+	// — same shape as the Go-side grpcClientPlaceholderIDs so a future
+	// cross-language linker pass can reuse the same suffix matcher
+	// (schema 1.9 §3.4, §6.5).
+	grpcClientPlaceholderIDsTS map[string]string
 }
 
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
@@ -72,6 +85,13 @@ func (v *declVisitor) visit() {
 	// (internal/link/http_match.go) reconciles placeholders against real
 	// server-side Endpoints from the same monorepo.
 	v.runHTTPClients()
+	// W3c (schema 1.9 §3.4): emit gRPC-web / Connect-web client
+	// placeholder Endpoints + grpc_calls edges. AST-only — all edges
+	// are INFERRED per §6.5 (c) because tree-sitter parses don't carry
+	// typesInfo. Placeholder Endpoints share the qname shape
+	// `grpc:Service.Method` with W3a/W3b so a future linker pass can
+	// rewire by suffix match.
+	v.runGRPCClients()
 }
 
 func (v *declVisitor) runQuery(q string, nt types.NodeType) {
