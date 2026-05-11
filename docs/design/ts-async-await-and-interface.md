@@ -17,6 +17,11 @@
 > + EdgeAwaits emit at every `await_expression` inside a Function/Method interval
 > (top-level await dropped per V0 scope). Schema 1.10 slots NodeAwaitPoint / EdgeAwaits
 > now produce data.
+> **W3 viewer style** ✅ **LANDED 2026-05-11** — `web/viewer-next/src/lib/edges.ts`
+> 에 `awaits` / `overrides` 등록 + GRAPH_GROUPS / DEFAULT_EDGE_TYPES 갱신.
+> **W4 measurement** ✅ **LANDED 2026-05-12** — self-graph (TS 82 files)
+> 측정: 245 AwaitPoint, 245 EdgeAwaits, 48 async Function, 118 async Method,
+> 6 EdgeExtends, 7 EdgeImplements. pair invariant 검증 OK. 상세 §4.4 LANDED 블록.
 > **Out of scope**: cross-language async (Go ↔ TS HTTP — that's schema 1.9
 > W series), JSX render graph, React-specific hooks dependency graph,
 > TypeScript decorators (already partially captured via `queryDecorator`).
@@ -325,6 +330,22 @@ track-c §2.2 의 Go `instantiates` 와 평행하게 TS 도 같은 엣지 emit.
 - `async_call`: G3, solid
 - `implements` / `extends`: 이미 G2 등록됨 (track-c §2.4 참조)
 
+#### LANDED 2026-05-11 (W-B W3)
+
+- `web/viewer-next/src/lib/edges.ts` 에 5종 신규 edge style 등록 (W-B
+  뿐 아니라 schema 1.9 W series + W-C 도 함께 — viewer 통합 일괄 처리).
+- W-B 관련 추가분:
+  - `awaits` (G3 Execution, light blue dashed) — 등록 + default ON
+  - `overrides` (G2 Semantic, deep blue solid) — W-C W2 와 공유, 등록 + default ON
+- `GRAPH_GROUPS` 갱신: G2 +overrides, G3 +awaits.
+- `DEFAULT_EDGE_TYPES` 갱신: 두 edge 모두 boot view ON (dash 라 시각적
+  비용 낮고, 가시화 가치 ↑).
+- Self-check 주석: 34→39 non-hidden edges (G1=3 / G2=13 / G3=5 / G4=6 /
+  G5=7 / G6=5).
+- Typecheck PASS, self-check 일관성 (EDGE_STYLE keys ⇄ GRAPH_GROUPS
+  합집합 일치).
+- Commit `7af9ce4`.
+
 ### 4.4 W4 — measurement + handoff
 
 self-graph 빌드 후 카운트 변화 측정:
@@ -334,6 +355,47 @@ self-graph 빌드 후 카운트 변화 측정:
 
 go-stablenet 은 TS 가 없으므로 별도 fixture (e.g. TanStack Query, Next.js
 샘플) 빌드 권장.
+
+#### LANDED 2026-05-12 (W-B W4)
+
+Self-graph TS subset (CKG 본 레포의 `web/viewer-next/**` + `internal/parse/
+typescript/testdata/**` 등 82 TS files) 기준 측정:
+
+| 항목 | Before (Phase 4 land 직후) | After (W-B W1/W2 land 후) | 변화 |
+|------|---------------------------|----------------------------|------|
+| TS Class | 14 | 14 | — |
+| TS Interface | 55 | 55 | — |
+| TS Function | 2,214 | 2,214 | — |
+| TS Method | 4,565 | 4,565 | — |
+| async Function (SubKind="async") | 0 | **48** | +48 (2.2% of Function) |
+| async Method (SubKind="async") | 0 | **118** | +118 (2.6% of Method) |
+| **NodeAwaitPoint** | 0 | **245** | +245 |
+| **EdgeAwaits** | 0 | **245** | +245 (pair invariant ✅) |
+| **EdgeExtends (TS)** | 0 | **6** | +6 |
+| **EdgeImplements (TS)** | 0 | **7** | +7 |
+
+밀도 보조 지표:
+- AwaitPoint / async callable = 245 / (48+118) = **1.48 awaits per async
+  callable** — 단일 async function 이 평균 1.5 회 suspension 함을 의미.
+- Heritage edge / Class+Interface = 13 / 69 = **18.8%** — 클래스/인터페이스
+  중 약 1/5 이 inheritance chain 에 참여 (React component 가 추상화 평면화
+  되어 있는 영향으로 추정).
+
+W series (schema 1.9, 본 측정에 함께 잡힘):
+- listens_on (TS HTTP 서버): 22
+- http_calls (TS HTTP 클라이언트, W2): 9
+- grpc_calls (TS gRPC-web client, W3c): 7
+
+go-stablenet TS fixture 별도 빌드 (TanStack Query / Next.js 샘플)는 보류 —
+self-graph 측정으로 schema 1.10 slot 활성화 + pair invariant 검증 만족.
+향후 KPI 변화 추적용으로 별도 fixture 빌드는 W5+ 후속에서 진행.
+
+빌드 명령 (재현):
+```bash
+go run ./cmd/ckg build --src . --out /tmp/ckg-wb-w4 --no-cache --lang ts
+sqlite3 /tmp/ckg-wb-w4/graph.db \
+  "SELECT type, COUNT(*) FROM nodes WHERE language='ts' GROUP BY type ORDER BY 2 DESC"
+```
 
 ---
 

@@ -107,6 +107,8 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-A (Go lock 전파) | 없음 | ✅ **LANDED 2026-05-11** |
 | W-B W1 (TS heritage) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-B W2 (TS async) | W-B W1 완료 권장 | ✅ **LANDED 2026-05-11** |
+| W-B W3 (viewer style) | W-B W2 완료 권장 | ✅ **LANDED 2026-05-11** |
+| W-B W4 (measurement) | W-B W1+W2 완료 | ✅ **LANDED 2026-05-12** |
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
@@ -153,6 +155,52 @@ predicate 의 음성 contract 명시. W1/W2/W4 회귀 0
 (testdata/inheritance: extends 8 / implements 5 / overrides 1 보존,
 testdata/overrides: extends 6 / overrides 6 보존). §7.0 Go regression
 `--lang=go` diff = 0. W-C W6 (using For) 진입 unblock.
+
+W-B W1 (TS heritage `extends`/`implements`) ✅ landed.
+`internal/parse/typescript/heritage.go` (284 LOC) + 6 fixture +
+`heritage_test.go` 4 test (FixtureMatrix / CrossFile / UnresolvedDropped /
+EdgeDirection). Class/Interface 전용 인덱스 `heritageByName` 로 동명
+Function/Method 부모-후보 오염 차단. same-file=ConfExtracted, cross-file=
+ConfInferred, 미해결=drop. self-graph 측정: EdgeExtends 6 / EdgeImplements
+7 emit. §7.0 Go regression diff=0. Commit `6f78427`.
+
+W-B W2 (TS async/await — NodeAwaitPoint + EdgeAwaits) ✅ landed.
+`internal/parse/typescript/async.go` (~180 LOC) + 5 fixture +
+`async_test.go` 3 test (FixtureMatrix / SchemaInvariants / TopLevelDropped).
+`declarations.go::runQuery` 가 NodeFunction/NodeMethod 의 name capture
+parent chain 을 거슬러 `async` 키워드 검출 → SubKind="async" 부여.
+`runAsync()` 가 await_expression 위치를 가장 가까운 Function/Method
+interval 에 anchor (top-level await drop, V0). §5.0 Q1/Q2/Q3/Q5 결정 반영
+(EdgeAsyncCall skip — AwaitPoint.StartByte 와 CallSite 의 위치 overlap 으로
+future join). self-graph 측정: 245 AwaitPoint / 245 EdgeAwaits (pair
+invariant ✅), 48 async Function / 118 async Method. §7.0 Go regression
+diff=0. Commit `0866ef0`.
+
+W-B W3 (viewer edge style + grouping) ✅ landed.
+`web/viewer-next/src/lib/edges.ts` 에 W-B/W-C/W series 5종 (awaits,
+overrides, http_calls, grpc_listens_on, grpc_calls) edge style + GRAPH_GROUPS
+배치 + DEFAULT_EDGE_TYPES whitelist 갱신. Self-check 주석: 34→39
+non-hidden edges (G1=3 / G2=13 / G3=5 / G4=6 / G5=7 / G6=5).
+`npm run typecheck` PASS. Commit `7af9ce4`.
+
+W-B W4 (measurement + handoff) ✅ landed 2026-05-12.
+self-graph (CKG 본 레포 TS subset, 82 files) 빌드 후 KPI 측정:
+
+| 항목 | Before | After | 변화 |
+|------|--------|-------|------|
+| async Function | 0 | 48 | +48 (2.2% of 2,214) |
+| async Method | 0 | 118 | +118 (2.6% of 4,565) |
+| NodeAwaitPoint | 0 | 245 | +245 |
+| EdgeAwaits | 0 | 245 | +245 (pair invariant ✅) |
+| EdgeExtends (TS) | 0 | 6 | +6 |
+| EdgeImplements (TS) | 0 | 7 | +7 |
+
+밀도: AwaitPoint / async callable = 245 / 166 = 1.48. Heritage edge /
+(Class+Interface) = 13 / 69 = 18.8%. 보조 W series: listens_on 22 /
+http_calls 9 / grpc_calls 7. 상세는
+`docs/design/ts-async-await-and-interface.md` §4.4 LANDED 블록 참조.
+go-stablenet TS fixture 빌드는 W5+ 후속으로 보류 (self-graph 측정으로
+schema 1.10 slot 활성화 + pair invariant 검증 만족).
 
 ### Phase 6 — 측정 + 핸드오프
 - 각 spec 의 `§4 측정` 단계 (self-graph / 실세계 corpus 빌드)
