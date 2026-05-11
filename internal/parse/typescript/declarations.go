@@ -89,6 +89,15 @@ func (v *declVisitor) visit() {
 	// lookup. Replaces the earlier P3 runBodyCalls — see
 	// internal/parse/typescript/statements.go for the full schema.
 	v.runBodyStatements()
+	// W-B W2 (schema 1.10 slots, 2026-05-11): emit NodeAwaitPoint +
+	// EdgeAwaits for every await_expression that lives inside a
+	// Function/Method interval. Runs after runBodyStatements so any
+	// CallSite/IfStmt/LoopStmt that might co-locate with an await is
+	// already in v.nodes (ordering doesn't affect the await emit itself
+	// — it anchors on intervals from v.nodes — but keeping the
+	// statement-level passes contiguous makes the order easier to read).
+	// See async.go for the full shape spec.
+	v.runAsync()
 	// W1 (schema 1.9): emit HTTP server Endpoint nodes + listens_on edges
 	// for Express / Koa / Fastify / Hono / Next.js App Router patterns.
 	// Runs after the declaration queries so Function/Method nodes are
@@ -140,12 +149,28 @@ func (v *declVisitor) runQuery(q string, nt types.NodeType) {
 					qname = className + "." + ident
 				}
 			}
+			// W-B W2 (schema 1.10): tag async function-likes via SubKind so
+			// graph consumers can distinguish suspension-bearing callables
+			// without reaching back into the body walk. Limited to
+			// NodeFunction / NodeMethod — class/interface/etc. have no
+			// async modifier. Arrow functions don't appear here (they
+			// aren't captured by queryFunction); their await points still
+			// get emitted in runAsync, but the SubKind on the arrow's
+			// surrounding declaration is unaffected by the inner arrow's
+			// asyncness — same idiom as Go's mutex SubKind on a wrapping
+			// struct vs the field that holds the lock.
+			subKind := ""
+			if nt == types.NodeFunction || nt == types.NodeMethod {
+				if isAsyncFunctionLike(&node) {
+					subKind = "async"
+				}
+			}
 			id := makeID(qname, "ts", startByte)
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: ident, QualifiedName: qname,
 				FilePath: v.rel, StartLine: startLine, EndLine: endLine,
 				StartByte: startByte, EndByte: endByte,
-				Language: "ts", Confidence: types.ConfExtracted,
+				Language: "ts", Confidence: types.ConfExtracted, SubKind: subKind,
 			})
 			v.edges = append(v.edges, types.Edge{
 				Src: v.fileID, Dst: id, Type: types.EdgeDefines,

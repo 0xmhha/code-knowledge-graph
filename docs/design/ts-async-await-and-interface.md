@@ -11,7 +11,12 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > **W1 heritage** ✅ **LANDED 2026-05-11** — `internal/parse/typescript/heritage.go`
 > + 5 fixtures + 4 test functions covering same-file / cross-file / unresolved
-> drop / edge-direction. W2 async/await 미착수 — Phase 5 next entry point.
+> drop / edge-direction.
+> **W2 async/await** ✅ **LANDED 2026-05-11** — `internal/parse/typescript/async.go`
+> + 5 fixtures + 3 test functions. Function/Method SubKind="async", NodeAwaitPoint
+> + EdgeAwaits emit at every `await_expression` inside a Function/Method interval
+> (top-level await dropped per V0 scope). Schema 1.10 slots NodeAwaitPoint / EdgeAwaits
+> now produce data.
 > **Out of scope**: cross-language async (Go ↔ TS HTTP — that's schema 1.9
 > W series), JSX render graph, React-specific hooks dependency graph,
 > TypeScript decorators (already partially captured via `queryDecorator`).
@@ -272,6 +277,46 @@ track-c §2.2 의 Go `instantiates` 와 평행하게 TS 도 같은 엣지 emit.
 
 추정 사이즈: 300~400 LOC + 5 fixture. enums.go 변경으로 prompt cache 영향
 — `prompt-cache.md` 의 append-only 원칙 준수 (insert 금지).
+
+#### LANDED 2026-05-11 (W-B W2)
+
+- 구현: `internal/parse/typescript/async.go` (~180 LOC). Hand-rolled
+  walker over the parse tree — visits every `await_expression` and
+  anchors it on the smallest enclosing Function/Method interval via
+  `findEnclosingFn` (reused from body_walk.go).
+- Wire: `declarations.go::visit()` 에 `v.runAsync()` 호출 추가
+  (`runBodyStatements()` 직후).
+- async modifier 감지: `declarations.go::runQuery` 내부에 분기 추가 —
+  NodeFunction / NodeMethod 의 name capture 의 parent chain 을 거슬러
+  function_declaration / method_definition / function_expression /
+  arrow_function 의 직계 children 에 `async` 키워드가 있는지 검사.
+  결과를 `SubKind="async"` 로 emit (default `SubKind=""`).
+- §5.0 결정 사항 구현:
+  - Q1: NodeAwaitPoint 신규 NodeType ✅ (enums.go slot 34 이미 reserved)
+  - Q2: Function/Method SubKind="async" ✅
+  - Q3: EdgeAsyncCall skip — EdgeAwaits 한 방향만 ✅
+  - Q5: 선언 합치기 V0 — 각 await 별개 AwaitPoint ✅
+- AwaitPoint 모양:
+  - QualifiedName: `<parentQname>#AwaitPoint@<startByte>` (statements.go
+    convention 과 동일)
+  - Name: `"await <callee>"` 추출 가능 시, 아니면 `"await"`. callee
+    shapes: bare identifier / `obj.foo()` / `foo()` / `member.prop`
+  - Confidence: 항상 EXTRACTED (위치 직접 관찰)
+- V0 한계 (track-c §7 carry-over):
+  - 모듈 최상위 `await` → 인접 enclosing function 없음 → drop
+  - 화살표 함수 body 내 await → 외곽 named function 에 anchor (intervals
+    walker 가 arrow function 을 별도 interval 로 분리하지 않음)
+  - `for await ... of` 는 LoopStmt 만 emit, 암묵적 per-iteration await
+    별도 AwaitPoint 생성 안 함
+- Fixtures: `testdata/async/{async_function, async_method, multi_awaits,
+  non_async, await_in_branch}.ts` (5 files).
+- 테스트: `async_test.go` 3 함수:
+  - `TestTSAsync_FixtureMatrix` — 5 fixture × (await-by-parent, async
+    SubKind set, pair invariant) 검증
+  - `TestTSAsync_AwaitPointSchemaInvariants` — line/byte 범위, language,
+    confidence, qname 마커, name prefix 검증
+  - `TestTSAsync_TopLevelAwaitDropped` — 모듈 최상위 await drop 검증
+- 회귀: 25/25 PASS, vet clean. Go 빌드 영향 0 (TS 전용 변경).
 
 ### 4.3 W3 — viewer + edge style
 
