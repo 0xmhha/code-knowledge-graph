@@ -198,8 +198,18 @@ edge types 새로 4~6개 추가.
     specific으로, 다른 method는 wildcard로 fall-through.
 - 매칭 fail 시: placeholder Endpoint with `AMBIGUOUS` confidence
   (§6.3 (B) 결정). monorepo 외부 API audit 가능하게 surface 유지.
-- Path matching은 suffix-match 또는 exact-match (§6 W2 dispatch 시점에
-  최종 결정 필요).
+- **Path matching은 exact-match** — W2 dispatch 시점 결정 (2026-05-11):
+  - 옵션 (a) exact-match — 사용자가 monorepo path convention을 신뢰할 수
+    있다고 가정. false-negative 가능 (e.g. multi-segment prefix mismatch).
+  - 옵션 (b) suffix-match — 다른 서비스의 동일 path suffix (e.g. 두 microservice가
+    모두 `/api/users` 노출) 가 false-positive로 cross-link. graph noise 큼.
+  - 옵션 (c) hybrid (exact 우선 + suffix fallback) — 직관 위반 + audit 시
+    원인 추적이 어려움.
+  - **결정 (a) exact-match.** 이유: V0에서는 false-positive보다 false-negative가
+    훨씬 안전. monorepo 외부 API는 §6.3 placeholder로 surface되므로 사용자가
+    누락된 매칭을 발견할 수 있음. suffix-match는 graph 의미를 의심하게 만들고
+    PageRank를 왜곡. 추후 단계에서 suffix fallback이 필요해지면 같은 placeholder
+    위에 incrementally 추가 가능.
 
 **의존성**: W1 + W1.5가 Endpoint를 정확한 `(method, path)` qname으로
 emit해야 cascade lookup이 의미 있음. backend가 다른 monorepo / 외부
@@ -272,13 +282,14 @@ API일 경우 placeholder Endpoint 노드 필요.
 | Edge | Stage | Src → Dst | Notes |
 |------|-------|----------|-------|
 | `ts_listens_on` | W1 | TS Func → Endpoint | Go `listens_on`의 TS counterpart |
-| `http_calls` | W2 | Func (any lang) → Endpoint | suffix-match resolution |
+| `http_calls` | W2 | Func (any lang) → Endpoint | exact-match resolution (§3.3 결정) |
 | `grpc_listens_on` | W3 | Method → Endpoint | gRPC service method |
 | `grpc_calls` | W3 | Func → Endpoint | gRPC client call |
 | `publishes_to` | W4 | Func → Topic | pub/sub producer |
 | `consumes_from` | W4 | Func → Topic | pub/sub consumer |
 
-총 35 → **41** edge types.
+총 35 → **41** edge types. W2 land 시점 (2026-05-11) 35 → **36** (http_calls 1개
+append; ts_listens_on은 §6.2 (B) 결정으로 listens_on 재사용 — 미신설).
 
 ### 4.3 SchemaVersion bump
 
@@ -601,9 +612,31 @@ graph에 공존할 때 client `fetch('/api/users')` (method=GET default) 또는
    guard 추가.
 5. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
    G5 카운트 증가 확인.
-6. **W2 dispatch** — W1 + W1.5 base 위에 client matching. §6.9 cascade
-   규칙 따라 specific verb 우선 lookup + wildcard fallback. §7.0 Go
-   regression guard 우선 검증.
-7. W3 / W4 진행은 W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
+6. ~~**W2 dispatch**~~ → **backend land 2026-05-11** — W1 + W1.5 base 위에
+   client matching. §6.9 cascade 규칙 따라 specific verb 우선 lookup +
+   wildcard fallback. §3.3 exact-match path matching 결정 land. §7.0 Go
+   regression guard 통과 (synthetic baseline: 8 edge types, 동일 count;
+   `http_calls`는 새 edge type append).
+   - `pkg/types/enums.go`: `EdgeHTTPCalls` 추가 (35 → 36).
+   - `internal/parse/golang/distributed.go`: HTTP client detection
+     (`http.Get/Post/PostForm/Head`, `(*http.Client).Get/Post/...`,
+     `http.NewRequest{,WithContext}`) — string-literal URL만, dynamic 스킵.
+   - `internal/parse/typescript/http_client.go` (신규): `fetch`,
+     `axios.METHOD`, `axios({method, url})`, `axios.request`, `useSWR`,
+     `useQuery({url})` 검출 + axios* 식별자 W1 false-positive 가드.
+   - `internal/link/http_match.go` (신규): §6.9 2-stage cascade matching
+     + AMBIGUOUS placeholder retention + 매칭 시 placeholder drop.
+   - `internal/buildpipe/pipeline.go::emitDerivedPasses`: `MatchHTTPClients`
+     pass wire — xlang 이후, temporal 이전.
+   - testdata: `internal/parse/golang/testdata/distributed/http_clients.go`
+     + `internal/parse/typescript/testdata/distributed/clients.ts` (TS→TS
+     자체 매칭으로 4 permutation 중 2개 cover; TS→Go·Go→TS는 link unit
+     test로 cover).
+   - **Viewer 통합은 별도 step에서 land** — 새 edge type은 자동 G5에
+     합산되어 viewer 코드 변경 없음 (`internal/server/web_assets/`
+     edge-counts 자동 반영).
+7. **W2 viewer 통합** — 별도 step. 사용자 audit UX (`EdgeTypeFilters`,
+   "External APIs" 패널 가능) 미land.
+8. W3 / W4 진행은 W2 viewer 통합 후 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
 
 **End of design draft.**

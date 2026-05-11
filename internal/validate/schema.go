@@ -170,6 +170,26 @@ func (v *SchemaValidator) Validate(ctx context.Context, g *graph.Graph, store pe
 					FilePath: e.FilePath,
 				})
 			}
+		case types.EdgeHTTPCalls:
+			// W2 (schema 1.9): http_calls always points Func/Method →
+			// Endpoint (real or AMBIGUOUS placeholder). The matcher passes
+			// through with the same shape so the validation is unchanged.
+			if src.Type != types.NodeFunction && src.Type != types.NodeMethod {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "http-calls-bad-src",
+					Message:  "http_calls src is not a Function/Method (got " + string(src.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
+			if dst.Type != types.NodeEndpoint {
+				report.Issues = append(report.Issues, Issue{
+					Severity: SeverityWarning, Code: "http-calls-bad-dst",
+					Message:  "http_calls dst is not an Endpoint (got " + string(dst.Type) + ")",
+					EdgeKey:  edgeKey(string(e.Type), e.Src, e.Dst, e.Line),
+					FilePath: e.FilePath,
+				})
+			}
 		case types.EdgeCalls, types.EdgeInvokes:
 			if !isCallable(src.Type) {
 				report.Issues = append(report.Issues, Issue{

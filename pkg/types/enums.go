@@ -108,13 +108,14 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
-// EdgeType enumerates the 35 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 36 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
 // cancellation_path for CKS G3 dogfood P2 — Go context.With* propagation;
 // schema 1.8 appended has_hunk / adjacent for the Hunk-graph H1 stage,
-// then `modifies` for the H2 AST-overlap stage).
+// then `modifies` for the H2 AST-overlap stage; schema 1.9 W2 appended
+// `http_calls` — caller Function → Endpoint (HTTP client call sites)).
 type EdgeType string
 
 const (
@@ -218,9 +219,29 @@ const (
 	//             See docs/design/hunk-graph.md §4.
 	// Appended at the end so existing hash positions stay stable.
 	EdgeModifies EdgeType = "modifies"
+	// Schema 1.9 W2 (CKS G5 Distributed cross-language interop expansion):
+	//   http_calls: caller Function/Method → Endpoint when the function
+	//               invokes an HTTP client (TS: fetch / axios / useSWR /
+	//               useQuery; Go: http.Get / http.Post / http.NewRequest /
+	//               (*http.Client).Get/Post/Do).
+	//
+	// Target resolution uses 2-stage cascade (schema-1.9-spec §6.9):
+	//   1. Specific-verb lookup: `http:METHOD /path` exact match.
+	//   2. Wildcard fallback: `http:* /path` exact match.
+	// On miss the matcher synthesises an AMBIGUOUS placeholder Endpoint
+	// (schema-1.9-spec §6.3 (B)) so the call site stays surfaceable for
+	// monorepo external-API audits. Path matching is EXACT (schema-1.9-spec
+	// §3.3 decision: V0 chooses exact-match over suffix-match because
+	// false-positives across distinct services with overlapping path
+	// suffixes are far worse than the false-negatives exact-match incurs
+	// in well-curated monorepos).
+	//
+	// Appended at the end so existing edge-type hash positions / test
+	// snapshots stay stable.
+	EdgeHTTPCalls EdgeType = "http_calls"
 )
 
-// AllEdgeTypes returns all 35 edge types in stable order.
+// AllEdgeTypes returns all 36 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
@@ -234,6 +255,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeChangedIn, EdgeBlame,
 		EdgeTimeoutPath, EdgeCancellationPath,
 		EdgeHasHunk, EdgeAdjacent, EdgeModifies,
+		EdgeHTTPCalls,
 	}
 }
 
