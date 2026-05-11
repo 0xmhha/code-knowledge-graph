@@ -248,9 +248,14 @@ func TestParseFile_EdgeCases(t *testing.T) {
 	if !strings.HasPrefix(counters.Signature, "map<") {
 		t.Errorf("counters signature=%q, want map<...>", counters.Signature)
 	}
-	// optional field still emitted.
-	if hasNode(r.Nodes, types.NodeField, "proto:edge.RunRequest.trace_id") == nil {
+	// optional field still emitted + label preserved in signature
+	// (W3a Important #3 — reviewer caught that `repeated string tags=2`
+	// and plain `string tags=2` were producing identical signatures).
+	traceID := hasNode(r.Nodes, types.NodeField, "proto:edge.RunRequest.trace_id")
+	if traceID == nil {
 		t.Errorf("missing optional Field trace_id")
+	} else if !strings.HasPrefix(traceID.Signature, "optional ") {
+		t.Errorf("trace_id signature=%q, want \"optional ...\" prefix", traceID.Signature)
 	}
 	// Reserved should NOT produce Field nodes (it's a directive, not a field).
 	if hasNode(r.Nodes, types.NodeField, "proto:edge.RunRequest.deprecated_field") != nil {
@@ -263,6 +268,56 @@ func TestExtensions(t *testing.T) {
 	exts := p.Extensions()
 	if len(exts) != 1 || exts[0] != ".proto" {
 		t.Errorf("Extensions()=%v, want [.proto]", exts)
+	}
+}
+
+// TestProto2GroupSkipped — reviewer (W3a Important #2) caught that the
+// proto2 `group` keyword had no dedicated branch in the message body
+// parse loop, leaving `group Body = N { ... }` to leak its trailing
+// `{ body }` tokens into the enclosing message and produce noisy
+// garbage Field nodes. The fix adds a `case "group":` that skips the
+// header + balance-skips the body. proto3 dropped the group syntax;
+// this branch is purely proto2 protection.
+func TestProto2GroupSkipped(t *testing.T) {
+	src := []byte(`syntax = "proto2";
+
+package legacy;
+
+message Outer {
+  required string name = 1;
+  optional group Body = 2 {
+    optional string text = 1;
+    optional int32 score = 2;
+  }
+  optional int32 trailing = 3;
+}
+`)
+	p := New(".")
+	r, err := p.ParseFile("legacy.proto", src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// Outer message emitted.
+	if hasNode(r.Nodes, types.NodeMessageType, "proto:legacy.Outer") == nil {
+		t.Fatalf("missing Outer; nodes=%s", debugNodes(r.Nodes))
+	}
+	// `name` (before group) and `trailing` (after group) must survive —
+	// proof that group skip didn't desync the body parser.
+	if hasNode(r.Nodes, types.NodeField, "proto:legacy.Outer.name") == nil {
+		t.Errorf("missing Field name (before group)")
+	}
+	if hasNode(r.Nodes, types.NodeField, "proto:legacy.Outer.trailing") == nil {
+		t.Errorf("missing Field trailing (after group) — group skip likely desynced body parse")
+	}
+	// Group body fields must NOT leak into Outer.
+	for _, leak := range []string{
+		"proto:legacy.Outer.text",
+		"proto:legacy.Outer.score",
+		"proto:legacy.Outer.Body",
+	} {
+		if hasNode(r.Nodes, types.NodeField, leak) != nil {
+			t.Errorf("group body leaked into Outer: %s", leak)
+		}
 	}
 }
 

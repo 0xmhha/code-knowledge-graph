@@ -236,6 +236,18 @@ func (v *visitor) parseMessage(parentQual string) {
 			case "map":
 				v.parseMapField(msgID, dotted)
 				continue
+			case "group":
+				// proto2 `group MyGroup = N { ... }` — best-effort skip.
+				// Reviewer (W3a Important #2) caught that without this branch
+				// parseField consumes the `group` token as a type ref, the
+				// group name as the field name, then bails on the missing `;`
+				// — but the trailing `{ body }` then leaks into the enclosing
+				// message body parse, producing noisy garbage fields. proto3
+				// dropped group so this is purely proto2 protection.
+				// skipBlock() handles: consume the `group` keyword, advance
+				// to the opening `{`, then balance-skip the body.
+				v.skipBlock()
+				continue
 			}
 		}
 		if t.Kind == tkPunct && t.Value == ";" {
@@ -257,9 +269,26 @@ func (v *visitor) parseMessage(parentQual string) {
 func (v *visitor) parseField(msgID, parentQual string) bool {
 	start := v.pos
 	// Optional label.
+	// Preserve label so downstream consumers (viewer / link / W3b grpc
+	// matching) can distinguish `repeated string tags = 2` from a plain
+	// scalar — reviewer (W3a Important #3) caught that the prior
+	// implementation discarded the label, leaving signatures identical for
+	// `string tags = 2` vs `repeated string tags = 2`.
+	label := ""
 	if t := v.peek(); t.Kind == tkIdent &&
 		(t.Value == "repeated" || t.Value == "optional" || t.Value == "required") {
+		label = t.Value
 		v.consume()
+	}
+	// proto2 group inside a field position — `[label] group Name = N { body }`.
+	// The message body switch already handles label-less `group`, but proto2
+	// commonly attaches a label, so we re-check here after label consume to
+	// avoid the body tokens leaking into the enclosing message parse.
+	// Reviewer (W3a Important #2) caught the desync on labelled groups.
+	// skipBlock() consumes the `group` keyword + balance-skips the body.
+	if t := v.peek(); t.Kind == tkIdent && t.Value == "group" {
+		v.skipBlock()
+		return true
 	}
 	// Type ref.
 	typeRef := v.parseTypeRef()
@@ -298,8 +327,11 @@ func (v *visitor) parseField(msgID, parentQual string) bool {
 	qname := "proto:" + v.qualify(parentQual+"."+nameTok.Value)
 	id := parse.MakeID(qname, languageTag, nameTok.StartByte)
 	sig := typeRef
+	if label != "" {
+		sig = label + " " + typeRef
+	}
 	if numberStr != "" {
-		sig = typeRef + " " + numberStr
+		sig = sig + " " + numberStr
 	}
 	v.nodes = append(v.nodes, types.Node{
 		ID: id, Type: types.NodeField,
