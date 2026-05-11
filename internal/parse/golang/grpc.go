@@ -222,19 +222,21 @@ func (v *declVisitor) collectGRPCImplMethods(arg ast.Expr) ([]grpcImplMethod, ty
 	if recvName == "" {
 		return nil, ""
 	}
-	suffix := "." + recvName + "."
-	prefix := v.pkgName + suffix
+	prefix := v.pkgName + "." + recvName + "."
 	var out []grpcImplMethod
 	for i := range v.nodes {
 		n := &v.nodes[i]
 		if n.Type != types.NodeMethod {
 			continue
 		}
-		// Match by qname suffix `.<recv>.<method>` so we don't accidentally
-		// match a method on a same-named type from a different package
-		// loaded into v.nodes (unlikely within one file but worth guarding).
-		if !strings.HasPrefix(n.QualifiedName, prefix) &&
-			!strings.Contains(n.QualifiedName, suffix) {
+		// W3b review Minor #1 (2026-05-11): match strictly by qname prefix
+		// `<pkg>.<recv>.<method>`. Earlier code had a `strings.Contains`
+		// fallback for the same suffix that was effectively dead within a
+		// single-file declVisitor (pkgName is single-valued per visitor) but
+		// would over-match if v.nodes ever spanned packages — a cross-file
+		// integration risk we don't want lurking. Prefix-only is both
+		// correct and defensive.
+		if !strings.HasPrefix(n.QualifiedName, prefix) {
 			continue
 		}
 		// Pull bare method name = trailing segment after the last dot.
