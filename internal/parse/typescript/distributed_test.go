@@ -177,6 +177,53 @@ func TestTSDistributed_NextjsRouteFromPath(t *testing.T) {
 	}
 }
 
+// TestTSDistributed_NamedFunctionExpression_Resolves — reviewer caught that
+// named function expressions (`async function fooHandler(...) {...}`) used
+// inline as a handler argument were collapsing to "<anonymous>" instead of
+// resolving to their declared name. After the fix, only true anonymous arrow
+// functions should produce "<anonymous>" Function nodes — every named
+// function (whether top-level declaration or named function expression)
+// must keep its identity for search / pagerank / impact downstream.
+//
+// The bound is "≤ arrow-handler count in the fixture": named function
+// expressions must resolve (so they never contribute), but anonymous arrow
+// handlers still synthesise. Identifier handlers (`app.get('/x', getUsers)`)
+// resolve via declaration-pass IDs so they don't synthesise either.
+func TestTSDistributed_NamedFunctionExpression_Resolves(t *testing.T) {
+	cases := []struct {
+		file             string
+		wantAnonymousMax int // arrow-function handler count only
+	}{
+		{"testdata/distributed/express.ts", 2},                       // 2 arrow handlers (DELETE /admin/:id, PATCH dyn)
+		{"testdata/distributed/fastify.ts", 0},                       // no arrow handlers
+		{"testdata/distributed/hono.ts", 1},                          // 1 arrow handler (POST /api/hello)
+		{"testdata/distributed/nextjs/app/api/users/route.ts", 0},    // file-based routing — no inline handlers
+	}
+	p := tsp.New(".")
+	for _, c := range cases {
+		t.Run(filepath.Base(c.file), func(t *testing.T) {
+			src, err := os.ReadFile(c.file)
+			if err != nil {
+				t.Fatalf("read %s: %v", c.file, err)
+			}
+			r, err := p.ParseFile(c.file, src)
+			if err != nil {
+				t.Fatalf("ParseFile: %v", err)
+			}
+			anon := 0
+			for _, n := range r.Nodes {
+				if n.Type == types.NodeFunction && n.Name == "<anonymous>" {
+					anon++
+				}
+			}
+			if anon > c.wantAnonymousMax {
+				t.Errorf("%s: %d <anonymous> Function nodes, want ≤ %d (arrow handlers only)",
+					filepath.Base(c.file), anon, c.wantAnonymousMax)
+			}
+		})
+	}
+}
+
 // helpers
 
 func mapKeys(m map[string]types.Node) []string {

@@ -366,18 +366,48 @@ func (v *declVisitor) emitListensOnFromHandlerArg(arg *sitter.Node, endpointID s
 			FilePath: v.rel,
 		})
 	case "arrow_function", "function_expression":
-		// Synthesise a Function node for the inline handler so listens_on
-		// has a concrete src. Name is "<anonymous>" + start line for
-		// approximate identification; Confidence is downgraded to INFERRED
-		// (inline anonymous handlers carry less signal than named ones).
+		// function_expression can be named (`function fooHandler(...) {...}`)
+		// — tree-sitter exposes that via ChildByFieldName("name"). Lookup
+		// order:
+		//   1) Try declaration-pass's top-level Function table — if the name
+		//      matches a top-level decl, hang listens_on off that ID directly.
+		//   2) Otherwise synthesise a Function node using the ACTUAL name
+		//      (the declaration-pass doesn't capture inline named function
+		//      expressions, so a previous fix that only resolved-or-fell-through
+		//      left them as "<anonymous>" — broken identity for search /
+		//      pagerank / impact). Inline-synthesised nodes carry INFERRED
+		//      Confidence to mark "name known, no top-level decl".
+		// Arrow functions skip the name lookup entirely (no name field).
+		handlerName := ""
+		if arg.Kind() == "function_expression" {
+			if nameNode := arg.ChildByFieldName("name"); nameNode != nil {
+				handlerName = nameNode.Utf8Text(v.src)
+				if handlerID := v.findFunctionByName(handlerName); handlerID != "" {
+					v.edges = append(v.edges, types.Edge{
+						Src: handlerID, Dst: endpointID, Type: types.EdgeListensOn,
+						Line: line, Count: 1, Confidence: conf,
+						FilePath: v.rel,
+					})
+					return
+				}
+			}
+		}
+		// Synthesise a Function node so listens_on has a concrete src.
+		// Name = actual identifier when known (inline named function
+		// expression), else "<anonymous>". Truly anonymous arrow handlers
+		// keep the "<anonymous>" sentinel for downstream filtering.
+		synthName := handlerName
+		if synthName == "" {
+			synthName = "<anonymous>"
+		}
 		startByte := int(arg.StartByte())
 		endByte := int(arg.EndByte())
 		startLine := int(arg.StartPosition().Row) + 1
 		endLine := int(arg.EndPosition().Row) + 1
-		qname := "<anonymous>@" + v.rel + ":" + itoa(startLine)
+		qname := synthName + "@" + v.rel + ":" + itoa(startLine)
 		id := makeID(qname, "ts", startByte)
 		v.nodes = append(v.nodes, types.Node{
-			ID: id, Type: types.NodeFunction, Name: "<anonymous>",
+			ID: id, Type: types.NodeFunction, Name: synthName,
 			QualifiedName: qname,
 			FilePath:      v.rel, StartLine: startLine, EndLine: endLine,
 			StartByte: startByte, EndByte: endByte,
