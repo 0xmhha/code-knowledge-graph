@@ -123,8 +123,12 @@ func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname strin
 		return
 	}
 	pattern, ok := stringLiteral(call.Args[0])
-	if !ok {
-		return // dynamic route — skip (V0)
+	if !ok || pattern == "" {
+		return // dynamic or empty route — skip (V0).
+		// Empty: Go 1.22 stdlib panics on `http.HandleFunc("", h)` at runtime,
+		// but a defensive guard here avoids emitting a malformed Endpoint
+		// qname like `http:* ` (trailing space, empty path) if such code
+		// somehow compiles.
 	}
 	// Best-effort confirm receiver is *http.ServeMux or http.Handler-like.
 	// Without typesInfo or when receiver is `http`, accept INFERRED.

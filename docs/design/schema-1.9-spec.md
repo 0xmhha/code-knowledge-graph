@@ -130,27 +130,49 @@ edge types 새로 4~6개 추가.
 | **W3** | gRPC client/server (Go + TS) + `.proto` schema | `grpc_listens_on` / `grpc_calls` | (MessageType 재사용) | L (~16h, parser 신규) | 없음 (병렬 가능) |
 | **W4** | Message queue (Kafka/NATS/RabbitMQ) pub/sub | `publishes_to` / `consumes_from` | `Topic` (신규) | M (~8h) | 없음 |
 
-### 3.2 W1: TS HTTP server endpoint detection
+### 3.2 W1: HTTP server endpoint detection (TS + Go W1.5 follow-up)
+
+본 stage는 두 phase로 land됨:
+- **W1** (commit `da502f4` + `ee1a17b`): TS 측 detection.
+- **W1.5** (commit `c21ea61`): Go HTTP endpoint qname을 `(method, path)`
+  쌍으로 끌어올려 TS와 cross-language 매칭 가능하게 정합.
 
 **대상 patterns** (V0 — dominant만):
 
-- **Express/Koa**: `app.get('/users', handler)` / `router.post(...)`
-- **Fastify**: `fastify.route({ method, url, handler })` / `fastify.get(...)`
-- **Hono**: `app.get('/api', c => ...)` (fluent API)
-- **Next.js App Router**: `app/api/users/route.ts`의 `export async function GET/POST/...`
-- **Next.js Pages Router**: `pages/api/*.ts`의 default export
+- **TS Express/Koa**: `app.get('/users', handler)` / `router.post(...)`
+- **TS Fastify**: `fastify.route({ method, url, handler })` / `fastify.get(...)`
+- **TS Hono**: `app.get('/api', c => ...)` (fluent API)
+- **TS Next.js App Router**: `app/api/users/route.ts`의 `export async function GET/POST/...`
+- **TS Next.js Pages Router**: `pages/api/*.ts`의 default export
+- **Go stdlib (W1.5)**: `http.HandleFunc(pattern, h)` / `http.Handle(pattern, h)`
+  / `(*ServeMux).HandleFunc(pattern, h)` / `(*ServeMux).Handle(pattern, h)`.
+  Pattern은 두 형태:
+  - **legacy** (`"/users"`): method 미지정 → `METHOD="*"` (net/http가 모든
+    verb를 단일 핸들러로 dispatch하는 의미를 그대로 표현).
+  - **Go 1.22+ method-prefixed** (`"GET /users"`, `"DELETE /admin/{id}"`):
+    `splitGo122Pattern` 헬퍼가 leading uppercase token + 단일 공백 + `/`
+    prefix를 검출해 (method, route) 분리. 매치 실패는 conservative
+    fallback으로 `("*", original)` — false positive로 route를 망가뜨릴
+    위험 회피. Edge case 락-인은 `distributed_internal_test.go::TestSplitGo122Pattern`
+    (13개 sub-test).
 
 **emit 규칙**:
 
-- Endpoint 노드 (재사용): `qualified_name = 'http:METHOD route'`,
-  e.g. `http:GET /api/users`. Method 누락 시 `http:* /api/users`.
-- `ts_listens_on` edge (신규): TS handler Function/Method → Endpoint.
-  Confidence: 문자열 리터럴 route + 인식된 framework 패턴 → EXTRACTED.
-  computed route / unknown framework → INFERRED.
-- 같은 route 중복 emit 시 dedup (qname 기반).
+- Endpoint 노드 (재사용): `qualified_name = 'http:METHOD /route'`,
+  e.g. `http:GET /api/users`. Method 누락 또는 wildcard → `http:* /api/users`.
+- `listens_on` edge (§6.2 (B) 결정 — 새 edge type 없이 기존 재사용):
+  handler Function/Method → Endpoint. Endpoint 노드의 `language` 필드로
+  emit 언어 식별 (`go` / `ts`). Confidence: 문자열 리터럴 route +
+  인식된 framework 패턴 → EXTRACTED. computed route / unknown framework
+  → INFERRED.
+- Dedup: 같은 `(method, route)` 쌍은 한 Endpoint 노드. 같은 path의
+  GET / POST / DELETE는 각각 다른 노드.
 
-**검증 fixture**: `internal/parse/typescript/testdata/distributed/`
-신규. Express/Fastify/Hono/Next.js 4종 minimal handler.
+**검증 fixture**:
+- TS: `internal/parse/typescript/testdata/distributed/` (Express / Fastify
+  / Hono / Next.js 4종).
+- Go: `internal/parse/golang/testdata/distributed/http_handlers.go`
+  (legacy + Go 1.22 method-prefixed 둘 다 포함).
 
 ### 3.3 W2: HTTP client → server matching
 
@@ -164,14 +186,24 @@ edge types 새로 4~6개 추가.
 **emit 규칙**:
 
 - `http_calls` edge (신규): caller Function → Endpoint.
-- Target Endpoint 매칭은 **suffix-match** 기반 (e.g. `/api/users` →
-  `http:GET /api/users` 또는 `http:* /api/users`). Method 매칭은
-  optional second-pass.
-- 매칭 fail 시: dropped (V0) 또는 placeholder Endpoint with
-  AMBIGUOUS confidence (decision §6).
+- Target Endpoint 매칭은 **2-단계 cascade** (§6.9 결정):
+  1. **Specific verb 우선**: client의 method가 알려진 경우
+     (`fetch('/x', {method: 'POST'})`, `axios.post(...)`) `http:POST /x`로
+     먼저 lookup.
+  2. **Wildcard fallback**: 1단계 miss 시 같은 path의 `http:* /x` 로
+     cascade. method 모르는 client (`fetch('/x')` default GET, dynamic
+     method)는 곧바로 wildcard부터 lookup.
+  - net/http (Go 1.22 ServeMux) 실제 라우터 동작과 정합: 같은 path에
+    `"GET /x"` (specific) + `"/x"` (wildcard) 공존 시 GET 요청은
+    specific으로, 다른 method는 wildcard로 fall-through.
+- 매칭 fail 시: placeholder Endpoint with `AMBIGUOUS` confidence
+  (§6.3 (B) 결정). monorepo 외부 API audit 가능하게 surface 유지.
+- Path matching은 suffix-match 또는 exact-match (§6 W2 dispatch 시점에
+  최종 결정 필요).
 
-**의존성**: W1이 Endpoint를 emit해야 매칭이 의미 있음. 단 backend가
-다른 monorepo / 외부 API일 경우 placeholder Endpoint 노드 필요.
+**의존성**: W1 + W1.5가 Endpoint를 정확한 `(method, path)` qname으로
+emit해야 cascade lookup이 의미 있음. backend가 다른 monorepo / 외부
+API일 경우 placeholder Endpoint 노드 필요.
 
 ### 3.4 W3: gRPC client/server + `.proto` schema
 
@@ -414,6 +446,29 @@ W1.5에서 Go HTTP emit을 위 규칙에 맞춰 끌어올림 — TS·Go가 같�
 - 추천: **(A)** — Topic은 in-degree가 높아 pagerank 왜곡. 별도
   distribution chart로 surface하는 게 정확.
 
+### §6.9 W2 — HTTP wildcard 매칭 cascade — **(A) specific 우선 + wildcard cascade** ✅
+
+`http:GET /api/users` (specific) 와 `http:* /api/users` (wildcard) 가 같은
+graph에 공존할 때 client `fetch('/api/users')` (method=GET default) 또는
+`axios.post('/api/users')` 가 어느 Endpoint로 매칭되는가?
+
+- (A) **Specific verb 우선, fail 시 wildcard cascade**: client method가
+  알려졌으면 `http:METHOD /path` 먼저 lookup → miss 시 `http:* /path`로
+  fall-through. method 모르는 client는 곧바로 wildcard.
+- (B) Wildcard가 모든 method에 매칭: specific endpoint 무시.
+- (C) 둘 다 매칭 — edge 2개 emit.
+
+- **확정 (2026-05-11): (A) specific 우선 + wildcard cascade.**
+- 근거:
+  1. net/http (Go 1.22 ServeMux) 실제 라우터 동작과 정합. graph가
+     라우터 의미를 반영해야 사용자 직관과 일치.
+  2. W2 매칭 로직 단순: lookup table 2회 (`http:METHOD /x` → fail이면
+     `http:* /x`). edge type은 그대로 `http_calls` 한 종류.
+  3. 옵션 (B)는 specific endpoint를 무시 — 직관 위반. 옵션 (C)는
+     graph noise + traversal ambiguous.
+- 구현 위치: W2 dispatch 시 client matching pass (`internal/link/xlang.go`
+  확장 또는 `internal/parse/typescript/http_client.go` 신규).
+
 ---
 
 ## §7. Acceptance criteria per stage
@@ -531,18 +586,24 @@ W1.5에서 Go HTTP emit을 위 규칙에 맞춰 끌어올림 — TS·Go가 같�
 
 ## §10. 다음 단계
 
-1. ~~사용자 §6 결정 8개 답변~~ → **§6.1~§6.3 확정 2026-05-11** (§6.4~§6.8
-   은 W2~W4 진입 시점에 다시 확인).
+1. ~~사용자 §6 결정 8개 답변~~ → **§6.1~§6.3 + §6.9 확정 2026-05-11**
+   (§6.4~§6.8은 W2~W4 진입 시점에 다시 확인).
 2. ~~**W1 first commit dispatch**~~ → **land 2026-05-11 (commit `da502f4` +
    follow-up `ee1a17b`)** — TS HTTP server endpoint detection.
-3. ~~**W1.5 Go HTTP qname 끌어올림**~~ → **land 2026-05-11** — Go HTTP
-   Endpoint qname을 `http:METHOD /route` 포맷으로 통일 (§6.2 보완 표 참조).
-   TS·Go가 동일 (method, path) 쌍에 동일 qname을 생성해 W2 dispatch matching의
-   사전 조건을 충족.
-4. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
+3. ~~**W1.5 Go HTTP qname 끌어올림**~~ → **land 2026-05-11 (commit `c21ea61`)**
+   — Go HTTP Endpoint qname을 `http:METHOD /route` 포맷으로 통일 (§6.2 보완
+   표 참조). TS·Go가 동일 `(method, path)` 쌍에 동일 qname을 생성해 W2
+   dispatch matching의 사전 조건을 충족.
+4. ~~**W1.5 review 후속 처리**~~ → **land 2026-05-11** — code-reviewer가
+   raise한 Important 2건 + Minor 2건 정리: `splitGo122Pattern` 13-case
+   internal unit test 추가, §3.2 Go server 패턴 catalog 보강, §3.3 W2
+   wildcard cascade 매칭 규칙 명시 (§6.9 결정), empty-pattern early-return
+   guard 추가.
+5. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
    G5 카운트 증가 확인.
-5. **W2 dispatch** — W1 + W1.5 base 위에 client matching. W1과 마찬가지로
-   §7.0 Go regression guard 우선 검증.
-6. W3 / W4 진행은 W1+W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
+6. **W2 dispatch** — W1 + W1.5 base 위에 client matching. §6.9 cascade
+   규칙 따라 specific verb 우선 lookup + wildcard fallback. §7.0 Go
+   regression guard 우선 검증.
+7. W3 / W4 진행은 W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
 
 **End of design draft.**
