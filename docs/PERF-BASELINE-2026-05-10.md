@@ -112,6 +112,33 @@ bench-server within measurement jitter (8.76ms vs 4.41ms p50).
 
 Raw: `/tmp/ckg-bench/mcp.json`.
 
+### Stdio framing overhead (bench-mcp-stdio)
+
+`ckg bench-mcp-stdio` spawns a real `ckg mcp` subprocess and drives
+each tool through the production stdio + JSON-RPC NDJSON path. The
+delta between the two harnesses attributes the framing cost
+independently of the graph layer.
+
+| Tool | in-proc p50 | stdio p50 | Δ p50 | in-proc p99 | stdio p99 |
+|------|------------:|----------:|------:|------------:|----------:|
+| find_symbol           |  0.03ms |  0.06ms | +0.03ms |   0.10ms |   0.46ms |
+| search_text           |  0.28ms |  0.40ms | +0.12ms |   0.67ms |   0.66ms |
+| get_context_for_task  |  3.98ms |  4.15ms | +0.16ms |   5.17ms |   5.37ms |
+| evidence_for_intent   |  4.02ms |  4.47ms | +0.44ms | 156.05ms | 158.19ms |
+
+**Finding**: framing overhead is 0.03–0.44ms across the four
+measurable tools — well under a millisecond. The earlier hypothesis
+"MCP latency is dominated by stdio framing" turns out wrong on this
+graph: after the evidence-cache manifest debounce (`9151746`),
+graph-layer cost and stdio framing are both small enough that
+neither dominates. p99 outliers track the in-process numbers
+(same underlying cache jitter) — stdio doesn't add tail latency.
+
+Concurrency is implicitly 1 in stdio mode (single pipe). Production
+clients (Claude Desktop, etc.) match this profile.
+
+Raw: `/tmp/ckg-bench/mcp-stdio.json`, `/tmp/ckg-bench/mcp-fresh.json`.
+
 ---
 
 ## Improvement candidates
@@ -144,12 +171,14 @@ Raw: `/tmp/ckg-bench/mcp.json`.
    `cachedManifestStore` already short-circuited the read). After:
    bench-mcp evidence p50 172ms → 8.76ms (−95%); bench-server held
    steady at ~4ms (already fast).
-7. **bench-mcp-stdio** — measure the same handlers through a real
-   `ckg mcp` subprocess to attribute the JSON-RPC + framing cost
-   independently. Deferred — the in-process numbers now match the
-   HTTP path closely, so the remaining "is stdio worth optimising"
-   question is decoupled from the BM25 cost question this session
-   was chasing.
+7. ✅ **bench-mcp-stdio** — landed in the same session.
+   `cmd/ckg/bench_mcp_stdio.go` spawns a `ckg mcp` subprocess and
+   drives each tool through the NDJSON JSON-RPC pipe. Stdio framing
+   overhead measured at 0.03–0.44ms across the four tools tested,
+   well under a millisecond. The pre-session hypothesis "MCP
+   latency is dominated by stdio framing" turns out wrong: after the
+   evidence manifest-debounce, neither graph nor framing dominates.
+   No further perf work indicated.
 
 ---
 
