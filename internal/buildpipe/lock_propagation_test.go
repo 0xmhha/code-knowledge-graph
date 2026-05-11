@@ -62,6 +62,11 @@ func TestLockPropagation_SingleHop(t *testing.T) {
 // TestLockPropagation_DeepChain verifies DFS reaches a depth-5 helper chain.
 // Enter -> level0 -> level1 -> level2 -> level3 -> terminal; only terminal
 // touches DeepChain.value. Without DFS the edge would be missing.
+//
+// Also pins the cross-fn confidence policy (W-A §5.0 Q2): all propagated
+// edges must be INFERRED regardless of DFS depth — the suspicion-grade
+// label that signals "could not have been derived from a single function
+// body" doesn't degrade further as the chain lengthens.
 func TestLockPropagation_DeepChain(t *testing.T) {
 	edges, nodes := buildAndQueryFull(t, "testdata/lock_propagation", true)
 	valueID := findNodeIDBySuffix(nodes, "DeepChain.value")
@@ -69,8 +74,12 @@ func TestLockPropagation_DeepChain(t *testing.T) {
 	if valueID == "" || muID == "" {
 		t.Fatalf("fixture nodes missing: value=%q mu=%q", valueID, muID)
 	}
-	if !hasEdge(edges, valueID, muID, types.EdgeAccessedUnderLock) {
-		t.Errorf("expected accessed_under_lock(DeepChain.value -> DeepChain.mu) via DFS depth>=5")
+	found := findEdge(edges, valueID, muID, types.EdgeAccessedUnderLock)
+	if found == nil {
+		t.Fatalf("expected accessed_under_lock(DeepChain.value -> DeepChain.mu) via DFS depth>=5")
+	}
+	if found.Confidence != types.ConfInferred {
+		t.Errorf("DeepChain cross-fn emit confidence=%q, want INFERRED (W-A §5.0 Q2)", found.Confidence)
 	}
 }
 
@@ -78,6 +87,11 @@ func TestLockPropagation_DeepChain(t *testing.T) {
 // infinite recursion in the call graph. cycleA <-> cycleB cycle: the build
 // must terminate AND at least one accessed_under_lock edge for Cycle.value
 // must be emitted (cycleA touches it).
+//
+// Confidence assertion parallels DeepChain — a cycle-pruned DFS doesn't
+// change the cross-fn label. Without this assertion a future regression
+// could silently downgrade the cycle path's edge to AMBIGUOUS / EXTRACTED
+// while still passing the existence check.
 func TestLockPropagation_Cycle(t *testing.T) {
 	edges, nodes := buildAndQueryFull(t, "testdata/lock_propagation", true)
 	valueID := findNodeIDBySuffix(nodes, "Cycle.value")
@@ -85,8 +99,12 @@ func TestLockPropagation_Cycle(t *testing.T) {
 	if valueID == "" || muID == "" {
 		t.Fatalf("fixture nodes missing: value=%q mu=%q", valueID, muID)
 	}
-	if !hasEdge(edges, valueID, muID, types.EdgeAccessedUnderLock) {
-		t.Errorf("expected accessed_under_lock(Cycle.value -> Cycle.mu) — cycleA touches value")
+	found := findEdge(edges, valueID, muID, types.EdgeAccessedUnderLock)
+	if found == nil {
+		t.Fatalf("expected accessed_under_lock(Cycle.value -> Cycle.mu) — cycleA touches value")
+	}
+	if found.Confidence != types.ConfInferred {
+		t.Errorf("Cycle cross-fn emit confidence=%q, want INFERRED (W-A §5.0 Q2)", found.Confidence)
 	}
 }
 
@@ -179,12 +197,16 @@ func findNodeIDBySuffix(nodes []types.Node, suffix string) string {
 }
 
 func hasEdge(edges []types.Edge, src, dst string, t types.EdgeType) bool {
-	for _, e := range edges {
+	return findEdge(edges, src, dst, t) != nil
+}
+
+func findEdge(edges []types.Edge, src, dst string, t types.EdgeType) *types.Edge {
+	for i, e := range edges {
 		if e.Src == src && e.Dst == dst && e.Type == t {
-			return true
+			return &edges[i]
 		}
 	}
-	return false
+	return nil
 }
 
 type lpKey struct{ src, dst string }
