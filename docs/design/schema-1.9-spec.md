@@ -238,6 +238,43 @@ API일 경우 placeholder Endpoint 노드 필요.
 **파서 위치**: `internal/parse/proto/` 신규. tree-sitter-proto 또는
 구현 별도 검토 (§6 결정).
 
+**W3a status (2026-05-11 land)**: `.proto` parser shipped. Hand-rolled
+recursive-descent lexer + visitor in `internal/parse/proto/` (decls.go,
+lexer.go, parser.go, visitor.go). Cross-namespace nested-type resolution
+via `byBareName` fallback (W3a review I1) is the key resolver for both
+own-pass `uses_type` edges and the W3b Go-side suffix matcher.
+
+**W3b status (2026-05-11 land)**: Go gRPC server/client detection shipped.
+`internal/parse/golang/grpc.go` runs as a sub-pass of `emitDistributedDecls`
+(after HTTP/JSON-RPC, before context-paths). Two detectors:
+
+- `pb.RegisterXXXServer(s, &impl{})` → for each exported method on the
+  impl receiver, emits one `grpc_listens_on` edge to a Endpoint named
+  `grpc:Service.Method` (language="go", sub_kind="grpc"). typesInfo path
+  EXTRACTED; AST fallback INFERRED.
+- `stub := pb.NewXXXClient(conn)` then `stub.RpcMethod(ctx, req)` →
+  emits one `grpc_calls` edge per call site. typesInfo path verifies the
+  receiver's underlying type is *Interface (false-positive guard against
+  user-defined `FakeClient struct{}`); AST fallback uses a per-function
+  stub-variable map. Misses emit AMBIGUOUS placeholder Endpoints
+  (language="external") mirroring the W2 http_calls pattern.
+
+V0 limitations (W3b):
+
+- Cross-file server↔client resolution lives in placeholders — when a Go
+  server in `a.go` registers a service that a Go client in `b.go` calls,
+  the client edge points at a language="external" placeholder Endpoint
+  even though the same-qname real Endpoint exists in the graph. Per-file
+  endpointNodeIDs dedup is the cause; a future linker pass can rewire
+  by qname suffix-match. Same-file pairs DO resolve to the real Endpoint.
+- Proto-package prefix is dropped in the emitted Endpoint qname:
+  `grpc:Service.Method` instead of `grpc:pkg.Service.Method`. The proto
+  parser emits `proto:pkg.Service.Method` Method nodes; cross-language
+  matching between the two surfaces is left to the same future linker.
+- Streaming, bidirectional, and per-message recursion are out-of-scope.
+
+TS gRPC-web client (W3c) is deferred to a separate dispatch.
+
 ### 3.5 W4: Message queue pub/sub
 
 **대상 patterns**:
@@ -290,6 +327,9 @@ API일 경우 placeholder Endpoint 노드 필요.
 
 총 35 → **41** edge types. W2 land 시점 (2026-05-11) 35 → **36** (http_calls 1개
 append; ts_listens_on은 §6.2 (B) 결정으로 listens_on 재사용 — 미신설).
+**W3b land 시점 (2026-05-11) 36 → 38** (`grpc_listens_on` + `grpc_calls` 2개
+append; both at positions 37 + 38 in `AllEdgeTypes()` — TestAllEdgeTypes_Stable
+locks the new order).
 
 ### 4.3 SchemaVersion bump
 
@@ -637,6 +677,25 @@ graph에 공존할 때 client `fetch('/api/users')` (method=GET default) 또는
      edge-counts 자동 반영).
 7. **W2 viewer 통합** — 별도 step. 사용자 audit UX (`EdgeTypeFilters`,
    "External APIs" 패널 가능) 미land.
-8. W3 / W4 진행은 W2 viewer 통합 후 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
+8. ~~**W3a `.proto` parser dispatch**~~ → **land 2026-05-11** — hand-rolled
+   recursive-descent parser in `internal/parse/proto/`. Service / message /
+   field / enum / oneof / map detection. Review fixes I1 (cross-namespace
+   nested type resolve via `byBareName` fallback) + I2 (proto2 group
+   handling) + I3 (label preservation) land.
+9. ~~**W3b Go gRPC server/client dispatch**~~ → **land 2026-05-11** —
+   `internal/parse/golang/grpc.go` + fixtures in
+   `testdata/distributed/grpc_{server,client}.go` + `grpc.proto` + a
+   hand-rolled `grpcstubs/` package so typesInfo path resolves under
+   `packages.Load`. Two new edge types appended (36 → 38):
+   `EdgeGRPCListensOn`, `EdgeGRPCCalls`. §7.0 Go regression guard PASS
+   (synthetic baseline diff = 0; gRPC edges = 0 on the synthetic fixture
+   because no `pb.RegisterXXXServer` patterns exist there). §6.5 (C)
+   confidence split implemented — typesInfo path EXTRACTED, AST fallback
+   INFERRED, unresolved targets AMBIGUOUS placeholders. Cross-file
+   server↔client resolution to real Endpoint deferred to a future
+   linker pass.
+10. W3c (TS gRPC-web client) — separate dispatch, follows W3b.
+11. W4 (message queue) 진행은 W3 완료 후 사용자 추가 결정 (§6.4~§6.6)
+    따라 분기.
 
 **End of design draft.**

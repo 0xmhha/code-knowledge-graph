@@ -51,6 +51,11 @@ func (v *declVisitor) emitDistributedDecls(f *ast.File) {
 	if v.messageNodeIDs == nil {
 		v.messageNodeIDs = map[string]string{}
 	}
+	// W3b gRPC server pass — top-level scan for pb.RegisterXXXServer call
+	// sites. Runs BEFORE the per-function body walk so the resulting real
+	// Endpoint IDs (cached in endpointNodeIDs) are visible to the client
+	// pass via upsertGRPCClientPlaceholder's same-file dedup.
+	v.emitGRPCDecls(f)
 	for _, decl := range f.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -61,12 +66,18 @@ func (v *declVisitor) emitDistributedDecls(f *ast.File) {
 			continue
 		}
 		funcID, funcQname := v.funcDeclIDQname(fd)
+		// W3b gRPC client pre-pass — register stub variables for this
+		// function body before the CallExpr walk fires. Without this,
+		// maybeEmitGRPCClientCall would miss the `client.RpcMethod(...)`
+		// edges because the stub var isn't bound yet at visit time.
+		v.scanFuncBodyForGRPCStubs(fd.Body)
 		v.scanFuncBodyForDistributed(funcID, funcQname, fd.Body)
 	}
 }
 
 // scanFuncBodyForDistributed walks a function body and dispatches each
-// CallExpr to the HTTP handler / RPC client / HTTP-client detectors.
+// CallExpr to the HTTP handler / RPC client / HTTP-client / gRPC-client
+// detectors.
 func (v *declVisitor) scanFuncBodyForDistributed(parentFuncID, parentFuncQname string, body *ast.BlockStmt) {
 	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -76,6 +87,10 @@ func (v *declVisitor) scanFuncBodyForDistributed(parentFuncID, parentFuncQname s
 		v.maybeEmitHTTPListensOn(parentFuncID, parentFuncQname, call)
 		v.maybeEmitRPCCall(parentFuncID, call)
 		v.maybeEmitHTTPClientCall(parentFuncID, call)
+		// W3b: gRPC client call detection. Mirrors the http_calls path —
+		// emits one grpc_calls edge per stub method call, with AMBIGUOUS
+		// placeholder fallback when the stub var type can't be resolved.
+		v.maybeEmitGRPCClientCall(parentFuncID, call)
 		return true
 	})
 }

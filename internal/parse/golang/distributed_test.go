@@ -33,6 +33,14 @@ func TestDistributed_HTTP_Endpoints(t *testing.T) {
 		if _, want := wantRoutes[n.QualifiedName]; want {
 			wantRoutes[n.QualifiedName] = true
 		}
+		// Scope the sub_kind assertion to HTTP endpoints — the W3b grpc
+		// detection lands in the same fixture and emits sub_kind="grpc"
+		// Endpoint nodes that share the listens_on edge type but a different
+		// route family. Filtering by qname prefix keeps the HTTP test
+		// surface unchanged.
+		if !strings.HasPrefix(n.QualifiedName, "http:") {
+			continue
+		}
 		if n.SubKind != "http" {
 			t.Errorf("Endpoint %q sub_kind = %q, want http", n.QualifiedName, n.SubKind)
 		}
@@ -258,6 +266,13 @@ func TestDistributed_HTTP_ClientCalls(t *testing.T) {
 	placeholders := map[string]types.Node{}
 	for _, n := range g.Nodes {
 		if n.Type != types.NodeEndpoint || n.Language != "external" {
+			continue
+		}
+		// Scope to HTTP placeholders — W3b grpc client detection emits
+		// language="external" Endpoints with sub_kind="grpc" in the same
+		// fixture (CallExternalService), which would otherwise fail the
+		// sub_kind/AMBIGUOUS assertions tailored to HTTP.
+		if !strings.HasPrefix(n.QualifiedName, "http:") {
 			continue
 		}
 		if n.SubKind != "http" {

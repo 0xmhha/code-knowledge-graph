@@ -56,6 +56,26 @@ type declVisitor struct {
 	// rewires the http_calls edge to a real Endpoint or leaves the placeholder
 	// in place as an external-API marker (W2, schema 1.9 §6.3 (B), §6.9).
 	httpClientPlaceholderIDs map[string]string
+	// grpcServerImpls tracks which (file, service) pairs have already had
+	// grpc_listens_on edges emitted, so duplicate `pb.RegisterXXXServer(s, ...)`
+	// calls for the same service in one file don't multiply the edge count.
+	// Key = "<relPath>::<service>". W3b (schema 1.9, CKS G5 Distributed).
+	grpcServerImpls map[string]struct{}
+	// grpcClientStubs maps a local variable name (within the current function
+	// scope) to the gRPC service name extracted from its
+	// `pb.NewXXXClient(...)` RHS assignment. Populated by
+	// scanFuncBodyForGRPCStubs (which runs before the CallExpr walk for the
+	// same body) and consumed by maybeEmitGRPCClientCall when typesInfo
+	// cannot resolve the stub's receiver type directly. Re-initialized per
+	// function scope. W3b (schema 1.9).
+	grpcClientStubs map[string]string
+	// grpcClientPlaceholderIDs maps a gRPC-client-call target qname
+	// ("grpc:Service.Method") to the AMBIGUOUS placeholder Endpoint ID
+	// emitted in upsertGRPCClientPlaceholder. Mirrors httpClientPlaceholderIDs
+	// — language="external" placeholder Endpoints live in a separate ID
+	// space from real `language="go"` Endpoints minted by the server-side
+	// RegisterXXXServer pass. W3b (schema 1.9).
+	grpcClientPlaceholderIDs map[string]string
 	// chanVarIDs maps a channel variable name (within the current function scope)
 	// to the Channel node ID emitted by emitChannelFromMake. Used to wire
 	// sends_to/recvs_from edges to the actual Channel node instead of an

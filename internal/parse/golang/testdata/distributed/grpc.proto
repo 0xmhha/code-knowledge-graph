@@ -1,0 +1,65 @@
+// W3b fixture — minimal .proto definition exercised by the proto parser
+// (internal/parse/proto). Defines two services (UserService, EchoService)
+// and an unused service (ExternalService) so the grpc_client fixture has
+// a target for the AMBIGUOUS-placeholder path.
+//
+// The proto parser emits NodeInterface (service), NodeMethod (rpc), and
+// NodeMessageType (message) nodes with qname format `proto:Service.Method`
+// and `proto:Message`. W3b's Go-side detection emits parallel
+// `grpc:Service.Method` Endpoint nodes — cross-language matching between
+// the two is left to a future linker pass (out-of-scope for W3b).
+
+syntax = "proto3";
+
+package userpkg;
+
+service UserService {
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+
+service EchoService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+// ExternalService is defined here but no Go server registers it — the
+// client fixture (CallExternalService) targets it to exercise the
+// AMBIGUOUS placeholder code path.
+service ExternalService {
+  rpc DoSomething(DoSomethingRequest) returns (DoSomethingResponse);
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  string name = 1;
+  int32 age = 2;
+}
+
+message ListUsersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListUsersResponse {
+  repeated GetUserResponse users = 1;
+  string next_page_token = 2;
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}
+
+message DoSomethingRequest {
+  string input = 1;
+}
+
+message DoSomethingResponse {
+  string output = 1;
+}
