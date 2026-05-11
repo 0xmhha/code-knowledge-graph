@@ -413,6 +413,54 @@ super_call.sol 은 declaration-time override 체인만 검증한다.
 
 추정 사이즈: 300~400 LOC + 2 fixture + (선택) viewer.
 
+**Status — 2026-05-11**: ✅ **LANDED**. 실제 변경:
+- `internal/parse/solidity/dispatch.go` (신규, ~155 LOC) — `member_expression`
+  AST 형태 매칭으로 `Type(args).method` 패턴을 감지하고 EdgeInvokes
+  PendingRef 큐잉. tree-sitter S-expression 으로 표현 불가능한 중첩
+  predicate (object 가 call_expression 이면서 그 function 이 identifier)
+  은 Go 후처리로 분리. `unwrapExpression` 헬퍼로 grammar 가 끼우는
+  `expression` wrapper 한 겹씩 벗기며 매칭.
+- `internal/parse/solidity/dispatch_test.go` (신규, ~230 LOC) — 4 test
+  function (SingleFile / CrossFile / NoFalsePositive / W1W2Regression).
+  9 subtest PASS. 음성 케이스 `address(this)` / `super.foo()` / unknown
+  type 모두 명시적 검증.
+- `internal/parse/solidity/declarations.go` — `visit()` 에 `runDispatch()`
+  호출 wire. 위치는 `runInheritance()` 다음, `collectABI()` 앞 (Pass 1
+  body-walk 검출은 declaration emit 이후가 자연 순서).
+- `internal/parse/solidity/resolve.go` — Pass 2b 에 W3 분기 + 신규
+  `resolveInterfaceDispatchRef()`. TargetQName 을 "TypeName.MethodName"
+  로 split, Interface byName 인덱스로 1차 필터 (모르는 식별자 drop) +
+  funcByQName 으로 2차 lookup. 동명 candidate 가 여러 파일에 있으면
+  source 파일 우선 (W2 와 동일 idiom).
+- `internal/parse/solidity/testdata/dispatch/` 4 fixture:
+  `simple_dispatch.sol` / `chained_dispatch.sol` + `cross_file_iface.sol`
+  + `cross_file_caller.sol`.
+
+**KPI (build --lang=sol on `testdata/dispatch/`)**:
+- 22 nodes / 24 edges total
+- EdgeInvokes = 6 (모두 AMBIGUOUS, §5.0 Q5)
+- per-fixture breakdown: simple=2 (Caller.send→IERC20.transfer,
+  Caller.check→IERC20.balanceOf), chained=3 (Router.route→{IFoo.bar,
+  IBar.baz}, Router.proxy→IFoo.something), cross_file=1
+  (ExternalCaller.run→IExternalAPI.execute)
+- W1 (EdgeExtends/EdgeImplements) = 0 / W2 (EdgeOverrides) = 0 — 본
+  fixture 는 dispatch only, 검출 순수성 확인
+
+**Verification**:
+- `go test ./internal/parse/solidity/... -count 1` 전 PASS (W1/W2/W4 회귀 0)
+- `go test ./... -count 1` 24 packages PASS
+- `go vet ./...` clean
+- §7.0 Go regression — `--lang=go` baseline diff = 0 (Sol 작업이 Go
+  그래프에 영향 0; 8개 edge type 카운트 그대로)
+- testdata/inheritance / testdata/overrides 회귀 0 (각각
+  extends=8/implements=5/overrides=1, extends=6/overrides=6 보존)
+- 음성 케이스 (`address(this)`, `super.foo()`, unknown identifier) 모두
+  EdgeInvokes 0건 — false positive 없음
+
+**Scope split note**: §3.4 의 `super.foo()` body-walk 은 W3 의 직접 scope
+밖 (declaration-time override 는 W2 가 이미 emit). Spec §4.3 의 "viewer
+의 Possible Dispatch Targets 패널" 은 별도 PR. `using For` 는 W6.
+
 ### 4.4 W4 — abstract / library SubKind
 
 1. `abstract contract` → SubKind="abstract"

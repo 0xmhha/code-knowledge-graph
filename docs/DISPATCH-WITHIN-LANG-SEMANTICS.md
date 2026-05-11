@@ -31,7 +31,7 @@
 | **W-D** | (cross) | `pkg/types/enums.go` stale comment 정정 | XS (~30 LOC) | P2 (but first) | 코드는 land 됨, commit 만 pending |
 | **W-A** | Go | Cross-function lock propagation (D1) | M (~300-400 LOC) | P1 | ✅ **LANDED 2026-05-11** (Stage B DFS depth=5, opt-in `--lock-propagation`) |
 | **W-B** | TS | async/await + heritage (extends/implements) | M (~700 LOC) | **P0** | Spec 합의 완료, 구현 미시작 |
-| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1 (inheritance / is-clause) ✅ 2026-05-11 land; W2 (virtual/override) ✅ 2026-05-11 land; W3/W6 미시작 |
+| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1 (inheritance / is-clause) ✅ 2026-05-11 land; W2 (virtual/override) ✅ 2026-05-11 land; W3 (interface dispatch AMBIGUOUS) ✅ 2026-05-11 land; W6 미시작 |
 
 ### 1.1 참조 문서 경로
 
@@ -109,7 +109,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-B W2 (TS async) | W-B W1 완료 권장 | 순차 |
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W3 (Sol interface dispatch) | W-C W1 완료 | 순차 |
+| W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W6 (Sol using For) | W-C W1 완료 | 순차 또는 마지막 |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
@@ -138,6 +138,21 @@ resolver 2-pass split (Pass 2a W1 inheritance, Pass 2b W2 overrides).
 virtual_override}` 모두 적용. W1 회귀 0 (EdgeExtends 8 / EdgeImplements
 5 보존). §7.0 Go regression `--lang=go` diff = 0. W-C W3 (interface
 dispatch AMBIGUOUS) 진입 unblock.
+
+W-C W3 (Sol interface dispatch `IFoo(addr).bar()` → EdgeInvokes
+AMBIGUOUS) ✅ landed.
+`internal/parse/solidity/dispatch.go` (~155 LOC) +
+`internal/parse/solidity/dispatch_test.go` (~230 LOC) + 4 fixture
+(simple / chained / cross-file pair) + resolver Pass 2b 분기
+(`resolveInterfaceDispatchRef`). 같은 빌드 (testdata/dispatch) 에서
+EdgeInvokes 6 emit (모두 AMBIGUOUS, §5.0 Q5 결정 — 파일 경계와 무관하게
+runtime address 가 dispatch 결정의 출처). per-fixture: simple=2 / chained=3
+/ cross_file=1. 음성 케이스 (`address(this)` 원시 cast, `super.foo()`
+identifier-object, unknown 식별자) 모두 false positive 0 — 검출
+predicate 의 음성 contract 명시. W1/W2/W4 회귀 0
+(testdata/inheritance: extends 8 / implements 5 / overrides 1 보존,
+testdata/overrides: extends 6 / overrides 6 보존). §7.0 Go regression
+`--lang=go` diff = 0. W-C W6 (using For) 진입 unblock.
 
 ### Phase 6 — 측정 + 핸드오프
 - 각 spec 의 `§4 측정` 단계 (self-graph / 실세계 corpus 빌드)
