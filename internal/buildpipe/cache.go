@@ -51,10 +51,18 @@ import (
 // schema DDL change (the new rows reuse existing tables); pre-1.8 DBs are
 // missing the rows + the new node/edge type literals so ManifestUsable's
 // version check forces a cold rebuild on first 1.8 run.
+// Bumped from "1.8" to "1.9" by W1 of schema-1.9-spec (cross-language interop
+// expansion): TypeScript HTTP server endpoint detection (Express / Fastify
+// / Hono / Next.js App Router). Reuses the existing NodeEndpoint type +
+// `listens_on` edge — no new enum literals, no new columns. The bump is
+// purely a cache-key contributor so pre-1.9 DBs don't carry forward a
+// missing-Endpoint TS graph view on first 1.9 build. Per §6.1 of the
+// design spec, future W2/W3/W4 stages (HTTP client matching, gRPC,
+// message queue) will stay on 1.9 and append-only.
 //
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.8"
+const SchemaVersion = "1.9"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

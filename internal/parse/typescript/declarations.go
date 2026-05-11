@@ -19,6 +19,10 @@ type declVisitor struct {
 	nodes   []types.Node
 	edges   []types.Edge
 	pending []parse.PendingRef
+	// endpointIDs deduplicates NodeEndpoint emissions inside a single file
+	// (schema 1.9 W1). Key = endpoint qname (`http:METHOD /route`),
+	// value = node ID. Initialised lazily by runDistributed.
+	endpointIDs map[string]string
 }
 
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
@@ -50,6 +54,12 @@ func (v *declVisitor) visit() {
 	// lookup. Replaces the earlier P3 runBodyCalls — see
 	// internal/parse/typescript/statements.go for the full schema.
 	v.runBodyStatements()
+	// W1 (schema 1.9): emit HTTP server Endpoint nodes + listens_on edges
+	// for Express / Koa / Fastify / Hono / Next.js App Router patterns.
+	// Runs after the declaration queries so Function/Method nodes are
+	// already in v.nodes — listens_on resolution walks v.nodes to find
+	// the handler.
+	v.runDistributed()
 }
 
 func (v *declVisitor) runQuery(q string, nt types.NodeType) {

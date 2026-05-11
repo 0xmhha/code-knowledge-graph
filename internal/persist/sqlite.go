@@ -64,6 +64,16 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 // even if the existing definition is missing newer columns. Pre-1.7 DBs
 // that already have an `edges` table without `dispatch_kind` would silently
 // keep the old shape; explicit ALTER TABLE here brings them up to current.
+//
+// Schema 1.8 → 1.9 (W1 of schema-1.9-spec): no DDL change — TypeScript
+// HTTP server endpoint detection reuses the existing NodeEndpoint + edge
+// `listens_on` rows. The schema version recognition lives in
+// buildpipe/cache.go.SchemaVersion; ManifestUsable forces a cold rebuild
+// on first 1.9 run so pre-1.9 DBs don't carry forward a stale TS graph.
+// This Migrate stub is intentionally empty for 1.9 — kept as a documented
+// landing site for future 1.9 column additions (e.g. W2 http_calls suffix
+// match needs no new column, W4 Topic node reuses NodeMessageType-shaped
+// columns).
 func (s *sqliteStore) Migrate() error {
 	if _, err := s.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -74,6 +84,7 @@ func (s *sqliteStore) Migrate() error {
 	if err := ensureDispatchKindColumn(s.db, "pending_refs"); err != nil {
 		return fmt.Errorf("migrate dispatch_kind on pending_refs: %w", err)
 	}
+	// Schema 1.9: no migrations required (see func docstring).
 	return nil
 }
 
