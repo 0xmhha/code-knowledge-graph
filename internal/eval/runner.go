@@ -139,13 +139,25 @@ func scoreTask(t Task, output string) (float64, int) {
 
 // extractSymbols pulls "pkg.Func" or backtick-quoted identifiers out of
 // free text. Crude but adequate for V0 symbol_set tasks.
+//
+// VERIFICATION_REPORT 2026-05-11 §5 L2: the previous Trim set kept
+// pointer-receiver sigils (`*`, `&`) attached, so LLM responses written
+// in idiomatic Go syntax (`*eth.Ethereum.New`) failed to match expected
+// values written in spec notation (`eth.Ethereum.New`). `*` and `&` are
+// added to the Trim set so receiver-prefixed identifiers normalise.
+// Trailing markdown punctuation (`,`, `;`, `)`, `]`) was already
+// covered; we also add `]` `[` for inline code spans like `[pkg.Func]`.
 func extractSymbols(s string) []string {
 	out := []string{}
 	for _, tok := range strings.FieldsFunc(s, func(r rune) bool {
 		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"'
 	}) {
+		// Normalise pointer-receiver sigils + bracket/punct wrappers before
+		// the dot-position check, so `*pkg.Func.` or `[pkg.Func]` both
+		// reduce to `pkg.Func`.
+		tok = strings.Trim(tok, ".:;()[]*&")
 		if strings.Contains(tok, ".") && !strings.HasPrefix(tok, ".") && !strings.HasSuffix(tok, ".") {
-			out = append(out, strings.Trim(tok, ".:;()"))
+			out = append(out, tok)
 		}
 	}
 	return out
@@ -221,14 +233,20 @@ func writeCSV(path string, rows []Result) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
+	// raw_output column added 2026-05-11 (VERIFICATION_REPORT §5 L2). The
+	// Result struct already captured RawOutput from the LLM call, but the
+	// CSV writer dropped it — post-hoc debugging of low scores (e.g. T01
+	// all-zero) was impossible without re-running the eval. Trailing
+	// column position is chosen so existing CSV readers that index by
+	// field position keep working; new readers can opt in via header.
 	_ = w.Write([]string{"task_id", "baseline", "input_tokens", "output_tokens",
-		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale"})
+		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale", "raw_output"})
 	for _, r := range rows {
 		_ = w.Write([]string{r.TaskID, string(r.Baseline),
 			strconv.Itoa(r.InputTokens), strconv.Itoa(r.OutputTokens),
 			strconv.Itoa(r.CachedTokens), fmt.Sprintf("%.4f", r.Score),
 			strconv.FormatInt(r.LatencyMS, 10), strconv.Itoa(r.NumToolCalls),
-			strconv.FormatBool(r.Stale)})
+			strconv.FormatBool(r.Stale), r.RawOutput})
 	}
 	return nil
 }

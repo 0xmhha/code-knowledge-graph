@@ -3,12 +3,119 @@
 package eval
 
 import (
+	"encoding/csv"
+	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 )
+
+// TestExtractSymbols_ReceiverNormalisation locks L2 fix (2026-05-11
+// VERIFICATION_REPORT §5): LLM responses written in Go-idiomatic
+// pointer-receiver notation (`*eth.Ethereum.New`) used to fail symbol
+// matching against spec-style expected values (`eth.Ethereum.New`).
+// Trim set now strips `*` `&` `[` `]` along with the existing
+// `.:;()` set so receiver-prefixed and inline-code-spanned identifiers
+// normalise to a comparable form.
+func TestExtractSymbols_ReceiverNormalisation(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "pointer receiver sigil stripped",
+			in:   "Calls into *eth.Ethereum.New for genesis bootstrap.",
+			want: []string{"eth.Ethereum.New"},
+		},
+		{
+			name: "ampersand receiver stripped",
+			in:   "Pass &core.BlockChain.Insert to the dispatcher.",
+			want: []string{"core.BlockChain.Insert"},
+		},
+		{
+			name: "markdown code span brackets stripped",
+			in:   "see [pkg.Func] and [other.Method] for the flow.",
+			want: []string{"pkg.Func", "other.Method"},
+		},
+		{
+			name: "trailing punctuation stripped",
+			in:   "Try core.NewBlockChain, then eth.Ethereum.New;",
+			want: []string{"core.NewBlockChain", "eth.Ethereum.New"},
+		},
+		{
+			name: "leading-dot token rejected",
+			in:   "The .gitignore entry isn't a symbol.",
+			want: []string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractSymbols(tc.in)
+			sort.Strings(got)
+			sort.Strings(tc.want)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("extractSymbols(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWriteCSV_RawOutputColumn locks L2 fix (2026-05-11 VERIFICATION_REPORT
+// §5 L2-1): the writeCSV header + each row now carries the raw LLM output
+// as the 10th column so post-hoc analysis of low scores doesn't need an
+// eval re-run.
+func TestWriteCSV_RawOutputColumn(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "results.csv")
+	rows := []Result{{
+		TaskID:    "T01",
+		Baseline:  "alpha",
+		Score:     0.42,
+		RawOutput: "The answer is core.NewBlockChain.\nWith pointer *eth.Ethereum.New.",
+	}}
+	if err := writeCSV(tmp, rows); err != nil {
+		t.Fatalf("writeCSV: %v", err)
+	}
+	f, err := os.Open(tmp)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	records, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatalf("csv read: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected header + 1 row, got %d records", len(records))
+	}
+	header := records[0]
+	if header[len(header)-1] != "raw_output" {
+		t.Errorf("last header column = %q, want raw_output", header[len(header)-1])
+	}
+	row := records[1]
+	if len(row) != len(header) {
+		t.Fatalf("row arity mismatch: %d vs %d", len(row), len(header))
+	}
+	if !strings.Contains(row[len(row)-1], "core.NewBlockChain") {
+		t.Errorf("raw_output column missing expected content: %q", row[len(row)-1])
+	}
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // newEvalFixtureStore runs buildpipe once and returns a read-only Store for
 // the Go resolve testdata fixture.

@@ -312,7 +312,7 @@ func TestWriteCSV(t *testing.T) {
 		}
 		header := records[0]
 		expectedCols := []string{"task_id", "baseline", "input_tokens", "output_tokens",
-			"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale"}
+			"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale", "raw_output"}
 		if len(header) != len(expectedCols) {
 			t.Errorf("header cols: want %v, got %v", expectedCols, header)
 		}
