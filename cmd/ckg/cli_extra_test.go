@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // absFixture returns the absolute path of the Go fixture directory used
@@ -73,6 +76,90 @@ func TestBuildCmd_BadSource(t *testing.T) {
 	cmd.SetErr(io.Discard)
 	if err := cmd.Execute(); err == nil {
 		t.Errorf("expected error for non-existent source directory")
+	}
+}
+
+// TestBuildCmd_LockPropagationFlagWired — W-A minor 5. End-to-end CLI
+// invocation of `ckg build --lock-propagation`. Builds the W-A fixture
+// twice (flag OFF + flag ON), opens the resulting graph.db with the same
+// persist.OpenReadOnly path production code uses, and asserts that the
+// ON build emits *strictly more* accessed_under_lock edges than OFF.
+//
+// Why this exists when integration-level tests in
+// internal/buildpipe/lock_propagation_test.go already exercise the same
+// option directly through buildpipe.Run(): those tests drive Options
+// in-process. They don't catch a regression where the cobra flag wiring
+// in cmd/ckg/build.go fails to plumb `lockPropagation` into Options —
+// the wire-up is one line, but a typo there would silently downgrade
+// every user invocation to OFF while every internal test stays green.
+// This e2e fills that gap by exercising the full cobra → buildpipe.Run
+// → persist write → persist read pipeline.
+func TestBuildCmd_LockPropagationFlagWired(t *testing.T) {
+	fixtureAbs, err := filepath.Abs("../../internal/buildpipe/testdata/lock_propagation")
+	if err != nil {
+		t.Fatalf("filepath.Abs: %v", err)
+	}
+
+	// Flag presence — guards against an accidental removal of the
+	// --lock-propagation flag definition (the e2e diff below would then
+	// fail with "unknown flag" instead of the clearer "flag is gone"
+	// message this assertion surfaces).
+	probe := newBuildCmd()
+	if probe.Flag("lock-propagation") == nil {
+		t.Fatal("build subcommand missing --lock-propagation flag")
+	}
+
+	runBuild := func(t *testing.T, lockProp bool) string {
+		t.Helper()
+		out := t.TempDir()
+		args := []string{
+			"--src=" + fixtureAbs,
+			"--out=" + out,
+			"--lang=go",
+			"--no-cache", // required for full effect per the flag's own help text
+		}
+		if lockProp {
+			args = append(args, "--lock-propagation")
+		}
+		cmd := newBuildCmd()
+		cmd.SetArgs(args)
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute (lockProp=%v): %v", lockProp, err)
+		}
+		return out
+	}
+
+	countUnderLock := func(t *testing.T, outDir string) int {
+		t.Helper()
+		store, err := persist.OpenReadOnly(filepath.Join(outDir, "graph.db"))
+		if err != nil {
+			t.Fatalf("OpenReadOnly: %v", err)
+		}
+		defer store.Close()
+		edges, err := store.QueryEdgesByType(string(types.EdgeAccessedUnderLock))
+		if err != nil {
+			t.Fatalf("QueryEdgesByType: %v", err)
+		}
+		return len(edges)
+	}
+
+	offDir := runBuild(t, false)
+	onDir := runBuild(t, true)
+	offCount := countUnderLock(t, offDir)
+	onCount := countUnderLock(t, onDir)
+
+	if onCount <= offCount {
+		t.Fatalf("--lock-propagation flag not wired: ON=%d, OFF=%d (expected ON > OFF)",
+			onCount, offCount)
+	}
+	// Bound the floor: OFF must emit at least one edge (intra-fn B1 pass —
+	// the W-A fixture has direct lock-then-touch in lock_propagation/single_hop.go).
+	// Catches the reverse failure where the build inadvertently disables both
+	// passes (e.g. emit table dropped).
+	if offCount == 0 {
+		t.Errorf("OFF emitted 0 accessed_under_lock edges; the intra-fn B1 pass should still fire")
 	}
 }
 
