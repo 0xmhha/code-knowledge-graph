@@ -32,9 +32,15 @@ const (
 	NodeDecorator     NodeType = "Decorator"
 	NodeGoroutine     NodeType = "Goroutine"
 	NodeChannel       NodeType = "Channel"
-	// NodeMutex: schema 1.1 slot reservation (spec v0.2 §2). B1 (Wave 5) will
-	// emit; the parser does not produce Mutex nodes yet. Kept adjacent to
-	// the other concurrency nodes (Goroutine/Channel) for grouping.
+	// NodeMutex: schema 1.1 slot — emitted by B1 Phase 1 of the Go
+	// concurrency pass for sync.Mutex / sync.RWMutex fields, package-level
+	// vars, and function-local vars. See
+	// internal/parse/golang/concurrency.go:emitMutexNode. Cross-function
+	// lock chain propagation (caller holds X, callee touches field) is
+	// deferred to D1 — see
+	// docs/design/go-cross-function-lock-propagation.md (decisions resolved
+	// 2026-05-11). Kept adjacent to the other concurrency nodes
+	// (Goroutine/Channel) for grouping.
 	NodeMutex      NodeType = "Mutex"
 	NodeIfStmt     NodeType = "IfStmt"
 	NodeLoopStmt   NodeType = "LoopStmt"
@@ -141,10 +147,23 @@ const (
 	EdgeSendsTo       EdgeType = "sends_to"
 	EdgeRecvsFrom     EdgeType = "recvs_from"
 	EdgeBindsTo       EdgeType = "binds_to"
-	// Schema 1.1 slot reservations (spec v0.2 §2): concurrency lock semantics.
-	// B1 (Wave 5) will emit these from the Go Mutex AST pass; the parser does
-	// not produce them yet. Appended (not interleaved) so existing edge-type
-	// hash positions / test snapshots stay stable.
+	// Schema 1.1 (concurrency lock semantics) — emitted by the Go
+	// concurrency pass:
+	//   acquires_lock / releases_lock: from
+	//     internal/parse/golang/concurrency.go:maybeEmitLockEdge — matches
+	//     sync.Mutex.Lock/Unlock/RLock/RUnlock by object-identity on the
+	//     receiver (types.Info path, EXTRACTED) or by name match (AST-only,
+	//     INFERRED). False-positive guarded against user-defined Lock() on
+	//     non-mutex types (spec §2 R2.1).
+	//   accessed_under_lock: from
+	//     internal/parse/golang/concurrency_underlock.go — intra-function
+	//     lexical heuristic (any field access in a body that holds any lock
+	//     gets one edge per (field, mutex) pair). Cross-function chain
+	//     propagation is deferred to D1 — see
+	//     docs/design/go-cross-function-lock-propagation.md (decisions
+	//     resolved 2026-05-11, --lock-propagation opt-in flag).
+	// Appended (not interleaved) so existing edge-type hash positions /
+	// test snapshots stay stable.
 	EdgeAcquiresLock      EdgeType = "acquires_lock"
 	EdgeReleasesLock      EdgeType = "releases_lock"
 	EdgeAccessedUnderLock EdgeType = "accessed_under_lock"

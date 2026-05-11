@@ -5,17 +5,19 @@
 > 미커버 영역을 묶어둔다. 진행중인 cross-language interop (schema 1.9 W1~W4)
 > 와 충돌하지 않으므로 병렬 dispatch 가능.
 >
-> **작성**: 2026-05-11. **상태**: 설계 문서 3종 ready, 사용자 결정 대기.
+> **작성**: 2026-05-11. **상태**: 26개 결정 항목 합의 완료 (2026-05-11).
+> 각 spec 의 §5.0 에 결정 요약 박제. 구현 진입 가능.
 
 ---
 
 ## §0. 한 줄 요약
 
-| ID | 언어 | 주제 | 설계 문서 | 사이즈 | 우선순위 |
-|----|------|------|-----------|--------|---------|
-| **W-A** | Go | Cross-function lock propagation (D1) | [`design/go-cross-function-lock-propagation.md`](design/go-cross-function-lock-propagation.md) | S (~200 LOC) | P1 |
-| **W-B** | TypeScript | async/await + heritage (interface/extends/implements) | [`design/ts-async-await-and-interface.md`](design/ts-async-await-and-interface.md) | M (~700 LOC, schema bump) | **P0** |
-| **W-C** | Solidity | Inheritance + interface dispatch | [`design/solidity-inheritance-and-interface-dispatch.md`](design/solidity-inheritance-and-interface-dispatch.md) | M (~900 LOC, schema bump) | **P0** |
+| ID | 언어 | 주제 | 설계 문서 | 사이즈 (결정 반영) | 우선순위 |
+|----|------|------|-----------|------------------|---------|
+| **W-A** | Go | Cross-function lock propagation (D1) | [`design/go-cross-function-lock-propagation.md`](design/go-cross-function-lock-propagation.md) | M (~300-400 LOC, Stage B DFS, opt-in flag) | P1 |
+| **W-B** | TypeScript | async/await + heritage (interface/extends/implements) | [`design/ts-async-await-and-interface.md`](design/ts-async-await-and-interface.md) | M (~700 LOC, schema 1.10 bump 일부) | **P0** |
+| **W-C** | Solidity | Inheritance + interface dispatch + **using For** | [`design/solidity-inheritance-and-interface-dispatch.md`](design/solidity-inheritance-and-interface-dispatch.md) | L (~1100-1200 LOC, schema 1.10 bump 일부, W6 신설) | **P0** |
+| **W-D** | (cross) | enums.go stale comment 정정 (Go Q8) | (해당 spec 내) | XS (~30 LOC docs-only) | P2 — 단 W-A 보다 *먼저* 권장 |
 
 ---
 
@@ -35,29 +37,35 @@
 
 ## §2. 진행 권장 순서
 
-### Phase 1 — 결정 합의 (사용자 dispatch)
-각 spec 의 `§5 결정 필요 항목` 8~10 개에 답변. 평균 30~60분 / spec.
-- W-A: 8 항목
-- W-B: 8 항목
-- W-C: 10 항목
+### Phase 1 — 결정 합의 ✅ 완료 (2026-05-11)
+26개 항목 모두 답변 완료. 각 spec 의 §5.0 에 결정 박제. 주요 divergent
+결정 2건:
+- Sol Q9: `using For` 본 spec 포함 → W6 신설, +200~300 LOC
+- Go Q1: Stage B DFS 직행 (권고 = Stage A 1-hop) → 사이즈 ~200 → 300-400 LOC
 
-병렬 진행 가능. 가장 가치 큰 W-C 부터 권장 (Solidity 의 90% 패턴 미캡처).
+### Phase 2 — docs-only PR (W-D)
+- `pkg/types/enums.go:35-38, 138-145` stale comment 정정 (Mutex / lock
+  edges 가 이미 emit 됨을 반영) — **이 문서 작성 세션에서 적용 완료**
+- 다음 세션이 cold start 시 enums.go 가 정확한 정보를 표시 → 다른 작업과
+  충돌 없이 우선 land 가능
 
-### Phase 2 — W4-style warm-up (가장 작은 PR)
+### Phase 3 — warm-up (가장 작은 PR)
 schema 변경 없는 small wins 먼저:
 - W-C 의 W4 (`abstract` / `library` SubKind, ~100 LOC)
 - W-A 의 baseline 측정 (PR 아님, 측정만)
 
-### Phase 3 — schema bump
-- W-B + W-C 의 schema 1.10 bump 합병 PR (Q8 결정 후)
-- enums.go 변경은 prompt cache 무효화 비용 — 1회 batch.
+### Phase 4 — schema 1.10 bump
+- W-B + W-C 의 schema 1.10 bump 합병 PR (Sol Q8 결정: 합쳐서 1.10)
+- `pkg/types/enums.go` 단일 수정: NodeAwaitPoint + EdgeAwaits + EdgeOverrides 등
+- `AllNodeTypes()` / `AllEdgeTypes()` 모두 append-only
+- prompt cache 무효화 비용 — 1회 batch 로 최소화
 
-### Phase 4 — 본 구현
-- W-A (의존성 없음)
-- W-B W1+W2 (병렬)
-- W-C W1, W2, W3 순차
+### Phase 5 — 본 구현
+- W-A (의존성 없음, Stage B DFS — `--lock-propagation` flag)
+- W-B W1+W2 (병렬 가능)
+- W-C W1, W2, W3, W6 (using For) 순차
 
-### Phase 5 — 측정 + 핸드오프
+### Phase 6 — 측정 + 핸드오프
 - 각 spec 의 `§4 측정` 단계
 - 새 `SESSION-HANDOFF-<date>.md` 의 §6 후보 등재
 

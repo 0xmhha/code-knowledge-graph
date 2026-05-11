@@ -218,8 +218,32 @@ sqlite3 /tmp/ckg-d1-baseline/graph.db \
 
 ## §5. 결정 필요 항목
 
-각 항목은 사용자 답변을 받아 W1 PR 본문에 반영. 답변 받기 전 구현 진입
-금지 (schema 1.8 §11 8 결정과 동일 패턴).
+> **STATUS — 2026-05-11**: 8개 항목 모두 합의 완료. 결정 요약은 §5.0
+> 참조. 각 Q 의 옵션·trade-off 원본은 §5.Q1 이하 read-only 보존.
+
+### §5.0. 결정 결과 (2026-05-11)
+
+| Q | 결정 | 권고 일치? | 비고 |
+|---|------|-----------|------|
+| Q1 | **Stage B 곧바로 (DFS depth 3-5)** | ❌ **divergent** | 권고는 (b) depth=2. 사용자 결정으로 §3.2 Reachability-bounded DFS 가 baseline. 구현 사이즈 ~200 → ~300-400 LOC, cycle 처리 (visited set) 필요 |
+| Q2 | 다른 mutex acquire 케이스도 INFERRED 통일 | ✅ | AMBIGUOUS 라벨 노이즈 차단 |
+| Q3 | `calls` + `invokes` 둘 다 traversal 따라감 | ✅ | future-proof, `invokes` 구현 진척과 무관 |
+| Q4 | Goroutine body = INFERRED 강제 (별도 confidence) | ✅ | caller scope 와 비동기 schedule 분리 |
+| Q5 | opt-in flag (`--lock-propagation`) | ✅ | 측정 후 default 전환 결정 |
+| Q6 | dedup 시 confidence 더 높은 것으로 overwrite | ✅ | EXTRACTED > INFERRED > AMBIGUOUS |
+| Q7 | 별도 testdata/lock_propagation/ | ✅ | 기존 B1 회귀 격리 |
+| Q8 | enums.go stale comment 정정은 별도 docs-only PR | ✅ | prompt cache 영향 최소화 — **본 세션에서 적용 완료** |
+
+**구현 영향 요약**:
+- 신규 NodeType / EdgeType: 0종 (기존 `accessed_under_lock` 확장만)
+- schema bump: 없음 (1.8 유지)
+- **구현 경로 변경**: §3.1 Stage A skip → **§3.2 Stage B DFS 직행**
+- 새 CLI flag: `--lock-propagation` (default off)
+- W 단계: W1 lock_propagation.go 신규 (depth=3-5 DFS), W2 validate 회귀, W3 측정+핸드오프
+
+원본 옵션 비교는 §5.Q1 이하 블록 참조.
+
+---
 
 ### Q1. Stage A 의 default depth
 
