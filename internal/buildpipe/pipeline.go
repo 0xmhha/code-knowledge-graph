@@ -49,6 +49,23 @@ func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
 		}
 		log.Info("xlang linked", "binds_to", len(xlEdges))
 	}
+	// W2 (schema 1.9 §6.9): HTTP client → server Endpoint matching.
+	// Cascade resolves AMBIGUOUS placeholder Endpoints emitted by the per-
+	// language parsers (Go: distributed.go, TS: http_client.go) against the
+	// real server-side Endpoints from W1. See internal/link/http_match.go
+	// for the algorithm + §3.3 exact-match decision.
+	newNodes, newEdges, httpResult := link.MatchHTTPClients(g.Nodes, g.Edges)
+	g.Nodes = newNodes
+	g.Edges = newEdges
+	if _, err := validateAndSanitize(g, log, "http_match", strict); err != nil {
+		return nil, nil, nil, err
+	}
+	log.Info("http client matching",
+		"rewired", httpResult.Rewired,
+		"specific_hits", httpResult.SpecificHits,
+		"wildcard_hits", httpResult.WildcardHits,
+		"ambiguous_retained", httpResult.AmbiguousRetained,
+		"placeholders_dropped", httpResult.PlaceholdersDropped)
 	hunkBlobs, err := emitTemporalEdges(g, srcRoot, log, 0)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("temporal: %w", err)

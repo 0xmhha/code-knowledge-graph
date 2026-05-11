@@ -263,6 +263,18 @@ func (v *declVisitor) maybeEmitFrameworkRoute(call *sitter.Node) {
 	if !isHTTP {
 		return
 	}
+	// W2 false-positive guard (schema 1.9): exclude obvious client-side
+	// receivers from the server-side detector. `axios.put('/x', ...)` and
+	// similar client APIs share the same shape as `router.put('/x', handler)`,
+	// so without this guard a single axios call would emit BOTH a (spurious)
+	// real Endpoint via W1 AND a placeholder Endpoint via W2. The client
+	// detector (http_client.go) owns the call site exclusively.
+	if obj := fn.ChildByFieldName("object"); obj != nil {
+		objName := obj.Utf8Text(v.src)
+		if strings.HasPrefix(objName, "axios") {
+			return
+		}
+	}
 	// Need at least (route, handler).
 	argList := namedArgs(args)
 	if len(argList) < 2 {

@@ -48,6 +48,14 @@ type declVisitor struct {
 	// "rpc:Service.Method") to its node ID, deduping handles_message and
 	// rpc_calls targets that resolve to the same logical message. E3.
 	messageNodeIDs map[string]string
+	// httpClientPlaceholderIDs maps an HTTP-client-call target qname
+	// ("http:METHOD /path") to the AMBIGUOUS placeholder Endpoint ID emitted
+	// in upsertHTTPClientPlaceholder. Distinct from endpointNodeIDs because
+	// placeholder Endpoints use Language="external" — they live in a separate
+	// ID space until the link pass (internal/link/http_match.go) either
+	// rewires the http_calls edge to a real Endpoint or leaves the placeholder
+	// in place as an external-API marker (W2, schema 1.9 §6.3 (B), §6.9).
+	httpClientPlaceholderIDs map[string]string
 	// chanVarIDs maps a channel variable name (within the current function scope)
 	// to the Channel node ID emitted by emitChannelFromMake. Used to wire
 	// sends_to/recvs_from edges to the actual Channel node instead of an

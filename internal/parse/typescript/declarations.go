@@ -23,6 +23,13 @@ type declVisitor struct {
 	// (schema 1.9 W1). Key = endpoint qname (`http:METHOD /route`),
 	// value = node ID. Initialised lazily by runDistributed.
 	endpointIDs map[string]string
+	// httpClientPlaceholderIDs maps an HTTP-client target qname to the
+	// AMBIGUOUS placeholder Endpoint ID emitted in http_client.go.
+	// Separate from endpointIDs because placeholder Endpoints use
+	// Language="external" — they live in a distinct ID space until the
+	// link pass (internal/link/http_match.go) resolves them (W2,
+	// schema 1.9 §6.3 (B), §6.9).
+	httpClientPlaceholderIDs map[string]string
 }
 
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
@@ -60,6 +67,11 @@ func (v *declVisitor) visit() {
 	// already in v.nodes — listens_on resolution walks v.nodes to find
 	// the handler.
 	v.runDistributed()
+	// W2 (schema 1.9): emit HTTP client placeholder Endpoints + http_calls
+	// edges for fetch / axios / useSWR / useQuery patterns. The link pass
+	// (internal/link/http_match.go) reconciles placeholders against real
+	// server-side Endpoints from the same monorepo.
+	v.runHTTPClients()
 }
 
 func (v *declVisitor) runQuery(q string, nt types.NodeType) {

@@ -66,7 +66,7 @@ func (v *declVisitor) emitDistributedDecls(f *ast.File) {
 }
 
 // scanFuncBodyForDistributed walks a function body and dispatches each
-// CallExpr to the HTTP handler / RPC client detectors.
+// CallExpr to the HTTP handler / RPC client / HTTP-client detectors.
 func (v *declVisitor) scanFuncBodyForDistributed(parentFuncID, parentFuncQname string, body *ast.BlockStmt) {
 	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
@@ -75,6 +75,7 @@ func (v *declVisitor) scanFuncBodyForDistributed(parentFuncID, parentFuncQname s
 		}
 		v.maybeEmitHTTPListensOn(parentFuncID, parentFuncQname, call)
 		v.maybeEmitRPCCall(parentFuncID, call)
+		v.maybeEmitHTTPClientCall(parentFuncID, call)
 		return true
 	})
 }
@@ -685,5 +686,218 @@ func isExportedIdent(s string) bool {
 		}
 	}
 	return true
+}
+
+// maybeEmitHTTPClientCall detects Go HTTP client call sites and emits an
+// http_calls edge (schema 1.9 W2) from the enclosing function to a
+// placeholder Endpoint. The link pass (internal/link/http_match.go) walks
+// these edges after all per-language parsers run and either rewires the
+// edge Dst to a matching real Endpoint (cascade: specific verb → wildcard)
+// or leaves the placeholder in place as an AMBIGUOUS external-API marker
+// (schema-1.9-spec §6.3 (B), §6.9).
+//
+// Supported patterns (V0 — string-literal URLs only):
+//
+//	http.Get(url)                             → method=GET
+//	http.Post(url, contentType, body)         → method=POST
+//	http.PostForm(url, values)                → method=POST
+//	http.Head(url)                            → method=HEAD
+//	(*http.Client).Get/Post/PostForm/Head     → same methods, receiver-based
+//	http.NewRequest(method, url, body)        → method = string-literal arg
+//	http.NewRequestWithContext(ctx, m, u, b)  → method = string-literal arg
+//
+// Computed URLs (variable, concat, fmt.Sprintf) are skipped — the placeholder
+// would have no useful qname. Path is extracted from the URL literal: if the
+// literal is an absolute URL (`https://api.example.com/foo`), the host portion
+// is stripped and the placeholder qname uses just `/foo`; if it's already a
+// path (`/api/users`), it's used verbatim. This matches the route literal
+// convention used by the server-side detector.
+func (v *declVisitor) maybeEmitHTTPClientCall(parentFuncID string, call *ast.CallExpr) {
+	if parentFuncID == "" {
+		return
+	}
+	method, urlArg, ok := classifyHTTPClientCall(call)
+	if !ok {
+		return
+	}
+	rawURL, ok := stringLiteral(urlArg)
+	if !ok || rawURL == "" {
+		return // dynamic URL — schema-1.9-spec §3.3 V0 skips computed URLs.
+	}
+	path := extractURLPath(rawURL)
+	if path == "" {
+		return
+	}
+	endpointID := v.upsertHTTPClientPlaceholder(method, path, call.Pos(), call.End())
+	pos := v.fset.Position(call.Pos())
+	v.edges = append(v.edges, types.Edge{
+		Src: parentFuncID, Dst: endpointID, Type: types.EdgeHTTPCalls,
+		Line: pos.Line, Count: 1, Confidence: types.ConfInferred,
+		FilePath: v.relPath,
+	})
+}
+
+// classifyHTTPClientCall inspects call's callee shape and returns
+// (HTTP method, URL-argument expression, true) when the call matches one of
+// the supported HTTP client patterns. AST-only — no typesInfo required, which
+// means receiver-type confirmation is best-effort (name + arg-count heuristics).
+//
+// The four shapes:
+//
+//   - http.Verb(...)              — receiver Ident "http", Sel one of Get/Post/PostForm/Head
+//   - http.NewRequest{,WithContext}(method, url, ...) — first string-literal arg is method
+//   - <recv>.Verb(...)            — receiver value (presumed *http.Client or compatible),
+//                                   Sel one of Get/Post/PostForm/Head; matched leniently
+//                                   to support common wrappers (chi.Client, retryablehttp.Client).
+//   - <recv>.Do(req)              — receiver value, Sel "Do"; SKIPPED in V0 because the
+//                                   request object's method/url require flow analysis.
+//                                   Documented limitation.
+func classifyHTTPClientCall(call *ast.CallExpr) (method string, urlArg ast.Expr, ok bool) {
+	sel, isSel := call.Fun.(*ast.SelectorExpr)
+	if !isSel {
+		return "", nil, false
+	}
+	name := sel.Sel.Name
+	// http.NewRequest / NewRequestWithContext — method is a string-literal arg.
+	if id, isPkg := sel.X.(*ast.Ident); isPkg && id.Name == "http" {
+		switch name {
+		case "NewRequest":
+			// http.NewRequest(method, url, body) — 3 args.
+			if len(call.Args) < 3 {
+				return "", nil, false
+			}
+			methodStr, ok := stringLiteral(call.Args[0])
+			if !ok || methodStr == "" {
+				return "", nil, false
+			}
+			return strings.ToUpper(methodStr), call.Args[1], true
+		case "NewRequestWithContext":
+			// http.NewRequestWithContext(ctx, method, url, body) — 4 args.
+			if len(call.Args) < 4 {
+				return "", nil, false
+			}
+			methodStr, ok := stringLiteral(call.Args[1])
+			if !ok || methodStr == "" {
+				return "", nil, false
+			}
+			return strings.ToUpper(methodStr), call.Args[2], true
+		case "Get", "Head":
+			// http.Get(url) / http.Head(url) — 1 arg.
+			if len(call.Args) < 1 {
+				return "", nil, false
+			}
+			return strings.ToUpper(name), call.Args[0], true
+		case "Post":
+			// http.Post(url, contentType, body) — 3 args.
+			if len(call.Args) < 3 {
+				return "", nil, false
+			}
+			return "POST", call.Args[0], true
+		case "PostForm":
+			// http.PostForm(url, data) — 2 args.
+			if len(call.Args) < 2 {
+				return "", nil, false
+			}
+			return "POST", call.Args[0], true
+		}
+		return "", nil, false
+	}
+	// Receiver-based: <client>.Verb(...) — same method names.
+	// AST-only mode can't confirm the receiver is *http.Client, so we accept
+	// any value-receiver call to these names when the URL is the first arg.
+	// False positives possible but tractable: user code defining a Get/Post
+	// method on a non-HTTP type would emit an http_calls edge. The downstream
+	// link pass either matches an Endpoint (suggesting it really was HTTP) or
+	// keeps an AMBIGUOUS placeholder (low cost — surfaces as "unknown
+	// external API" in viewer).
+	switch name {
+	case "Get", "Head":
+		if len(call.Args) < 1 {
+			return "", nil, false
+		}
+		return strings.ToUpper(name), call.Args[0], true
+	case "Post":
+		if len(call.Args) < 3 {
+			return "", nil, false
+		}
+		return "POST", call.Args[0], true
+	case "PostForm":
+		if len(call.Args) < 2 {
+			return "", nil, false
+		}
+		return "POST", call.Args[0], true
+	}
+	return "", nil, false
+}
+
+// extractURLPath strips an absolute URL's scheme + host, returning only the
+// path portion. Paths starting with `/` are returned verbatim. Empty / pure-
+// scheme inputs return "" so the caller can skip emission.
+//
+// Examples:
+//
+//	"/api/users"                  → "/api/users"
+//	"https://api.example.com/foo" → "/foo"
+//	"http://localhost:8080/x"     → "/x"
+//	"api.example.com/foo"         → ""   (no leading slash, no scheme — ambiguous)
+//	""                            → ""
+func extractURLPath(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "/") {
+		return raw
+	}
+	// scheme://host[:port]/path
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return ""
+	}
+	rest := raw[i+3:]
+	slash := strings.IndexByte(rest, '/')
+	if slash < 0 {
+		// host-only URL with no path — root.
+		return "/"
+	}
+	return rest[slash:]
+}
+
+// upsertHTTPClientPlaceholder emits an AMBIGUOUS placeholder Endpoint for an
+// http_calls edge target. The placeholder uses Language="" (sentinel for
+// "client-side intent; resolution pending") so it doesn't collide with real
+// server-side Endpoint IDs that include "go"/"ts" in their hash input.
+//
+// The link pass (internal/link/http_match.go) replaces these placeholders
+// with real Endpoint IDs when a server-side handler is detected on a matching
+// (METHOD, path) — or keeps them as-is when the call targets an external API.
+func (v *declVisitor) upsertHTTPClientPlaceholder(method, path string, startPos, endPos token.Pos) string {
+	qname := "http:" + method + " " + path
+	// Distinct ID space from real Endpoints: use language="external" so the
+	// placeholder ID never collides with a real `go`/`ts` Endpoint with the
+	// same qname (which would otherwise dedup via graph.Build's by-ID merge).
+	// Track via a separate map so we don't dedup against real-Endpoint IDs in
+	// the same file.
+	if v.httpClientPlaceholderIDs == nil {
+		v.httpClientPlaceholderIDs = map[string]string{}
+	}
+	if id, ok := v.httpClientPlaceholderIDs[qname]; ok {
+		return id
+	}
+	startLn, startBy := v.pos(startPos)
+	endLn, endBy := v.pos(endPos)
+	id := MakeID(qname, "external", startBy)
+	v.httpClientPlaceholderIDs[qname] = id
+	v.nodes = append(v.nodes, types.Node{
+		ID: id, Type: types.NodeEndpoint,
+		Name: path, QualifiedName: qname,
+		FilePath: v.relPath, StartLine: startLn, EndLine: endLn,
+		StartByte: startBy, EndByte: endBy,
+		Language: "external", Confidence: types.ConfAmbiguous, SubKind: "http",
+	})
+	v.edges = append(v.edges, types.Edge{
+		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1,
+		Confidence: types.ConfAmbiguous,
+	})
+	return id
 }
 
