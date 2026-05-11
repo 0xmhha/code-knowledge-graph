@@ -233,9 +233,19 @@ func runIncremental(opt Options, log *slog.Logger,
 	// cold path; DB drops in step (1) ensure the in-memory re-emission
 	// translates cleanly to the persist step. hunkBlobs (schema 1.8 H1) are
 	// merged into InsertBlobs alongside the dirty-file CodeNode slices.
-	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
+	//
+	// W-A: lock propagation is structurally skipped on the incremental path
+	// — per-function field-touch maps for cached files aren't reconstructed
+	// from DB, so the propagator would over-emit (only seeing dirty files'
+	// callees). Operators wanting the W-A KPI must run with --no-cache.
+	// Passing nil + false makes emitDerivedPasses' propagation call a no-op
+	// regardless of opt.LockPropagation.
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, nil, false)
 	if err != nil {
 		return persist.Manifest{}, err
+	}
+	if opt.LockPropagation {
+		log.Warn("lock propagation skipped on incremental path; use --no-cache for W-A measurement")
 	}
 
 	// (6) Persist + new pending_refs for dirty files only.

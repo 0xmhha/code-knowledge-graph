@@ -7,7 +7,10 @@
 > "Stage 2 SSA territory" referenced in `concurrency.go:17` and
 > `concurrency_underlock.go:24`.
 >
-> **Status**: design draft 2026-05-11. No code changes.
+> **Status**: W1 LANDED 2026-05-11 (Stage B DFS, opt-in `--lock-propagation`).
+> Implementation at `internal/buildpipe/lock_propagation.go` (+ Go-parser
+> field-touch side-channel at `internal/parse/golang/concurrency_underlock.go`
+> `recordFuncFieldTouches`). KPI in §4.1 below.
 > **Out of scope**: cross-language locks (no equivalent semantic in TS/Sol),
 > happens-before race detection (Go race detector territory), runtime trace
 > ingestion (schema 1.9 W series).
@@ -173,46 +176,91 @@ propagateLockedFieldAccessDFS(g, maxDepth=5):
 
 ## §4. 구현 계획
 
-### 4.1 Pre-work — 측정 (필수)
+### 4.1 KPI — Before/After 측정 (LANDED 2026-05-11)
 
-PR 작성 전 baseline 확보:
+#### Self-graph (`./bin/ckg build --src=.`)
 
-```bash
-./bin/ckg build --src=<repo> --out=/tmp/ckg-d1-baseline
-sqlite3 /tmp/ckg-d1-baseline/graph.db \
-  "SELECT COUNT(*) FROM edges WHERE type='accessed_under_lock';"
-sqlite3 /tmp/ckg-d1-baseline/graph.db \
-  "SELECT confidence, COUNT(*) FROM edges WHERE type='accessed_under_lock' GROUP BY confidence;"
-```
+| metric | flag OFF (baseline) | flag ON (--lock-propagation) | delta |
+|--------|---------------------|------------------------------|-------|
+| `accessed_under_lock` | 33 | 68 | **+35 (+106%)** |
+| `lock_holders` (info log) | n/a | 15 | — |
+| `max_depth` | n/a | 5 | — |
+| nodes | 24760 | 24760 | 0 |
+| edges total | 122702 | 122737 | +35 |
 
-- go-stablenet 같이 lock-heavy 한 fixture 사용 권장.
-- Stage A 적용 후 동일 측정 → diff 가 KPI.
+#### W-A fixture (`internal/buildpipe/testdata/lock_propagation`)
 
-### 4.2 W1 — Stage A 구현 (S 사이즈, ≤200 LOC)
+| metric | flag OFF | flag ON | delta |
+|--------|---------|---------|-------|
+| `accessed_under_lock` | 5 | 9 | +4 |
 
-1. `internal/parse/golang/lock_propagation.go` 신규 (별도 파일, B1 코드 손
-   안 댐 — 다른 세션 충돌 방지).
-2. 진입점: `internal/buildpipe/pipeline.go:emitDerivedPasses` 의 `score.Compute`
-   직전.
-3. 입력: `*graph.Graph` (이미 모든 노드/엣지 emit 완료).
-4. 출력: g.Edges 에 `accessed_under_lock` 추가.
-5. 단위 테스트: `lock_propagation_test.go` — 3 fixture
-   - (a) caller locks, callee touches one field (positive)
-   - (b) caller locks, callee touches stdlib (skip, no edge)
-   - (c) caller doesn't lock, callee touches field (no edge — guard)
+Per-edge breakdown (flag ON only):
+- `SingleHop.value -> SingleHop.mu#mutex` (1-hop)
+- `DeepChain.value -> DeepChain.mu#mutex` (5-hop DFS)
+- `Cycle.value -> Cycle.mu#mutex` (cycle visited-set test)
+- `Cycle.flag -> Cycle.mu#mutex` (cycle visited-set test)
 
-### 4.3 W2 — validateAndSanitize 게이트 통과 확인
+Negative guards (verified by tests):
+- `StdlibSkip` → no edge to stdlib callees (no node in graph → skipped)
+- `NoLockNoEdge` → no `accessed_under_lock(value, ...)` (caller doesn't lock)
+- `GoroutineHolder.value` → no edge (named-fn goroutine `go x.touchAsync()`
+  doesn't emit a `calls` edge — existing parser limitation, see
+  `concurrency.go:530-531`. Anonymous goroutine literals work via the
+  intra-fn parent attribution path.)
 
-새 엣지가 `graph.Inspect` 의 dangling endpoint 검사를 통과하는지 확인.
-이미 g.Nodes 안의 node ID 만 src/dst 로 쓰므로 통과해야 하지만
-`internal/graph/validate.go` 의 lenient/strict 동작 확인 필수.
+#### Regression baselines
 
-### 4.4 W3 — 측정 + 핸드오프
+- `testdata/synthetic` (no Go locks) — flag OFF: same edge counts pre/post W-A.
+- `internal/parse/golang/testdata/concurrency` — flag OFF: 5 `accessed_under_lock`
+  unchanged; flag ON: 5 (no cross-fn pattern in fixture).
+- `internal/parse/golang/concurrency_test.go` — all PASS (24/24 unchanged).
 
-`PERF-BASELINE-2026-05-xx.md` (별도 새 파일) 에 before/after:
-- 노드/엣지 카운트
-- 빌드 시간
-- viewer 의 lock 패널 가시성 변화 (스크린샷)
+### 4.2 W1 — Stage B DFS 구현 (LANDED 2026-05-11)
+
+**§5.0 Q1 divergent**: Stage A skipped per user decision. Direct Stage B DFS
+(depth=5, visited set) is the baseline.
+
+Land artifacts:
+1. `internal/buildpipe/lock_propagation.go` (new, ~200 LOC) — DFS propagator.
+   - `propagateLockedFieldAccess(g, funcFields, log)` is the public entry.
+   - `buildCalleeAdjacency` merges `calls` + `invokes` (Q3).
+   - `buildLockHolders` derives held-mutex set per func from existing
+     `acquires_lock` edges.
+   - DFS loop with visited-set + depth cap (`lockPropagationMaxDepth = 5`).
+   - Dedup against existing edges via `edgePairKey` (Q6).
+2. `internal/parse/golang/concurrency_underlock.go` — added
+   `recordFuncFieldTouches(funcID, body)`: per-function field-access map,
+   independent of lock state. Stashed on `declVisitor.funcFieldTouches`.
+3. `internal/parse/golang/parser.go` — added thread-safe parser-wide
+   `funcFieldTouches` aggregator (`mergeFuncFieldTouches` under
+   `funcFieldTouchesMu`) and `FuncFieldTouches()` accessor.
+4. `internal/buildpipe/language_runners.go` — `runGoPipeline` now returns
+   the per-Function field-touch map alongside the resolved graph.
+5. `internal/buildpipe/pipeline.go` — `Options.LockPropagation bool`,
+   wire into `emitDerivedPasses`, post-emit `validateAndSanitize` gate
+   (W2 fold-in, see §4.3).
+6. `internal/buildpipe/incremental.go` — incremental path passes nil +
+   false (W-A skipped on cache hits; warn log when flag is set).
+7. `cmd/ckg/build.go` — `--lock-propagation` CLI flag (default false).
+8. `internal/buildpipe/testdata/lock_propagation/` — 6 fixture files
+   (single_hop, stdlib_skip, no_lock_no_edge, goroutine_body, deep_chain,
+    cycle) + own `go.mod` (Q7 — isolated from B1 testdata).
+9. `internal/buildpipe/lock_propagation_test.go` — 6 test cases
+   (DefaultOff_NoEmit + per-fixture positive/negative assertions).
+
+### 4.3 W2 — validateAndSanitize 게이트 (folded into W1)
+
+`propagateLockedFieldAccess` is followed by
+`validateAndSanitize(g, log, "lock_propagation", strict)` in
+`emitDerivedPasses` whenever the propagator emits ≥1 edge. Both src and
+dst are guaranteed to be node IDs already in `g.Nodes` (the propagator
+filters via `nodeKind` lookup), so the gate is a defensive check rather
+than a primary correctness mechanism.
+
+### 4.4 W3 — KPI (DONE — see §4.1)
+
+Self-graph: 33 → 68 `accessed_under_lock` edges (+106%). Build time delta
+sub-second (DFS bounded by depth=5 × 15 lock-holders × small fanout).
 
 ---
 

@@ -148,8 +148,9 @@ func collectPendingRefs(results []*parse.ParseResult) []persist.PendingRefRow {
 }
 
 // runGoPipeline drives Pass 1 (per-file ParseFile) + Pass 2 (Resolve) for Go.
-// Returns the resolved graph, count of files that failed to read or parse,
-// and any fatal Resolve error.
+// Returns the resolved graph, the per-Function/Method body field-touch map
+// used by W-A cross-function lock propagation, count of files that failed
+// to read or parse, and any fatal Resolve error.
 //
 // B1 (Wave 5): loads each module with full go/types info via detect.GoPackages
 // and registers the result on the parser via SetPackages. This enables the
@@ -161,7 +162,12 @@ func collectPendingRefs(results []*parse.ParseResult) []persist.PendingRefRow {
 // Failure of the typed load is a soft fallback — the parser will still work
 // in AST-only mode (concurrency edges become INFERRED). Logs the warning so
 // operators can investigate without breaking the build.
-func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
+//
+// funcFieldTouches (W-A return value) is nil when the typed-load fallback
+// kicks in — AST-only mode has no reliable way to map field references to
+// Field node IDs (parser.go comment). The propagator then no-ops, which
+// matches the existing INFERRED-confidence semantics of AST-only builds.
+func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, map[string]map[string]struct{}, int, error) {
 	p := gop.New(srcRoot)
 	if pkgs, err := detect.GoPackages(srcRoot); err != nil {
 		log.Warn("Go packages typed-load failed; concurrency pass falls back to AST-only", "err", err)
@@ -222,7 +228,7 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		rg.Edges = append(rg.Edges, instEdges...)
 		log.Debug("instantiates emitted", "count", len(instEdges))
 	}
-	return rg, pending, errs, err
+	return rg, pending, p.FuncFieldTouches(), errs, err
 }
 
 // stampFilePath populates Edge.FilePath for every per-file edge that lacks

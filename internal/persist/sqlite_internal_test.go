@@ -53,6 +53,60 @@ func TestRewriteFTSQuery_TrailingPunctuation(t *testing.T) {
 	}
 }
 
+// TestRewriteFTSQuery_PowerUserGate locks B3 fix (2026-05-11
+// VERIFICATION_REPORT §7.3): the earlier power-user passthrough triggered
+// on any of `*"():` chars, which mis-classified natural-language
+// descriptions containing parentheses ("Where does (X) get called:") and
+// fed the raw `(` straight to FTS5. Power-user passthrough now requires
+// `*` or `"` only — `(` `)` `:` flow through the per-token sanitiser.
+func TestRewriteFTSQuery_PowerUserGate(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// B3 reproduction: parenthesis in prose no longer triggers passthrough.
+		// `get` (3 chars) keeps without `*` per rewriteFTSQuery's length tier.
+		{
+			"prose with parentheses",
+			"Where does (NewBlockChain) get called",
+			"Where* OR does* OR NewBlockChain* OR get OR called*",
+		},
+		// Trailing colon (common in prose) no longer triggers passthrough.
+		{
+			"prose with trailing colon",
+			"investigate WBFT prepare:",
+			"investigate* OR WBFT* OR prepare*",
+		},
+		// `*` still signals power-user — verbatim passthrough preserved.
+		{
+			"explicit FTS5 wildcard",
+			"NewBlock*",
+			"NewBlock*",
+		},
+		// `"` still signals power-user — phrase queries preserved.
+		{
+			"explicit FTS5 phrase",
+			`"exact phrase"`,
+			`"exact phrase"`,
+		},
+		// Combined `*"` — verbatim passthrough preserved.
+		{
+			"wildcard + phrase",
+			`"foo" OR bar*`,
+			`"foo" OR bar*`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rewriteFTSQuery(tc.in)
+			if got != tc.want {
+				t.Errorf("rewriteFTSQuery(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestTrimFTSToken locks the trimming primitive itself: leading/trailing
 // non-alnum (plus optional `_`) is stripped; identifier-internal chars
 // are preserved. Pure-punctuation tokens collapse to "".

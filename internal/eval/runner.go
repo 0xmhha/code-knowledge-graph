@@ -147,6 +147,24 @@ func scoreTask(t Task, output string) (float64, int) {
 // added to the Trim set so receiver-prefixed identifiers normalise.
 // Trailing markdown punctuation (`,`, `;`, `)`, `]`) was already
 // covered; we also add `]` `[` for inline code spans like `[pkg.Func]`.
+//
+// VERIFICATION_REPORT 2026-05-11 §8.3 (L2-2-1): the simulated re-scoring
+// of T01 showed that LLMs writing verbose answers ("see core.NewBlockChain
+// in core/blockchain.go") dragged the file path into the dot-tokenised
+// symbol set, dropping precision below the 0.7 threshold even when the
+// real qualified-name answers were correct. We now drop two extra
+// classes of dot-bearing tokens after the Trim:
+//
+//   - path-like tokens (`pkg/foo.go`, `path/to/file.ts`) — anything with
+//     a `/` separator is treated as a file path rather than a symbol.
+//   - tokens whose trailing dot-segment matches a source file extension
+//     (`.go`, `.ts`, `.tsx`, `.js`, `.jsx`, `.sol`, `.proto`, `.py`,
+//     `.rs`, `.java`, `.md`, `.yaml`, `.yml`, `.toml`, `.json`). Covers
+//     file citations without a directory prefix (`blockchain.go`).
+//
+// The blacklist is conservative — it intentionally does not strip every
+// dotted token, only those that look like file paths or stand-alone file
+// names. Genuine `pkg.Func` identifiers stay in the output.
 func extractSymbols(s string) []string {
 	out := []string{}
 	for _, tok := range strings.FieldsFunc(s, func(r rune) bool {
@@ -156,11 +174,36 @@ func extractSymbols(s string) []string {
 		// the dot-position check, so `*pkg.Func.` or `[pkg.Func]` both
 		// reduce to `pkg.Func`.
 		tok = strings.Trim(tok, ".:;()[]*&")
-		if strings.Contains(tok, ".") && !strings.HasPrefix(tok, ".") && !strings.HasSuffix(tok, ".") {
-			out = append(out, tok)
+		if !strings.Contains(tok, ".") || strings.HasPrefix(tok, ".") || strings.HasSuffix(tok, ".") {
+			continue
 		}
+		// L2-2-1 file path / extension blacklist (§8.3).
+		if strings.Contains(tok, "/") {
+			continue
+		}
+		if dot := strings.LastIndex(tok, "."); dot >= 0 && isFileExtension(tok[dot:]) {
+			continue
+		}
+		out = append(out, tok)
 	}
 	return out
+}
+
+// isFileExtension reports whether ext (including the leading dot) is a
+// recognised source/markup file extension that should be excluded from
+// extractSymbols output. The set is the dominant set in CKG-targeted
+// repos; new languages or markup formats can be added incrementally.
+func isFileExtension(ext string) bool {
+	switch ext {
+	case ".go", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+		".sol", ".proto", ".py", ".rs", ".java", ".kt", ".swift",
+		".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",
+		".md", ".markdown",
+		".yaml", ".yml", ".toml", ".json", ".xml", ".html", ".css",
+		".sh", ".bash", ".zsh":
+		return true
+	}
+	return false
 }
 
 func dumpFiles(root string, count, perFileLimit int) string {

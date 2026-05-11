@@ -38,8 +38,18 @@ import (
 // edges are reloaded directly into g instead). DB-side drops for temporal
 // and binds_to are the caller's responsibility (cold wipes everything via
 // openColdStore; incremental issues targeted DeleteEdgesByType).
+//
+// goFuncFieldTouches (W-A): per Go Function/Method node ID → set of struct-
+// Field node IDs whose values are read/written in the body. Sourced from
+// the Go parser's FuncFieldTouches() accessor on the cold path; nil on
+// the incremental path (which short-circuits the propagation pass even
+// when opt.LockPropagation is true — incremental cache lacks per-function
+// field touches for cached files). lockPropagation=false makes the map
+// irrelevant.
 func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
-	log *slog.Logger, strict bool) (*cluster.PkgTree, *cluster.TopicTree, map[string][]byte, error) {
+	log *slog.Logger, strict bool,
+	goFuncFieldTouches map[string]map[string]struct{}, lockPropagation bool,
+) (*cluster.PkgTree, *cluster.TopicTree, map[string][]byte, error) {
 	if solParser != nil {
 		abi := convertABI(solParser.ABI())
 		xlEdges := link.SolToTS(g.Nodes, abi)
@@ -72,6 +82,21 @@ func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
 	}
 	if _, err := validateAndSanitize(g, log, "temporal", strict); err != nil {
 		return nil, nil, nil, err
+	}
+	// W-A (D1 Stage B): cross-function lock propagation. Runs BEFORE
+	// cluster/score so the propagated edges contribute to PageRank /
+	// in-degree statistics consistently with the existing intra-function
+	// edges. Opt-in (Options.LockPropagation) — when off the call is a
+	// structural no-op that touches neither g.Edges nor the validation
+	// gate. validateAndSanitize is invoked after emit so any propagator
+	// bug producing dangling endpoints is caught at lenient/strict gates.
+	if lockPropagation {
+		n := propagateLockedFieldAccess(g, goFuncFieldTouches, log)
+		if n > 0 {
+			if _, err := validateAndSanitize(g, log, "lock_propagation", strict); err != nil {
+				return nil, nil, nil, err
+			}
+		}
 	}
 	pkgTree := cluster.BuildPkgTree(g)
 	topicTree := cluster.BuildTopicTree(g, []float64{0.5, 1.0, 2.0}, 42)
@@ -110,6 +135,16 @@ type Options struct {
 	// (see internal/filterlist). When set, only files matching the filter
 	// reach the parsers. Empty means "use heuristic discovery as before".
 	FilesFromPath string
+	// LockPropagation enables D1 Stage B cross-function lock propagation
+	// (W-A, Within-language semantics Phase 5). When true, the cold build
+	// path walks the Go call graph from every lock-holding function up to
+	// lockPropagationMaxDepth=5 hops and emits accessed_under_lock(field,
+	// mutex) edges for fields touched in reachable callee bodies. Default
+	// false (opt-in per W-A §5.0 Q5) so existing builds are byte-identical.
+	// Incremental cache path skips propagation regardless of this flag —
+	// run with --no-cache when the flag is on to measure full effect.
+	// Spec: docs/design/go-cross-function-lock-propagation.md.
+	LockPropagation bool
 }
 
 // validateAndSanitize runs the lenient/strict validation gate against g and
@@ -233,15 +268,22 @@ func runCold(opt Options, log *slog.Logger,
 	resolved := []*parse.ResolvedGraph{}
 	allPending := []persist.PendingRefRow{}
 	parseErrs := 0
+	// goFuncFieldTouches: W-A side-channel from the Go parser (per
+	// Function/Method node ID → set of struct-Field node IDs touched in
+	// body). Consumed by emitDerivedPasses' propagateLockedFieldAccess
+	// when opt.LockPropagation is true. Stays nil when the Go pipeline
+	// doesn't run or the typed-load fallback strips field resolution.
+	var goFuncFieldTouches map[string]map[string]struct{}
 	if shouldRun("go", opt.Languages) && len(goFiles) > 0 {
 		log.Debug("pass1.start", "language", "go", "files", len(goFiles))
-		rg, pending, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
+		rg, pending, fieldTouches, n, err := runGoPipeline(opt.SrcRoot, goFiles, log)
 		if err != nil {
 			return persist.Manifest{}, fmt.Errorf("go pipeline: %w", err)
 		}
 		parseErrs += n
 		resolved = append(resolved, rg)
 		allPending = append(allPending, pending...)
+		goFuncFieldTouches = fieldTouches
 		log.Debug("pass1.end", "language", "go", "nodes", len(rg.Nodes), "errs", n)
 	}
 	// solParser is retained across the language passes so that the
@@ -304,7 +346,7 @@ func runCold(opt Options, log *slog.Logger,
 	// by temporal living only in cold; the helper makes that recurrence
 	// structurally impossible.
 	log.Debug("metrics.start")
-	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate)
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, goFuncFieldTouches, opt.LockPropagation)
 	if err != nil {
 		return persist.Manifest{}, err
 	}

@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/tools/go/packages"
 
@@ -39,6 +40,22 @@ type Parser struct {
 	// EmitImplementsEdges) can iterate package scopes. Same lifetime as
 	// fileIndex — both populated by SetPackages, both nil in AST-only mode.
 	pkgs []*packages.Package
+	// funcFieldTouchesMu guards funcFieldTouches across the parallel
+	// parseConcurrent worker pool. ParseFile is called from many goroutines;
+	// each worker merges its declVisitor's per-file touches into the parser
+	// map under this lock. Read access (FuncFieldTouches) happens after all
+	// workers finish, so a read-write mutex isn't needed.
+	funcFieldTouchesMu sync.Mutex
+	// funcFieldTouches aggregates per-function field-access sets across every
+	// file ParseFile sees. Keyed by Function/Method node ID, value is the set
+	// of struct-Field node IDs whose values are read or written in the body.
+	// Used by buildpipe's W-A cross-function lock propagation pass (opt-in
+	// via --lock-propagation).
+	//
+	// Lifetime: populated by ParseFile, read by FuncFieldTouches() after the
+	// parser is done. Idempotent across Resolve calls — the map is append-only
+	// per (funcID, fieldID) pair.
+	funcFieldTouches map[string]map[string]struct{}
 }
 
 // typedFile holds the parsed AST + resolved type info for one source file,
@@ -131,6 +148,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		// emitDistributedDecls so the same v.nodes function-ID lookup is
 		// usable. Self-loop edges only — never produces new nodes.
 		v.emitContextPaths(tf.file)
+		p.mergeFuncFieldTouches(v.funcFieldTouches)
 		return &parse.ParseResult{
 			Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 		}, nil
@@ -144,9 +162,48 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	ast.Walk(v, f)
 	v.emitDistributedDecls(f)
 	v.emitContextPaths(f)
+	p.mergeFuncFieldTouches(v.funcFieldTouches)
 	return &parse.ParseResult{
 		Path: rel, Nodes: v.nodes, Edges: v.edges, Pending: v.pending,
 	}, nil
+}
+
+// mergeFuncFieldTouches merges a single declVisitor's per-file
+// funcFieldTouches into the parser-wide aggregate. Thread-safe — callable
+// from concurrent ParseFile workers in parseConcurrent. No-op when src is
+// empty (AST-only mode or files with no field accesses).
+func (p *Parser) mergeFuncFieldTouches(src map[string]map[string]struct{}) {
+	if len(src) == 0 {
+		return
+	}
+	p.funcFieldTouchesMu.Lock()
+	defer p.funcFieldTouchesMu.Unlock()
+	if p.funcFieldTouches == nil {
+		p.funcFieldTouches = make(map[string]map[string]struct{}, len(src))
+	}
+	for funcID, fields := range src {
+		dst := p.funcFieldTouches[funcID]
+		if dst == nil {
+			dst = make(map[string]struct{}, len(fields))
+			p.funcFieldTouches[funcID] = dst
+		}
+		for fid := range fields {
+			dst[fid] = struct{}{}
+		}
+	}
+}
+
+// FuncFieldTouches returns the parser-wide map of Function/Method node ID
+// → set of struct-Field node IDs touched by the body. Populated during
+// ParseFile when typesInfo is available; empty otherwise.
+//
+// Consumed by buildpipe's W-A cross-function lock propagation pass. The
+// caller MUST treat the returned map as read-only — the parser retains a
+// reference to the same map for the rest of its lifetime.
+func (p *Parser) FuncFieldTouches() map[string]map[string]struct{} {
+	p.funcFieldTouchesMu.Lock()
+	defer p.funcFieldTouchesMu.Unlock()
+	return p.funcFieldTouches
 }
 
 // lookupTyped returns the registered typedFile for path. Tries an exact

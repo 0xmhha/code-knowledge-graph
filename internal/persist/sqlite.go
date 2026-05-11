@@ -649,7 +649,19 @@ func hasNonASCII(q string) bool {
 // Returning q unchanged when no useful tokens survive (`""`, `"a b"`)
 // lets FTS5 surface its own no-hits behaviour.
 func rewriteFTSQuery(q string) string {
-	if strings.ContainsAny(q, `*"():`) {
+	// Power-user passthrough — explicit FTS5 wildcard (`*`) or phrase quote
+	// (`"`) signals a hand-crafted query that should bypass the prose
+	// rewriter. The earlier sigil set included `()`/`:` as well, but those
+	// punctuation marks routinely show up in natural-language task
+	// descriptions (e.g. "Where does (NewBlockChain) get called:") and the
+	// false-power-user classification caused FTS5 to choke on the raw
+	// parenthesis as a "syntax error near 'does'". Reported 2026-05-11 in
+	// go-stablenet VERIFICATION_REPORT §7.3 as B1's adjacent case. We now
+	// route those queries through the same per-token sanitiser as plain
+	// prose; `trimFTSToken` strips boundary `(` / `)` / `:` so the FTS5
+	// expression stays well-formed. Hand-crafted FTS5 queries that rely
+	// on grouping or column filters can still opt in by adding `*` or `"`.
+	if strings.ContainsAny(q, `*"`) {
 		return q
 	}
 	fields := strings.Fields(q)

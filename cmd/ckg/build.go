@@ -12,7 +12,7 @@ import (
 func newBuildCmd() *cobra.Command {
 	var src, out, dbDsn, filesFrom string
 	var langs []string
-	var noCache, rebuildMetrics, strictValidate bool
+	var noCache, rebuildMetrics, strictValidate, lockPropagation bool
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
@@ -24,16 +24,17 @@ func newBuildCmd() *cobra.Command {
 			defer cleanup()
 
 			m, err := buildpipe.Run(buildpipe.Options{
-				SrcRoot:        src,
-				OutDir:         out,
-				Languages:      langs,
-				Logger:         log,
-				CKGVersion:     ckgVersion,
-				NoCache:        noCache,
-				RebuildMetrics: rebuildMetrics,
-				DBDSN:          dbDsn,
-				StrictValidate: strictValidate,
-				FilesFromPath:  filesFrom,
+				SrcRoot:         src,
+				OutDir:          out,
+				Languages:       langs,
+				Logger:          log,
+				CKGVersion:      ckgVersion,
+				NoCache:         noCache,
+				RebuildMetrics:  rebuildMetrics,
+				DBDSN:           dbDsn,
+				StrictValidate:  strictValidate,
+				FilesFromPath:   filesFrom,
+				LockPropagation: lockPropagation,
 			})
 			if err != nil {
 				return err
@@ -56,6 +57,8 @@ func newBuildCmd() *cobra.Command {
 		"abort on first dangling edge (legacy v0.x behaviour); default lenient drops them with a warning")
 	cmd.Flags().StringVar(&filesFrom, "files-from", "",
 		"path to JSON file with {include, exclude} glob patterns; restricts which files reach the parsers")
+	cmd.Flags().BoolVar(&lockPropagation, "lock-propagation", false,
+		"enable Go cross-function lock propagation (W-A, D1 Stage B DFS depth=5); requires --no-cache to take full effect")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

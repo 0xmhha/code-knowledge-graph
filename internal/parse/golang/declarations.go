@@ -82,6 +82,22 @@ type declVisitor struct {
 	// anonymous CallSite. Key = variable name string (AST-level, not qualified).
 	// Re-initialized per function scope in emitFunctionBodyPos.
 	chanVarIDs map[string]string
+	// funcFieldTouches records, for each Function/Method node ID emitted by
+	// visitFuncDecl, the set of struct-Field node IDs whose values are
+	// read or written anywhere inside the body. Populated even when the
+	// function holds NO lock — buildpipe's cross-function lock propagation
+	// pass (W-A, opt-in via --lock-propagation) walks the call graph from
+	// lock-holding callers into their callees and uses this map to discover
+	// "what fields does this callee touch?" without re-parsing.
+	//
+	// Stored as a set (map[string]struct{}) per func so DFS dedup is O(1)
+	// and accidental double-emit from repeated field references inside the
+	// same body (e.g. `x.f++; x.f++`) collapses to a single entry.
+	//
+	// Nil-safe: callers must check map presence before iteration. Only
+	// populated when typesInfo != nil — AST-only mode has no reliable
+	// way to distinguish field references from method receivers.
+	funcFieldTouches map[string]map[string]struct{}
 }
 
 func newDeclVisitor(fset *token.FileSet, relPath, pkgName string) *declVisitor {
@@ -263,6 +279,14 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 	// referenced inside a function that holds at least one lock. No-op when
 	// typesInfo is nil or the body holds no lock — keeps AST-only mode safe.
 	v.emitAccessedUnderLock(id, d.Body)
+	// W-A (D1 Stage 2, opt-in via --lock-propagation): record funcID → fields
+	// touched for ALL functions (lock-holding or not). buildpipe's
+	// propagateLockedFieldAccessDFS reads this map after Pass 2 to walk the
+	// call graph and emit accessed_under_lock for callee field accesses under
+	// caller-held locks. No-op when typesInfo is nil — declarations.go's
+	// fieldNodeIDs is empty in AST-only mode and collectFieldAccesses would
+	// return an empty set anyway.
+	v.recordFuncFieldTouches(id, d.Body)
 }
 
 // helpers

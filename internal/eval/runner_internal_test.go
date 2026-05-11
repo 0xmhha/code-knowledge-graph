@@ -65,6 +65,58 @@ func TestExtractSymbols_ReceiverNormalisation(t *testing.T) {
 	}
 }
 
+// TestExtractSymbols_FileExtensionBlacklist locks L2-2-1 fix
+// (2026-05-11 VERIFICATION_REPORT §8.3): LLM verbose answers that cite
+// file paths (`see core.NewBlockChain in core/blockchain.go`) used to
+// drag those file references into the symbol set, pushing precision
+// below the rubric's 0.7 threshold and zeroing out the score even when
+// the real qualified-name answers were correct. extractSymbols now
+// drops path-like tokens (`/` separator) and tokens whose trailing
+// dot-segment matches a recognised source/markup extension.
+func TestExtractSymbols_FileExtensionBlacklist(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "path-with-slash dropped",
+			in:   "See core.NewBlockChain in core/blockchain.go for details.",
+			want: []string{"core.NewBlockChain"},
+		},
+		{
+			name: "bare file name with .go dropped",
+			in:   "Defined in blockchain.go alongside eth.Ethereum.New.",
+			want: []string{"eth.Ethereum.New"},
+		},
+		{
+			name: "TS file extension dropped",
+			in:   "see auth.ts and user.Service.login for the flow",
+			want: []string{"user.Service.login"},
+		},
+		{
+			name: "markdown reference dropped",
+			in:   "documented in README.md; symbol is pkg.Helper.Run",
+			want: []string{"pkg.Helper.Run"},
+		},
+		{
+			name: "no-symbol-only-paths",
+			in:   "see core/blockchain.go and eth/handler.go",
+			want: []string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractSymbols(tc.in)
+			sort.Strings(got)
+			sort.Strings(tc.want)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("extractSymbols(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestWriteCSV_RawOutputColumn locks L2 fix (2026-05-11 VERIFICATION_REPORT
 // §5 L2-1): the writeCSV header + each row now carries the raw LLM output
 // as the 10th column so post-hoc analysis of low scores doesn't need an
