@@ -863,9 +863,9 @@ func extractURLPath(raw string) string {
 }
 
 // upsertHTTPClientPlaceholder emits an AMBIGUOUS placeholder Endpoint for an
-// http_calls edge target. The placeholder uses Language="" (sentinel for
-// "client-side intent; resolution pending") so it doesn't collide with real
-// server-side Endpoint IDs that include "go"/"ts" in their hash input.
+// http_calls edge target. The placeholder uses Language="external" (sentinel
+// for "client-side intent; resolution pending") so it doesn't collide with
+// real server-side Endpoint IDs that include "go"/"ts" in their hash input.
 //
 // The link pass (internal/link/http_match.go) replaces these placeholders
 // with real Endpoint IDs when a server-side handler is detected on a matching

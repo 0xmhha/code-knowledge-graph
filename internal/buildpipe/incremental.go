@@ -153,14 +153,17 @@ func runIncremental(opt Options, log *slog.Logger,
 	// FilePath, so the per-file CASCADE in step (2) does not remove them —
 	// they must be dropped here or every incremental build duplicates rows.
 	//
-	// http_calls (W2, schema 1.9): kept in DB for cached client files. The
-	// per-file CASCADE removes edges from dirty client files; cached client
-	// edges retain whatever Dst they had after the prior MatchHTTPClients
-	// pass (a real Endpoint or an AMBIGUOUS placeholder). Known V0 gap:
-	// if a dirty file ADDS a server Endpoint that would now match a cached
-	// AMBIGUOUS http_calls edge, the cached edge is not re-matched — operators
-	// can force-rematch via --no-cache. Tracked in schema-1.9-spec §8.
-	for _, t := range []string{"changed_in", "blame", "binds_to", "implements", "extends"} {
+	// http_calls (W2, schema 1.9): rebuilt every incremental pass. cached
+	// client files are reloaded into memory by reloadCachedEdges (with
+	// non-zero IDs); MatchHTTPClients re-matches them against the current
+	// Endpoint set and resets their IDs to 0 so the persist step INSERTs
+	// fresh rows. The DeleteEdgesByType("http_calls") here clears the
+	// stale rows the cached files originally INSERTed; the next persist
+	// pass rewrites them with the up-to-date Dst (specific verb / wildcard /
+	// AMBIGUOUS placeholder). Without this cycle, a dirty file ADDING a
+	// server Endpoint would leave cached AMBIGUOUS http_calls edges
+	// stranded — review-flagged behaviour, now fixed.
+	for _, t := range []string{"changed_in", "blame", "binds_to", "implements", "extends", "http_calls"} {
 		if err := store.DeleteEdgesByType(t); err != nil {
 			return persist.Manifest{}, fmt.Errorf("clear %s: %w", t, err)
 		}
