@@ -14,7 +14,7 @@ func TestAllNodeTypes_Count(t *testing.T) {
 }
 
 func TestAllEdgeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllEdgeTypes()), 40; got != want {
+	if got, want := len(types.AllEdgeTypes()), 41; got != want {
 		t.Fatalf("AllEdgeTypes count = %d, want %d", got, want)
 	}
 }
@@ -46,6 +46,7 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 		types.EdgeHTTPCalls,
 		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 		types.EdgeAwaits, types.EdgeOverrides,
+		types.EdgeUsesFor,
 	}
 	have := make(map[types.EdgeType]struct{}, len(types.AllEdgeTypes()))
 	for _, e := range types.AllEdgeTypes() {
@@ -92,8 +93,9 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 // TestAllEdgeTypes_Stable mirrors the node-stability check for edges.
 // Lock edges, distributed edges, temporal edges, context-path edges,
 // hunk-graph edges, the W2 http_calls edge, the W3b grpc_listens_on /
-// grpc_calls edges, and the schema 1.10 W-B `awaits` + W-C `overrides`
-// slots are appended at the end — never interleaved.
+// grpc_calls edges, the schema 1.10 W-B `awaits` + W-C `overrides`
+// slots, and the schema 1.10 W-C W6 `using_for` slot are appended at the
+// end — never interleaved.
 func TestAllEdgeTypes_Stable(t *testing.T) {
 	want := []types.EdgeType{
 		types.EdgeContains, types.EdgeDefines, types.EdgeCalls, types.EdgeInvokes, types.EdgeUsesType,
@@ -109,6 +111,7 @@ func TestAllEdgeTypes_Stable(t *testing.T) {
 		types.EdgeHTTPCalls,
 		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 		types.EdgeAwaits, types.EdgeOverrides,
+		types.EdgeUsesFor,
 	}
 	if !reflect.DeepEqual(types.AllEdgeTypes(), want) {
 		t.Fatalf("AllEdgeTypes order changed:\n got=%v\nwant=%v", types.AllEdgeTypes(), want)

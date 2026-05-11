@@ -574,32 +574,35 @@ Vault.deposit  --[no edge]-->  ???  (.add 미해결, drop)
 type 이 다른 contract 에서 다른 library 에 bind 될 수 있음. binding map
 은 contractID 별로 분리.
 
-#### 4.6.3 결정 필요 — Q9 후속
+#### 4.6.3 결정 결과 — Q9 후속 (2026-05-12)
 
-W6 의 graph 표현 방법 두 갈래:
+W6 의 graph 표현 방법:
 
 | 옵션 | 그래프 표현 | schema | LOC | trade-off |
 |------|-----------|--------|-----|-----------|
-| **(b) 별도 EdgeUsesFor** | (Contract→Library) `uses_for` + dispatch 는 `calls` | EdgeUsesFor 추가 (1.10 append 또는 1.11) | +50 | 명시적 binding 가시화. 다만 schema bump 필요 + viewer 새 edge 처리 |
-| **(c) EdgeCalls 재사용** | dispatch 는 기존 `calls`. binding 은 detector 내부 (graph 미표시) | 변경 없음 | +200 | 사용자 query "이 library 가 어디 binding 됐나" 어려움. graph clean. schema 안정 |
+| **(b) 별도 EdgeUsesFor** | (Contract→Library) `using_for` + dispatch 는 `calls` | schema 1.10 append (EdgeUsesFor 추가) | +50 over (c) | Solidity binding semantics first-class — extends/implements/overrides/has_modifier 와 동급. viewer/SQL 단일 edge filter 로 "어디 binding?" 답 가능 |
+| (c) EdgeCalls 재사용 | dispatch 는 기존 `calls`. binding 은 detector 내부 (graph 미표시) | 변경 없음 | baseline | graph 표현 일관성 위반 — extends 도 syntactic level 이지만 first-class 인데 using_for 만 invisible |
 
-**권장**: **(c)**. 이유:
-- schema 1.10 이미 NodeAwaitPoint / EdgeAwaits / EdgeOverrides 로
-  bump 됐고, W6 만 위해 추가 EdgeType 도입은 cost > benefit.
-- using directive 자체는 *parsing artifact* 라 그래프에서 별도 노출
-  안 해도 됨. 실용적 가치는 dispatch resolution (어디서 SafeMath.add
-  호출되나) — 이건 EdgeCalls 로 충분.
-- "binding 어디?" query 는 SQL 으로 contractID + library 의
-  has-method via funcByQName 으로 재구성 가능 (별도 패널 필요시).
-- viewer 통합 비용 0 (기존 EdgeCalls 색상/그룹 그대로 사용).
+**결정 (2026-05-12)**: **Q9-1 = (b)** EdgeUsesFor 신규.
 
-**결정 요청 항목**:
-- Q9-1: 권장안 (c) 채택 vs (b) 채택?
-- Q9-2: receiver type 추론의 V0 한계 — 단순 식별자만 (state variable
-  / parameter) vs return value chaining (`foo().bar.add(1)`) 도?
-  권장: 식별자만 (V0 단순화, chaining 은 별도 spec).
-- Q9-3: `using for *` (wildcard binding) 의 fallback 우선순위 —
-  특정 타입 binding 우선, 없으면 `*` fallback. 권장: 위 순서대로.
+이유:
+- **Solidity semantics first-class 표현**. extends / implements / overrides
+  / has_modifier / emits_event / reads_mapping 등 다른 Sol-specific 의미가
+  모두 first-class EdgeType. `using_for` 만 invisible 하면 그래프 일관성
+  위반 — 사용자의 정당한 지적 (2026-05-12 결정 turn).
+- **추가 비용 실제로 미미**. EdgeType 1 줄 + AllEdgeTypes append + viewer
+  edges.ts 등록 (G2 카테고리, 1 entry) = ~40 LOC. 본체 +200 LOC 대비 20%
+  미만.
+- **사용자 query 직관**. "이 contract 가 어떤 library 를 binding 했나" 가
+  `WHERE edge.type='using_for'` 한 줄로 답 가능. SQL 재구성 필요 없음.
+- **viewer 통합 cost 같은 idiom**. 직전 turn `7af9ce4` 에서 5종 edge 를
+  같은 패턴 (G2 등록, 1 entry) 으로 통합 — 추가 1 entry 는 동일 cost 패턴.
+
+**Q9-2 = (a)** Receiver type 추론 — V0 식별자만 (state variable / parameter
+type). Return value chaining (`foo().bar.add(1)`) 은 별도 spec 으로 분리.
+
+**Q9-3 = (a)** Wildcard binding fallback — specific-first (특정 타입
+binding 우선, 없으면 `*` fallback).
 
 #### 4.6.4 구현 sketch (권장안 (c) 가정)
 

@@ -129,7 +129,7 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
-// EdgeType enumerates the 40 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 41 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
@@ -321,17 +321,31 @@ const (
 	//                   dispatch resolution. See
 	//                   docs/design/solidity-inheritance-and-interface-dispatch.md
 	//                   §2.1 + §3.3.
+	//   using_for (W-C W6): Contract → Library binding emitted from
+	//                   `using SafeMath for uint256` directives. First-class
+	//                   so binding queries can run as a single edge-type
+	//                   filter (matches the extends/implements/overrides/
+	//                   has_modifier idiom — every other Sol-specific
+	//                   semantic relation is already first-class). Q9-1 (b)
+	//                   decision (2026-05-12). Direction = contract →
+	//                   library; the call site of `balance.add(...)` still
+	//                   produces a separate EdgeCalls into the library
+	//                   function. See solidity-inheritance-and-interface-
+	//                   dispatch.md §4.6.
 	//
 	// Appended at the end so existing edge-type hash positions / test
 	// snapshots stay stable.
 	EdgeAwaits    EdgeType = "awaits"
 	EdgeOverrides EdgeType = "overrides"
+	EdgeUsesFor   EdgeType = "using_for"
 )
 
-// AllEdgeTypes returns all 40 edge types in stable order.
+// AllEdgeTypes returns all 41 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 // EdgeAwaits (W-B) + EdgeOverrides (W-C) are appended at indices 38-39
 // for schema 1.10 (slot-only; detectors land in Phase 5).
+// EdgeUsesFor (W-C W6) is appended at index 40 (schema 1.10 W6 — using
+// For library extension; first-class binding edge per Q9-1 (b) 2026-05-12).
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
 		EdgeContains, EdgeDefines, EdgeCalls, EdgeInvokes, EdgeUsesType,
@@ -347,6 +361,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeHTTPCalls,
 		EdgeGRPCListensOn, EdgeGRPCCalls,
 		EdgeAwaits, EdgeOverrides,
+		EdgeUsesFor,
 	}
 }
 
