@@ -628,7 +628,7 @@ Scoring pass:
 Three reasons:
 
 1. **No new infra dependency.** The S0 acceptance constraint
-   (`docs/STATUS-REPORT-2026-05-04.md` and similar) requires
+   (`docs/archive/STATUS-REPORT-2026-05-04.md` and similar) requires
    determinism: same DB, same query, same output. BM25 is deterministic;
    any embedding-based ranker introduces a model-version dependency.
 2. **Quality is good enough at this scale.** The Agent's queries are
@@ -873,9 +873,12 @@ The blob rows fall away via the existing `ON DELETE CASCADE` on
   (35)" entries for `has_hunk` / `modifies` / `adjacent`, and bump the
   schema-version header from 1.7 to 1.8.
 - `internal/persist/SCHEMA.md`: same bump.
-- `docs/G6-INCREMENTAL-REDESIGN.md`: append a "Hunk graph follow-up"
-  section pointing here.
-- `docs/HANDOFF.md` (or its equivalent): mention the new MCP tool.
+- `docs/archive/G6-INCREMENTAL-REDESIGN.md` (archived 2026-05-11):
+  no further follow-up needed — G6 v4 + C1 have landed; partial-cache
+  routing is stable and the design history is preserved for reference.
+- `docs/SESSION-HANDOFF-2026-05-10.md` (current hand-off): mentions the
+  Hunk graph stages and MCP `evidence_for_intent` tool. Older
+  `docs/archive/HANDOFF-2026-05-04.md` is preserved for context only.
 
 ---
 

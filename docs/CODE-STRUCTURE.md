@@ -37,7 +37,7 @@
 | **이름** | CKG (Code Knowledge Graph) |
 | **버전** | v0.2.x (schema 1.5) |
 | **언어** | Go 1.25.5 (single binary, CGO-free default) |
-| **목적** | Go/TypeScript/Solidity 소스 → 코드 지식 그래프 (33 NodeType × 30 EdgeType) |
+| **목적** | Go/TypeScript/Solidity 소스 → 코드 지식 그래프 (34 NodeType × 35 EdgeType, schema 1.8) |
 | **활용** | 3D viewer + MCP server + Eval framework + audit |
 | **검증 corpus** | go-stablenet-latest 2,142 files → 217K nodes / 669K edges, audit PARITY ✅ |
 | **저장소** | SQLite (default, modernc) / PostgreSQL (`--db postgres://...`, pgxpool) |
@@ -48,22 +48,31 @@
 
 | 문서 | 역할 | 핵심 내용 | 갱신 빈도 |
 |---|---|---|---|
-| **HANDOFF.md** | 세션 경계 snapshot | 현재 상태, 남은 작업, 함정 (cold-read 5분) | wave마다 |
-| **WORK-PLAN.md** | 작업 tracker | Group A~G, Wave 1~9 진행상황 | wave마다 |
+| **SESSION-HANDOFF-2026-05-10.md** | 현재 세션 경계 snapshot | schema 1.8 + H1-H4 + perf 8 누적 상태 (cold-read 5분) | 세션마다 |
+| **SESSION-HANDOFF-2026-05-08.md** | 직전 세션 경계 | viewer UX 개편 + Track C/D + spec 정합 (이전 진입점) | snapshot |
+| **NEXT-CANDIDATES-2026-05-10.md** | 후보 inventory | 10개 항목 상세 분석, 대부분 완료 | 세션마다 |
+| **PERF-BASELINE-2026-05-10.md** | bench 측정 baseline | bench-server/mcp/mcp-stdio 결과 | bench 갱신마다 |
+| **VERIFICATION-CHECKLIST.md** | PR-ready 체크리스트 | 4축 surface 매트릭스 + negative path + 5종 누락 패턴 | 안정 |
+| **HYDRATION-PATTERN.md** | viewer hydration 패턴 | React #418 anti-pattern + usePersistedState 사용법 | 안정 |
 | **ARCHITECTURE.md** | 1-page overview | 7-pass 파이프라인 한 줄 요약 | 안정 |
 | **ARCHITECTURE-DETAILED.md** | 전체 설계서 (994줄) | 17 sections — 패키지/스키마/MCP/CKS gap 분석 | 분기마다 |
 | **CODE-STRUCTURE.md** (본 문서) | 시각적·구조적 인덱스 | doc map + 패키지 layout + 다이어그램 모음 | 분기마다 |
-| **SCHEMA.md** | 노드/엣지 카탈로그 | 33 NodeTypes × 30 EdgeTypes, schema 버전 history | schema bump마다 |
+| **SCHEMA.md** | 노드/엣지 카탈로그 | 34 NodeTypes × 35 EdgeTypes, schema 버전 history (1.0~1.8) | schema bump마다 |
 | **INCREMENTAL.md** | A3 캐시 가이드 | cache_key 공식, manifest v2, 무효화 규칙, partial-cache D4 fallback | A3/G6 변경시 |
 | **EVAL.md** | 평가 사용법 | 4 baseline (α/β/γ/δ), 가설 H1/H2 | 안정 |
 | **STUDY-GUIDE.md** | 외부 개념 학습 | Leiden, MCP, tree-sitter, 3D layout 학습 경로 | 안정 |
+| **SELF-VERIFICATION.md** | 자기검증 매뉴얼 | self-graph로 사용자 7개 검토항목 만족 확인 명령 | 안정 |
 | **spec-ckg-v0.2.md** | foundation spec (497줄) | parser 마이그레이션·동시성·PG·incremental 설계 원전 | 안정 |
-| **G6-INCREMENTAL-REDESIGN.md** | partial-cache 재설계 | G6 v1~v4 시도 history, root cause H3 분석 | G6 진척시 |
-| **G6-V3-VALIDATION-FINDINGS.md** | v3 실패 분석 | +2675 phantom edges 원인 추적 | history |
-| **VIEWER-PERF-CLUSTERING.md** | viewer 성능 노트 | Next.js viewer 마이그레이션 background | history |
-| **STATUS-REPORT-2026-05-04.md** | 시점 status | refresh 7 시점 측정 metric | snapshot |
+| **design/hunk-graph.md** | Hunk-graph 설계 원본 | H1-H4 단계 + §11 8 결정 + acceptance criteria | 안정 (구현 완료) |
+| **design/track-c-detector-gap.md** | Track C 진단 | 0건/희소 edge type 분석 + 우선순위 (구현 완료) | 안정 |
+| **archive/HANDOFF-2026-05-04.md** | 보존 — 2026-05-04 hand-off | refresh 7 시점 snapshot (post-Wave 5 / G6 v4 / C1/C2) | archived |
+| **archive/WORK-PLAN-2026-05-04.md** | 보존 — 2026-05-04 work tracker | V0 + Group A~G + Wave 1~9 진행 history | archived |
+| **archive/STATUS-REPORT-2026-05-04.md** | 보존 — 시점 status | refresh 7 시점 측정 metric + S0 spec gap | archived |
+| **archive/G6-INCREMENTAL-REDESIGN.md** | 보존 — G6 v3 design spec | partial-cache 재설계 (v4로 해결됨) | archived |
+| **archive/G6-V3-VALIDATION-FINDINGS.md** | 보존 — v3 실패 분석 | H3 root cause 추적, v4 fix 방향 | archived |
+| **archive/VIEWER-PERF-CLUSTERING.md** | 보존 — viewer 마이그레이션 노트 | Next.js viewer Phase 0-3 + 마이그레이션 background | archived |
 
-**문서 위계**:
+**문서 위계** (post-Hunk-graph, 2026-05-11 정리):
 
 ```
 spec-ckg-v0.2.md (설계 원전)
@@ -72,16 +81,31 @@ spec-ckg-v0.2.md (설계 원전)
 ARCHITECTURE.md ─────► ARCHITECTURE-DETAILED.md ─────► CODE-STRUCTURE.md (본 문서)
    (1-page)               (deep dive 994줄)               (visual + index)
         │
-        ├──► SCHEMA.md         (data model)
+        ├──► SCHEMA.md         (data model, schema 1.8)
         ├──► INCREMENTAL.md    (cache 운영)
         ├──► EVAL.md           (평가 사용)
+        ├──► SELF-VERIFICATION.md (자기검증 매뉴얼)
         └──► STUDY-GUIDE.md    (외부 개념)
 
-운영 tracker:
-HANDOFF.md (세션 경계) ↔ WORK-PLAN.md (작업 진척)
+설계 원본 (구현 완료, 추적 참조):
+design/hunk-graph.md          (H1-H4, §11 결정)
+design/track-c-detector-gap.md (G2/G4/G5 detector 강화)
+
+세션 진입점 (운영 tracker):
+SESSION-HANDOFF-2026-05-10.md (현재) ◄── SESSION-HANDOFF-2026-05-08.md (직전)
         │
-        ├──► G6-INCREMENTAL-REDESIGN.md (partial-cache 깊은 분석)
-        └──► STATUS-REPORT-*.md (시점 metric snapshot)
+        ├──► NEXT-CANDIDATES-2026-05-10.md (후보 inventory)
+        ├──► PERF-BASELINE-2026-05-10.md  (bench baseline)
+        ├──► VERIFICATION-CHECKLIST.md    (PR workflow)
+        └──► HYDRATION-PATTERN.md         (viewer 패턴)
+
+archive/ (V0 완료 시점 + G6 v3 design history):
+        ├──► HANDOFF-2026-05-04.md
+        ├──► WORK-PLAN-2026-05-04.md
+        ├──► STATUS-REPORT-2026-05-04.md
+        ├──► G6-INCREMENTAL-REDESIGN.md
+        ├──► G6-V3-VALIDATION-FINDINGS.md
+        └──► VIEWER-PERF-CLUSTERING.md
 ```
 
 ---
@@ -548,14 +572,14 @@ G6 v4 ──► C1 ──► B3                                ✅ (B3 진입 �
 
 ---
 
-## 16. 운영 함정 (HANDOFF.md § 5에서 누적)
+## 16. 운영 함정 (archive/HANDOFF-2026-05-04.md § 5에서 누적)
 
 1. **subagent stall**: 큰 task는 token budget 명시(150-200K), real-corpus parity check 강제, 측정 결과 받기 전 commit 금지
 2. **gopls 캐시 지연**: `BrokenImport`/`UndeclaredName` IDE 경고는 false positive, `go test ./...` 그린이면 무시
 3. **commit 컨벤션**: NO Co-Authored-By 헤더, NO emoji, Conventional Commits English subject ≤70 chars, *why* 중심
 4. **Viewer build coupling**: `make build` 시 stub-restore 메커니즘으로 `git status` clean 유지
 5. **partial-cache D4**: mixed dirty/cached → cold fallback (correctness > speed). G6 v4(`ORDER BY start_line`) + C1(reverse-ref) 후 cold vs partial diff = 0 ✅
-6. **Heredoc commit message**: perl regex 같은 escape-prone tooling 금지 (이전에 WORK-PLAN.md 망친 사고 있음)
+6. **Heredoc commit message**: perl regex 같은 escape-prone tooling 금지 (이전에 archive/WORK-PLAN-2026-05-04.md 망친 사고 있음)
 
 ---
 

@@ -33,7 +33,7 @@ Any change in any contributor invalidates the cache for that file:
 | `file_content` | the file bytes | every edit |
 | `ckg_version` | `cmd/ckg/root.go: ckgVersion` | every CKG release |
 | `parser_version` | `runtime.Version()` for Go; tree-sitter module version for TS/Sol | toolchain or grammar bump |
-| `schema_version` | `internal/buildpipe/cache.go: SchemaVersion` (currently `"1.2"`) | extraction schema bump |
+| `schema_version` | `internal/buildpipe/cache.go: SchemaVersion` (currently `"1.8"`) | extraction schema bump |
 
 The schema_version is global — bumping it forces a full rebuild for every
 file (silent corruption defense; see decision D9 in `spec-ckg-v0.2.md`).

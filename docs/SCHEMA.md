@@ -1,27 +1,33 @@
 # CKG Schema (V0)
 
-Schema version: **1.6** (v0.2 — P2 added two G3 control-flow edge kinds
-(`timeout_path`, `cancellation_path`) for Go `context.With*` constructor
-sites. Pre-1.6 DBs lack those rows; the file-level cache treats the bump
-as cache-invalidating, so the next `ckg build` falls into the cold path
-on first run with this binary.)
+Schema version: **1.8** (Hunk-graph H1+H2 — added `NodeHunk` (one block
+of changed lines per commit×file) and three edges (`has_hunk`, `adjacent`,
+`modifies`). Patch text lives in `blobs.source` gzip-compressed, capped
+at 64KB. Confidence enum gained `AMBIGUOUS` semantics for unreachable
+history (see hunk-graph.md §11.3). Pre-1.8 DBs lack the Hunk rows and
+edges; the file-level cache treats every schema bump as cache-invalidating
+so the next `ckg build` falls into the cold path on first run with this
+binary.)
 
 A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
 incremental cache infrastructure (FK ON DELETE CASCADE on
 edges/blobs/pkg_tree/topic_tree); E3 (1.2 → 1.3) added distributed
-topology nodes/edges; E4 (1.3 → 1.4) adds temporal commit nodes/edges;
-G6v3 (1.4 → 1.5) added pending_refs persistence; P2 (1.5 → 1.6) adds
-context-propagation edges. All bumps invalidate the file-level cache by
-design.
+topology nodes/edges; E4 (1.3 → 1.4) added temporal commit nodes/edges;
+G6v3 (1.4 → 1.5) added pending_refs persistence; P2 (1.5 → 1.6) added
+context-propagation edges; Track C P1b (1.6 → 1.7) added the optional
+`dispatch_kind` metadata column on edges (populated only for `invokes`
+to disambiguate interface_method / func_value / method_value / closure);
+Hunk-graph H1+H2 (1.7 → 1.8) added NodeHunk + has_hunk/adjacent/modifies.
+All bumps invalidate the file-level cache by design.
 
-## Node types (33)
+## Node types (34)
 
 `Package, File, Struct, Interface, Class, TypeAlias, Enum, Contract,
 Mapping, Event, Function, Method, Modifier, Constructor, Constant,
 Variable, Field, Parameter, LocalVariable, Import, Export, Decorator,
 Goroutine, Channel, Mutex, IfStmt, LoopStmt, CallSite, ReturnStmt, SwitchStmt,
 Endpoint, MessageType,
-Commit`
+Commit, Hunk`
 
 LoopStmt uses `sub_kind ∈ {for, while, range, for_in, for_of}`.
 
@@ -51,9 +57,32 @@ repo-relative path (stable across builds inside the same repo),
 `start_line`/`end_line` = 1 (commits have no source range). Emitted
 by the post-Build temporal pass (`internal/buildpipe/temporal.go`)
 from a single `git log --raw --no-renames` invocation per build.
-Capped at 10 most-recent commits per file by default.
+Capped at 10 most-recent commits per file by default. Subject text is
+mined post-commit by the H4 issue-id pass (`temporal/issueid.go`): the
+4 regex families (`GH-#`, `[PROJ-N]`, JIRA prefix, GitHub issue URL)
+yield ticket IDs encoded back into the `Hunk.doc_comment` as a
+`issues:GH-42;JIRA-7` string.
 
-## Edge types (32)
+`Hunk` (Hunk-graph H1, schema 1.8): one contiguous block of changed
+lines in one file in one commit, as defined by unified-diff `@@`
+headers. `name` = `<sha12>:<file>:<idx>`, `qualified_name` =
+`hunk:<full-sha>:<file>:<idx>` (idx = 0-based per-commit hunk position
+so multiple hunks per commit get distinct IDs via MakeID).
+`sub_kind` = `git`, `language` = `git` (same sentinel as Commit).
+`start_line`/`end_line` = the hunk's @@ header new-file line range;
+`start_byte` = 0 / `end_byte` = 1 sentinels (the patch text lives in
+`blobs.source`, gzip-compressed; cap 64KB). `doc_comment` carries the
+optional `issues:` encoding when H4 matches a ticket in the parent
+commit's subject. Confidence semantics (hunk-graph.md §11.3, finalised
+2026-05-09): `EXTRACTED` for HEAD-reachable hunks (the only kind H1
+collects today); `AMBIGUOUS` reserved for unreachable hunks collected
+via reflog/fsck (slot live, parser does emit them when run with
+unreachable-collection enabled). The H3 EvidencePack assembler filters
+to `confidence='EXTRACTED'` so the LLM never sees code paths that were
+rolled back by force-push; the human Recovery panel surfaces AMBIGUOUS
+explicitly.
+
+## Edge types (35)
 
 `contains, defines, calls, invokes, uses_type, instantiates, references,
 reads_field, writes_field, imports, exports, implements, extends,
@@ -62,7 +91,8 @@ spawns, sends_to, recvs_from, binds_to,
 acquires_lock, releases_lock, accessed_under_lock,
 listens_on, handles_message, rpc_calls,
 changed_in, blame,
-timeout_path, cancellation_path`
+timeout_path, cancellation_path,
+has_hunk, adjacent, modifies`
 
 `acquires_lock`, `releases_lock`, `accessed_under_lock` are **slot-reserved**
 for B1 (Wave 5) — same status as `NodeMutex` above. The viewer registers
@@ -99,7 +129,42 @@ sites in the same function produce multiple edges (different `Line`).
 V0; deferred until a typed retry primitive lands (backoff library
 detection or annotated loops). Both edges off by default in the viewer.
 
+`has_hunk` (Hunk-graph H1, schema 1.8): `Commit` → `Hunk`. One per Hunk;
+"this commit produced this block of changed lines". Confidence mirrors
+the Hunk's own (EXTRACTED for HEAD-reachable, AMBIGUOUS for unreachable
+hunks added by the reflog-collection pass).
+
+`adjacent` (Hunk-graph H1, schema 1.8): `Hunk` → `Hunk` between same-
+commit, same-file hunks ordered by their @@ header start line. Provides
+a deterministic "next-in-this-file" traversal so the EvidencePack
+assembler can stitch a multi-hunk view of a commit's edits without a
+separate ORDER BY query. Emitted only between hunks within one
+(commit, file) pair — never across commits or files.
+Out-of-scope clusterings (out of H1 scope, see hunk-graph.md §11.5):
+`same_logical_change` across commits.
+
+`modifies` (Hunk-graph H2, schema 1.8): `Hunk` → CodeNode (Function /
+Method / Struct / Interface / Field / etc.) when the hunk's
+`[start_line, end_line]` interval overlaps the CodeNode's interval
+inside the same file. Whitelisted to FunctionLike + TypeLike + Field-ish
+(13 node types) so noise-level statement nodes (CallSite / IfStmt / …)
+don't blow up the edge count without retrieval signal. See
+`docs/design/hunk-graph.md §4` for the whitelist rationale.
+
+## Edge metadata: `dispatch_kind` (schema 1.7)
+
+The `edges` table has an optional `dispatch_kind TEXT` column populated
+only for the `invokes` edge type. Values: `interface_method`,
+`func_value`, `method_value`, `closure` (Track C P1b). Empty string
+otherwise. Migrate() ALTER-ADDs this column when opening a pre-1.7 DB
+(see `sqlite.go::ensureDispatchKindColumn`). SELECT projections
+enumerate columns explicitly (no SELECT *) so pre-1.7 readers tolerate
+the column being absent.
+
 ## Confidence
 
-`EXTRACTED` (direct from AST) | `INFERRED` (heuristic / dispatch) | `AMBIGUOUS` (unresolved).
+`EXTRACTED` (direct from AST) | `INFERRED` (heuristic / dispatch) |
+`AMBIGUOUS` (unreachable history — Hunk/Commit added by force-pushed
+branches; filtered out of LLM-facing retrieval by the `llmSafeStoreReader`
+wrapper, surfaced explicitly in the human Recovery panel).
 
