@@ -3,13 +3,17 @@
 // `grpc_calls` edge from the enclosing TS function to an AMBIGUOUS
 // placeholder Endpoint with qname `grpc:Service.Method`.
 //
-// Expected placeholder Endpoint qnames:
+// Expected placeholder Endpoint qnames (camelCase reflects the observed
+// JS method name — V0 emits the AST-visible token without proto-PascalCase
+// normalisation):
 //
-//   grpc:GreetService.SayHello         (createPromiseClient + method call)
-//   grpc:GreetService.SayGoodbye       (await client.sayGoodbye(req))
-//   grpc:NotificationService.Subscribe (createClient — Connect-ES new shape)
+//   grpc:GreetService.sayHello         (createPromiseClient + method call)
+//   grpc:GreetService.sayGoodbye       (await client.sayGoodbye(req))
+//   grpc:NotificationService.subscribe (createClient — Connect-ES new shape)
 //
-// Confidence per §6.5 (c) for TS: all INFERRED.
+// Confidence per §6.5 (c) for TS: all INFERRED. Patterns B/C
+// (createPromiseClient / createClient) are NOT gated on imports — the
+// factory names are distinctive enough on their own.
 
 import { createPromiseClient } from '@bufbuild/connect-web';
 import { createClient } from '@connectrpc/connect';
@@ -23,8 +27,8 @@ import { SubscribeRequest } from './gen/notification_pb';
 // Multiple method calls on the same client emit one grpc_calls edge each,
 // both sharing the same Service-derived qname prefix.
 //
-// Expected: grpc_calls → grpc:GreetService.SayHello (INFERRED)
-// Expected: grpc_calls → grpc:GreetService.SayGoodbye (INFERRED)
+// Expected: grpc_calls → grpc:GreetService.sayHello (INFERRED)
+// Expected: grpc_calls → grpc:GreetService.sayGoodbye (INFERRED)
 export async function callGreet(name: string): Promise<void> {
   const transport = createConnectTransport({
     baseUrl: 'https://api.example.com',
@@ -41,7 +45,7 @@ export async function callGreet(name: string): Promise<void> {
 // Pattern B: createClient(Service, transport) — Connect-ES rename.
 // Equivalent emit semantics.
 //
-// Expected: grpc_calls → grpc:NotificationService.Subscribe (INFERRED)
+// Expected: grpc_calls → grpc:NotificationService.subscribe (INFERRED)
 export async function callSubscribe(): Promise<void> {
   const transport = createConnectTransport({
     baseUrl: 'https://api.example.com',

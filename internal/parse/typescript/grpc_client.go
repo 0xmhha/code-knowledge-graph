@@ -42,11 +42,24 @@
 // (mirroring the §6.5 V0 limitation already documented for Go).
 //
 // Per §6.5 (c) — typesInfo is unavailable in tree-sitter parses, so
-// every TS gRPC call edge is INFERRED. The import-path heuristic
-// (`@improbable-eng/grpc-web`, `grpc-web`, `@bufbuild/connect-web`,
-// `@connectrpc/connect`, etc.) is recorded but not used to upgrade
-// confidence — the Service-name + method-call structure carries the
-// signal.
+// every TS gRPC call edge is INFERRED.
+//
+// Pattern A (`new <Svc>Client(host)`) is gated on a file-scoped
+// import-path heuristic: at least one import from `grpc-web`,
+// `@improbable-eng/grpc-web`, `@bufbuild/connect-web`, `@connectrpc/connect`,
+// `nice-grpc`, or any path matching `*grpc*` must be present, otherwise
+// the suffix `*Client` is far too common (RedisClient / PrismaClient /
+// ApolloClient / HttpClient / S3Client / KafkaClient / MongoClient /
+// ElasticsearchClient / ApiClient) to be treated as a gRPC stub. This
+// was raised by W3c code-review as Important #1 (2026-05-11) — the prior
+// implementation matched `*Client` unconditionally and would have
+// produced AMBIGUOUS placeholders for every non-gRPC client in a real
+// monorepo.
+//
+// Patterns B (`createPromiseClient` / `createClient`) and C
+// (`grpc.unary(Service.Method, ...)`) carry distinctive function names
+// and are NOT gated — their signal-to-noise ratio is high enough that
+// false positives in real code are vanishingly rare.
 //
 // Out of scope (deferred):
 //   - nice-grpc, twirp, ts-proto generated clients — same shape as
@@ -85,8 +98,76 @@ import (
 func (v *declVisitor) runGRPCClients() {
 	intervals := collectFnIntervalsFromTree(v)
 	v.grpcClientStubsTS = map[string]string{}
+	// Pattern A gating signal — file-scoped scan for gRPC library imports.
+	// See module header for the rationale (W3c review Important #1, 2026-05-11).
+	v.tsGRPCImportPresent = fileHasGRPCImport(v.root, v.src)
 	v.collectGRPCClientStubs(v.root, intervals)
 	v.walkForGRPCClientCalls(v.root, intervals)
+}
+
+// fileHasGRPCImport reports whether the parse tree contains at least one
+// import_statement whose source string matches a known gRPC library path.
+// The set of recognised paths is small and dominant; nice-grpc and other
+// vendor variants fall back to the generic `*grpc*` substring rule (so
+// e.g. `nice-grpc-common`, `@grpc/grpc-js` also activate Pattern A).
+//
+// The check is intentionally string-based rather than parser-aware: every
+// TS module-level import either spells out the dependency literally or
+// re-exports through a barrel; the latter is rare enough in gRPC client
+// code that we don't bother chasing. False negatives here surface as
+// missing grpc_calls edges — auditable via the same path-trace UX as any
+// other detector gap.
+func fileHasGRPCImport(root *sitter.Node, src []byte) bool {
+	if root == nil {
+		return false
+	}
+	// Known dominant gRPC client libraries — match by exact equality on
+	// the import source string.
+	var exact = []string{
+		"grpc-web",
+		"@improbable-eng/grpc-web",
+		"@bufbuild/connect-web",
+		"@connectrpc/connect",
+		"@connectrpc/connect-web",
+	}
+	return walkForGRPCImport(root, src, exact)
+}
+
+func walkForGRPCImport(n *sitter.Node, src []byte, exact []string) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind() == "import_statement" {
+		// Source string lives in a child of kind "string"; payload is the
+		// quoted literal (e.g. `"grpc-web"`). We strip surrounding quotes
+		// and compare against the exact list + the generic `grpc` substring.
+		count := int(n.ChildCount())
+		for i := 0; i < count; i++ {
+			child := n.Child(uint(i))
+			if child == nil || child.Kind() != "string" {
+				continue
+			}
+			raw := child.Utf8Text(src)
+			raw = strings.Trim(raw, "\"'`")
+			for _, e := range exact {
+				if raw == e {
+					return true
+				}
+			}
+			// Generic fallback: any import whose path mentions "grpc"
+			// (e.g. nice-grpc-common, @grpc/grpc-js, my-org/grpc-internal).
+			if strings.Contains(raw, "grpc") {
+				return true
+			}
+		}
+	}
+	count := int(n.ChildCount())
+	for i := 0; i < count; i++ {
+		if walkForGRPCImport(n.Child(uint(i)), src, exact) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectGRPCClientStubs walks the parse tree for variable_declarator nodes
@@ -147,6 +228,16 @@ func (v *declVisitor) maybeTrackGRPCClientStub(decl *sitter.Node, intervals []fn
 	}
 	svc := extractGRPCServiceFromConstructor(valueNode, v.src)
 	if svc == "" {
+		return
+	}
+	// Pattern A gating — `new <Svc>Client(host)` is the noisiest signal
+	// (RedisClient / PrismaClient / ApolloClient / HttpClient / S3Client /
+	// MongoClient / ApiClient all match the `*Client` suffix). Require
+	// a gRPC library import in the file before honouring the binding.
+	// Pattern B (createPromiseClient / createClient) uses an explicit
+	// factory name and is never gated. See module header + W3c review
+	// Important #1 (2026-05-11).
+	if valueNode.Kind() == "new_expression" && !v.tsGRPCImportPresent {
 		return
 	}
 	fnID, _ := findEnclosingFn(intervals, int(decl.StartByte()))

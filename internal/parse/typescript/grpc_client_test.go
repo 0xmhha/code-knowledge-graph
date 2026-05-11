@@ -145,6 +145,115 @@ func TestTSGRPCClient_NoMatchOnNonGRPC(t *testing.T) {
 	}
 }
 
+// TestTSGRPCClient_PatternAGatedByImport locks W3c review Important #1
+// (2026-05-11): without an explicit gRPC library import, Pattern A
+// (`new <Svc>Client(host)`) must NOT emit grpc_calls edges. The `*Client`
+// suffix is far too common in TS ecosystems (RedisClient, PrismaClient,
+// HttpClient, ApolloClient, S3Client, MongoClient, KafkaClient,
+// ElasticsearchClient, ApiClient, ...) to be treated as a gRPC stub on
+// the suffix heuristic alone.
+//
+// Patterns B (createPromiseClient) and C (grpc.unary) are NOT gated —
+// their factory/descriptor names are distinctive enough.
+func TestTSGRPCClient_PatternAGatedByImport(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "RedisClient — no gRPC import",
+			src: `
+				export function useRedis(): void {
+				  const redis = new RedisClient({ host: 'localhost' });
+				  redis.get('key');
+				}
+			`,
+		},
+		{
+			name: "PrismaClient — no gRPC import",
+			src: `
+				export async function fetchUsers(): Promise<void> {
+				  const prisma = new PrismaClient();
+				  await prisma.findMany();
+				}
+			`,
+		},
+		{
+			name: "HttpClient with non-gRPC import",
+			src: `
+				import axios from 'axios';
+				export function callApi(): void {
+				  const http = new HttpClient();
+				  http.get('/api/users');
+				}
+			`,
+		},
+		{
+			name: "ApolloClient with apollo-client import (non-gRPC despite client suffix)",
+			src: `
+				import { ApolloClient } from '@apollo/client';
+				export function query(): void {
+				  const client = new ApolloClient({ uri: 'http://x' });
+				  client.query({ query: null });
+				}
+			`,
+		},
+	}
+	p := tsp.New(".")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, err := p.ParseFile("client.ts", []byte(tc.src))
+			if err != nil {
+				t.Fatalf("ParseFile: %v", err)
+			}
+			for _, e := range r.Edges {
+				if e.Type == types.EdgeGRPCCalls {
+					t.Errorf("Pattern A gating failed — non-gRPC %s emitted grpc_calls edge: %+v",
+						tc.name, e)
+				}
+			}
+			for _, n := range r.Nodes {
+				if n.Type == types.NodeEndpoint && n.SubKind == "grpc" {
+					t.Errorf("Pattern A gating failed — non-gRPC %s emitted gRPC Endpoint: %+v",
+						tc.name, n)
+				}
+			}
+		})
+	}
+}
+
+// TestTSGRPCClient_PatternAActivatedByImport locks the inverse: when a
+// gRPC library import IS present, Pattern A activates and the `*Client`
+// suffix produces the expected grpc_calls + AMBIGUOUS placeholder.
+// Together with PatternAGatedByImport this fixes the gate at exactly
+// the right place — neither false-positive nor false-negative.
+func TestTSGRPCClient_PatternAActivatedByImport(t *testing.T) {
+	src := []byte(`
+		import { grpc } from '@improbable-eng/grpc-web';
+		import { UserServiceClient } from './gen/user_service';
+		export function callUser(): void {
+		  const client = new UserServiceClient('https://api.example.com');
+		  client.getUser({ id: '1' });
+		}
+	`)
+	p := tsp.New(".")
+	r, err := p.ParseFile("gated.ts", src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	found := false
+	for _, n := range r.Nodes {
+		if n.Type == types.NodeEndpoint && n.QualifiedName == "grpc:UserService.getUser" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Pattern A activation failed — expected grpc:UserService.getUser " +
+			"placeholder Endpoint with gRPC import present")
+	}
+}
+
 // TestTSGRPCClient_UnmatchedClientStillPlaceholder verifies §6.3 (B):
 // when a TS gRPC call hits a service that has no corresponding Go server
 // in the graph, the AMBIGUOUS placeholder is retained so the audit pane

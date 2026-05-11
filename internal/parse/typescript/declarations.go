@@ -43,6 +43,14 @@ type declVisitor struct {
 	// cross-language linker pass can reuse the same suffix matcher
 	// (schema 1.9 §3.4, §6.5).
 	grpcClientPlaceholderIDsTS map[string]string
+	// tsGRPCImportPresent caches whether this file imports any known
+	// gRPC client library. Pattern A (`new <Svc>Client(host)`) emits
+	// gRPC stubs only when this is true — without the gating, common
+	// non-gRPC clients (RedisClient/PrismaClient/HttpClient/ApolloClient
+	// /S3Client/MongoClient/KafkaClient/ApiClient) would all produce
+	// AMBIGUOUS placeholders. W3c review Important #1 (2026-05-11).
+	// Set once in runGRPCClients() via fileHasGRPCImport().
+	tsGRPCImportPresent bool
 }
 
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {

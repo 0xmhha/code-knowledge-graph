@@ -3,15 +3,21 @@
 // `grpc_calls` edge from the enclosing TS function to an AMBIGUOUS
 // placeholder Endpoint with qname `grpc:Service.Method`.
 //
-// Expected placeholder Endpoint qnames:
+// Expected placeholder Endpoint qnames (camelCase reflects the observed
+// JS method name — V0 emits the AST-visible token without proto-PascalCase
+// normalisation; EchoService.Echo stays PascalCase because the grpc.unary
+// descriptor itself carries the PascalCase Method identifier):
 //
-//   grpc:UserService.GetUser       (generated client class + method call)
-//   grpc:UserService.ListUsers     (generated client class + method call)
-//   grpc:EchoService.Echo          (grpc.unary unary call)
-//   grpc:OrderService.PlaceOrder   (factory-shaped client instantiation)
+//   grpc:UserService.getUser       (Pattern A: generated client class)
+//   grpc:UserService.listUsers     (Pattern A: same client, second method)
+//   grpc:EchoService.Echo          (Pattern B: grpc.unary descriptor)
+//   grpc:OrderService.placeOrder   (Pattern A: pkg.XxxClient nested form)
 //
 // Confidence per §6.5 (c) for TS: all INFERRED (typesInfo not available
 // in tree-sitter parses; we trust the import + naming convention).
+// Pattern A is gated on the `@improbable-eng/grpc-web` import on line 17 —
+// without it the `*Client` suffix would be too noisy (matches Redis/
+// Prisma/Apollo/etc.). See module header of grpc_client.go.
 
 import { grpc } from '@improbable-eng/grpc-web';
 import { UserServiceClient } from './generated/user_service_pb_service';
@@ -25,7 +31,7 @@ import { PlaceOrderRequest } from './generated/order_pb';
 //   const client = new XxxClient(host)
 //   client.method(req, callback)
 //
-// Expected: grpc_calls → grpc:UserService.GetUser (INFERRED)
+// Expected: grpc_calls → grpc:UserService.getUser (INFERRED)
 export function callGetUser(id: string): void {
   const client = new UserServiceClient('https://api.example.com');
   const req = new GetUserRequest();
@@ -39,7 +45,7 @@ export function callGetUser(id: string): void {
 // Same client instance, different method — emits a second grpc_calls
 // edge sharing no placeholder with the first.
 //
-// Expected: grpc_calls → grpc:UserService.ListUsers (INFERRED)
+// Expected: grpc_calls → grpc:UserService.listUsers (INFERRED)
 export function callListUsers(): void {
   const client = new UserServiceClient('https://api.example.com');
   const req = new ListUsersRequest();
@@ -66,7 +72,7 @@ export function callEcho(message: string): void {
 // Pattern C: factory-shaped instantiation — `new pkg.XxxClient(host)`.
 // Verifies the AST walker handles MemberExpression+NewExpression nesting.
 //
-// Expected: grpc_calls → grpc:OrderService.PlaceOrder (INFERRED)
+// Expected: grpc_calls → grpc:OrderService.placeOrder (INFERRED)
 export function callPlaceOrder(): void {
   const client = new OrderServiceClient('https://api.example.com');
   const req = new PlaceOrderRequest();
