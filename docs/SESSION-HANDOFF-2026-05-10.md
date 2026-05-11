@@ -1,8 +1,47 @@
-# Session Hand-off — 2026-05-10
+# Session Hand-off — 2026-05-10 (final)
 
 다음 세션이 cold start 가능하도록 정리한 문서. 직전 핸드오프(`docs/SESSION-HANDOFF-2026-05-08.md`) 이후 진행된 모든 작업과 결정의 요약.
 
 기준점: branch `main`, HEAD `a729cd2` (feat: bench-mcp-stdio — JSON-RPC framing latency attribution).
+
+---
+
+## §0. Cold start (다음 세션 시작 시 먼저 확인)
+
+**현재 상태**: schema 1.8 + H1-H4 + §11.3 hybrid + perf 8개 작업 모두 main 반영. 추가 perf 후속 없음 (graph + HTTP + MCP layer 모두 sub-ms 수준).
+
+**워밍업 명령** (3분 내 환경 파악):
+
+```bash
+cd /Users/kevin/work/github/0xmhha/code-knowledge-graph
+git status                                       # working tree clean 확인
+git log --oneline -3                             # 최근 commits 확인 (HEAD = a729cd2 이후 더 있을 수 있음)
+go test ./... -count 1 2>&1 | grep -E '^(ok|FAIL)'  # 23/23 ok 확인
+make build                                       # bin/ckg 갱신 (viewer 변경 시 필수)
+```
+
+**핵심 graph (1.98M edges)**: `/tmp/ckg-h4` — go-stablenet 빌드, `build_timestamp=2026-05-10T08:00:54Z`, src_commit=940e9f28..., 모든 H4 issue-id 데이터 포함 (GH-66 = 501 hunks 등).
+
+**viewer 확인**:
+```bash
+./bin/ckg serve --graph /tmp/ckg-h4 --port 8765
+# 별도 터미널에서 http://127.0.0.1:8765 접속
+```
+
+**benchmark 재현 (1.5분 내)**:
+```bash
+./bin/ckg bench-server --graph /tmp/ckg-h4 --iterations 50 --concurrency 4
+./bin/ckg bench-mcp --graph /tmp/ckg-h4 --iterations 50 --concurrency 1
+./bin/ckg bench-mcp-stdio --graph /tmp/ckg-h4 --iterations 50
+```
+
+**누적 perf 효과** (baseline → 현재):
+- manifest p50: 235→26ms (−89%)
+- tickets p50: 190→18ms (−91%), p99: 5775→34ms (−99.4%)
+- edges.counts p50: 152→0.1ms (−99.9%)
+- evidence.intent (HTTP) p50: 168→4.3ms (−97%)
+- evidence_for_intent (in-process MCP) p50: 172→8.8ms (−95%)
+- stdio framing overhead: 0.03~0.44ms (negligible)
 
 ---
 
@@ -222,3 +261,79 @@ cd web/viewer-next && npx tsc --noEmit
 - viewer hydration 패턴: `docs/HYDRATION-PATTERN.md` (React #418 anti-pattern + 8 마이그레이션 사례)
 - 성능 baseline: `cmd/ckg/bench_server.go` + `cmd/ckg/bench_mcp.go` + `cmd/ckg/bench_mcp_stdio.go` + `docs/PERF-BASELINE-2026-05-10.md` (사용 예: `ckg bench-server` / `ckg bench-mcp` / `ckg bench-mcp-stdio --graph /tmp/ckg-h4 --iterations 50`)
 - MCP in-process bench: `internal/mcp/bench.go::NewBenchHandlers` (8 tools handler map exposed for cmd/ckg)
+
+---
+
+## §10. 다음 세션 시작점 추천
+
+이번 세션에서 NEXT-CANDIDATES 원본 10/10 + 추가 perf 8 모두 완료. **남은 후보 단 하나**: schema 1.9 design (High, multi-session).
+
+### 후보 A — schema 1.9 design spec (권장)
+**현재 상태**: schema 1.8 (H1-H4 + §11.3 hybrid) 안정. 다음 큰 dimension 미정의.
+
+**가능한 방향**:
+1. **Cross-language interop edges** — Go ↔ TS calls (HTTP, gRPC, message types) 명시적 edge로 surface. 현재 `Endpoint`/`MessageType`/`Contract` node 존재하지만 connecting edges 미흡.
+2. **Configuration / Build-system edges** — `go.mod`, `package.json`, `*.proto`, helm charts 등. 정적 그래프 dimension.
+3. **Runtime / Telemetry edges** — observed call graph from production traces. 현재는 static analysis only.
+
+**시작 권장**: `docs/design/schema-1.9-spec.md` 신규 → 사용자와 디자인 결정 (`§11` 8 결정처럼) 합의 → H 시리즈 follow-up plan.
+
+### 후보 B — small cleanup (별도 작업으로 1-2시간)
+이번 세션 미해결 잔여 항목:
+
+| 항목 | 영향도 | 비고 |
+|------|--------|------|
+| Function seed 못 찾는 graph 케이스 (bench-* impact probe skip) | Low | `pickFunctionSeed`가 `QueryNodes("", 200)` root만 봄. parent 한 단계 더 walk 추가 |
+| `/api/evidence` hits=null edge case는 cleanup됨 — 단 다른 endpoint도 nil-slice 가능성 점검 미실시 | Low | grep `return nil` in handle* |
+| `/api/search` FTS가 일부 graph에서 활성화 안 됨 | Low | `ckg build`의 FTS 인덱싱 단계 검토 |
+| TS body walk P3 `arrow-function` nested edge case | Low | 알려진 false negative 가능, 보강 case 추가 |
+| viewer NodeDetail pill 라이브 클릭 검증 (이번 세션 unit으로 대체) | Low | Hunk 노드 캔버스 등장 후 클릭 시나리오 |
+
+### 후보 C — perf 측정 도구 활용
+이번 세션 완료한 3개 bench 명령 (`bench-server` / `bench-mcp` / `bench-mcp-stdio`) 는 CI 회귀 detection에 즉시 활용 가능:
+
+- GitHub Actions workflow에 PR-trigger bench 실행 + JSON diff
+- `/tmp/ckg-h4` 또는 testdata fixture 기준
+- 임계 (예: p99 > 50% drift) 초과 시 PR comment
+
+---
+
+## §11. 학습된 워크플로 패턴 (이번 세션 keytakeaways)
+
+### 11.1 VERIFICATION-CHECKLIST 적용
+새 feature commit 전 4축 surface fan-out (Options/HTTP/MCP/CLI) + 조합 매트릭스 + negative path 점검. 첫 적용 사례 `51cd1c7` (top_files), 이후 모든 perf commit에 적용됨. `docs/VERIFICATION-CHECKLIST.md` 참조.
+
+### 11.2 Perf trace 패턴
+1. **측정** (`bench-*` 명령으로 baseline 기록)
+2. **가설** (어디가 hot path인가? EXPLAIN / 코드 검토 / metric 비교)
+3. **검증** (가설을 입증하는 single experiment)
+4. **fix** (가장 작은 변경)
+5. **재측정** (before/after diff in PERF-BASELINE doc)
+
+성공 사례: evidence 40x 격차 trace → `ensureIndex` 매 호출 manifest read 발견 → 1s TTL mini-cache → -95%.
+
+실패 사례 (지나칠 뻔): `edges.counts` 첫 가설 = "covering index 부재" → EXPLAIN으로 검증 → 이미 covering index 사용 중. 가설 폐기 → "결과 자체 캐싱" 으로 전환.
+
+### 11.3 Deferred 처리의 함정
+"발견된 개선 후보 → 나중에" 패턴은 **잊혀질 위험**이 있음. 학습한 안전장치:
+1. 즉시 docs (PERF-BASELINE 등) 에 명시
+2. 핸드오프 §6 우선순위에 등록
+3. **Low effort 후속은 같은 세션에서 처리 권장** (사용자 catch 한 case 참조)
+
+### 11.4 측정 도구의 self-instrumentation
+`bench-mcp-stdio`가 `os.Executable()` 로 자기 자신을 spawn — Go build 후 즉시 `ckg bench-mcp-stdio` 실행하면 방금 빌드한 binary가 측정 대상. CI 통합 시 별도 binary path 관리 불필요.
+
+### 11.5 Commit message 규약
+- Co-author 마커 (`Co-Authored-By: Claude`) **절대 추가 안 함** (사용자 명시 룰)
+- 본문에 commit이 해결하는 *문제*와 *trade-off* 명시 — diff만으로 안 드러나는 *why* 캡처
+- before/after 측정값 commit 본문에 포함 (perf 변경 시 필수)
+
+### 11.6 누락 검증 5종 패턴
+이번 세션에서 사후 발견된 5종 — `docs/VERIFICATION-CHECKLIST.md §5` 카탈로그 참조:
+1. surface fan-out 1축만 검증
+2. 조합 시나리오 미고려
+3. HTTP allow-list guard 라이브 누락
+4. MCP tool 라이브 cover 부족
+5. negative path 검증 빠짐
+
+다음 세션 시작 시 §11.6를 한 번 훑으면 같은 실수 반복 방지.
