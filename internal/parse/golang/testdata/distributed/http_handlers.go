@@ -9,16 +9,16 @@ import (
 
 // usersHandler is registered via http.HandleFunc — expected:
 //
-//	NodeEndpoint qname="http:/users"
-//	listens_on(usersHandler -> http:/users)
+//	NodeEndpoint qname="http:* /users"   (method=* because no Go 1.22 prefix)
+//	listens_on(usersHandler -> http:* /users)
 func usersHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("users"))
 }
 
 // adminHandler is registered via mux.HandleFunc — expected:
 //
-//	NodeEndpoint qname="http:/admin"
-//	listens_on(adminHandler -> http:/admin)
+//	NodeEndpoint qname="http:* /admin"
+//	listens_on(adminHandler -> http:* /admin)
 func adminHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("admin"))
 }
@@ -26,8 +26,8 @@ func adminHandler(w http.ResponseWriter, r *http.Request) {
 // healthHandler is registered via http.Handle wrapped in http.HandlerFunc
 // — V0 detector matches Handle calls too. Expected:
 //
-//	NodeEndpoint qname="http:/health"
-//	listens_on(healthHandler -> http:/health)
+//	NodeEndpoint qname="http:* /health"
+//	listens_on(healthHandler -> http:* /health)
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
@@ -36,11 +36,17 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 // handler at /ping. The anonymous endpoint should still emit a NodeEndpoint
 // (route is a string literal) but no listens_on edge (no named function
 // node to anchor on — V0 simplification).
+//
+// Go 1.22+ method-prefixed pattern ("GET /scoped") is exercised below — the
+// detector splits the pattern and emits qname "http:GET /scoped" rather
+// than the wildcard form.
 func SetupRoutes() {
 	http.HandleFunc("/users", usersHandler)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/admin", adminHandler)
 	http.Handle("/health", http.HandlerFunc(healthHandler))
+	// Go 1.22+ method-prefixed pattern — Endpoint qname is "http:GET /scoped".
+	http.HandleFunc("GET /scoped", usersHandler)
 	// Anonymous handler — endpoint emitted, listens_on edge skipped.
 	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("pong"))

@@ -101,14 +101,20 @@ func (v *declVisitor) funcDeclIDQname(fd *ast.FuncDecl) (id, qname string) {
 // Supported patterns (V0 MVP):
 //
 //	http.HandleFunc("/path", handler)
+//	http.HandleFunc("GET /path", handler)   // Go 1.22+ method-prefixed pattern
 //	http.Handle("/path", handler)
-//	mux.HandleFunc("/path", handler)   // mux: *http.ServeMux (or compatible)
+//	mux.HandleFunc("/path", handler)        // mux: *http.ServeMux (or compatible)
 //	mux.Handle("/path", handler)
 //
 // Routes that are not string literals are skipped — they require runtime
 // trace integration to capture the actual path.
+//
+// Endpoint qname uses the cross-language format `http:METHOD /route` (schema
+// 1.9 §6.2). When the route literal is a plain path (no method prefix),
+// METHOD defaults to `*` — net/http's stdlib HandleFunc dispatches all HTTP
+// methods to the same handler, so a single node represents the union.
 func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname string, call *ast.CallExpr) {
-	method, isHTTPSel, ok := httpHandleSelector(call)
+	_, isHTTPSel, ok := httpHandleSelector(call)
 	if !ok {
 		return
 	}
@@ -116,7 +122,7 @@ func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname strin
 	if len(call.Args) < 2 {
 		return
 	}
-	route, ok := stringLiteral(call.Args[0])
+	pattern, ok := stringLiteral(call.Args[0])
 	if !ok {
 		return // dynamic route — skip (V0)
 	}
@@ -127,7 +133,8 @@ func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname strin
 		return // user-defined HandleFunc on unrelated type — skip
 	}
 
-	endpointID := v.upsertEndpoint(route, "http", call.Pos(), call.End())
+	httpMethod, route := splitGo122Pattern(pattern)
+	endpointID := v.upsertHTTPEndpoint(httpMethod, route, call.Pos(), call.End())
 	pos := v.fset.Position(call.Pos())
 	handlerID := v.resolveHTTPHandlerArg(call.Args[1])
 	if handlerID != "" {
@@ -136,7 +143,6 @@ func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname strin
 			Line: pos.Line, Count: 1, Confidence: conf,
 			FilePath: v.relPath,
 		})
-		_ = method
 		_ = parentFuncQname
 		return
 	}
@@ -156,7 +162,34 @@ func (v *declVisitor) maybeEmitHTTPListensOn(parentFuncID, parentFuncQname strin
 	}
 	_ = parentFuncID
 	_ = parentFuncQname
-	_ = method
+}
+
+// splitGo122Pattern parses Go 1.22+'s method-prefixed http.HandleFunc
+// pattern syntax (`"GET /users"`) and returns (method, route). When the
+// pattern has no method prefix, returns ("*", pattern) to indicate the
+// handler accepts all HTTP methods — net/http stdlib semantics for the
+// plain `"/path"` form.
+//
+// Only the leading uppercase token followed by a single space and a path
+// starting with `/` is recognised as a method. Anything else falls through
+// to the wildcard form (conservative: false positives here would mangle
+// the route).
+func splitGo122Pattern(pattern string) (method, route string) {
+	sp := strings.IndexByte(pattern, ' ')
+	if sp <= 0 || sp == len(pattern)-1 {
+		return "*", pattern
+	}
+	head, tail := pattern[:sp], pattern[sp+1:]
+	if !strings.HasPrefix(tail, "/") {
+		return "*", pattern
+	}
+	for i := 0; i < len(head); i++ {
+		c := head[i]
+		if c < 'A' || c > 'Z' {
+			return "*", pattern
+		}
+	}
+	return head, tail
 }
 
 // httpHandleSelector returns (methodName, isHTTPPackageSelector, true) when
@@ -405,11 +438,17 @@ func stringLiteral(e ast.Expr) (string, bool) {
 	return strings.Trim(lit.Value, "\"`"), true
 }
 
-// upsertEndpoint emits a NodeEndpoint for (route, subKind) if not already
-// emitted in this file, and returns its node ID. Uses endpointNodeIDs as
-// the dedup key (same route in two HandleFunc calls is one endpoint).
-func (v *declVisitor) upsertEndpoint(route, subKind string, startPos, endPos token.Pos) string {
-	qname := subKind + ":" + route
+// upsertHTTPEndpoint emits a NodeEndpoint for an HTTP (method, route) pair
+// if not already emitted in this file, and returns its node ID. Uses
+// endpointNodeIDs keyed by the full `http:METHOD /route` qname so that
+// `GET /users` and `POST /users` are distinct endpoints (schema 1.9 §6.2 —
+// cross-language qname format shared with the TS parser).
+//
+// The Name field stores just the route (without the method), matching the
+// TS parser's convention and keeping the existing viewer/search behaviour
+// (route lookup) intact.
+func (v *declVisitor) upsertHTTPEndpoint(method, route string, startPos, endPos token.Pos) string {
+	qname := "http:" + method + " " + route
 	if id, ok := v.endpointNodeIDs[qname]; ok {
 		return id
 	}
@@ -422,7 +461,7 @@ func (v *declVisitor) upsertEndpoint(route, subKind string, startPos, endPos tok
 		Name: route, QualifiedName: qname,
 		FilePath: v.relPath, StartLine: startLn, EndLine: endLn,
 		StartByte: startBy, EndByte: endBy,
-		Language: "go", Confidence: types.ConfExtracted, SubKind: subKind,
+		Language: "go", Confidence: types.ConfExtracted, SubKind: "http",
 	})
 	v.edges = append(v.edges, types.Edge{
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1,

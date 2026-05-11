@@ -39,9 +39,10 @@ type declVisitor struct {
 	// `x.field` references inside locked functions into edges anchored at the
 	// owning Field node.
 	fieldNodeIDs map[gotypes.Object]string
-	// endpointNodeIDs maps an Endpoint qname (e.g. "http:/users") to its node
-	// ID, deduping repeat HandleFunc calls on the same route within a file.
-	// E3 (G5 Distributed).
+	// endpointNodeIDs maps an Endpoint qname (e.g. "http:GET /users" or
+	// "http:* /users") to its node ID, deduping repeat HandleFunc calls on
+	// the same (method, route) pair within a file. E3 (G5 Distributed).
+	// Schema 1.9 §6.2 — cross-language qname format shared with the TS parser.
 	endpointNodeIDs map[string]string
 	// messageNodeIDs maps a MessageType qname (e.g. "pkg.Args" or
 	// "rpc:Service.Method") to its node ID, deduping handles_message and

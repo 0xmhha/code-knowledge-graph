@@ -18,11 +18,16 @@ func TestDistributed_HTTP_Endpoints(t *testing.T) {
 		t.Fatalf("LoadAndResolve: %v", err)
 	}
 	endpoints := nodesByType(g.Nodes, types.NodeEndpoint)
+	// Schema 1.9 §6.2 — HTTP Endpoint qname is `http:METHOD /route`. Plain
+	// `http.HandleFunc("/x", ...)` registrations carry method="*" because
+	// net/http dispatches all verbs to the same handler. The "GET /scoped"
+	// case exercises Go 1.22+ method-prefixed pattern parsing.
 	wantRoutes := map[string]bool{
-		"http:/users":  false,
-		"http:/admin":  false,
-		"http:/health": false,
-		"http:/ping":   false, // anonymous handler — endpoint still emitted
+		"http:* /users":   false,
+		"http:* /admin":   false,
+		"http:* /health":  false,
+		"http:* /ping":    false, // anonymous handler — endpoint still emitted
+		"http:GET /scoped": false, // Go 1.22+ method-prefixed pattern
 	}
 	for _, n := range endpoints {
 		if _, want := wantRoutes[n.QualifiedName]; want {
@@ -49,13 +54,14 @@ func TestDistributed_HTTP_ListensOnEdges(t *testing.T) {
 		t.Fatalf("LoadAndResolve: %v", err)
 	}
 	listensOn := edgesByType(g.Edges, types.EdgeListensOn)
-	// usersHandler, adminHandler, healthHandler — at least 3.
+	// usersHandler, adminHandler, healthHandler, and the Go 1.22 GET /scoped
+	// re-use of usersHandler — at least 4 named-handler edges.
 	if len(listensOn) < 3 {
 		t.Errorf("listens_on count: got %d, want >=3 (usersHandler/adminHandler/healthHandler)",
 			len(listensOn))
 	}
-	// Each named-handler edge must point INTO an http:/<route> Endpoint
-	// (i.e. handler is src, endpoint is dst).
+	// Each named-handler edge must point INTO an `http:METHOD /route` Endpoint
+	// (i.e. handler is src, endpoint is dst). Schema 1.9 §6.2.
 	for _, e := range listensOn {
 		dst := findNodeByID(g.Nodes, e.Dst)
 		if dst == nil || dst.Type != types.NodeEndpoint {
@@ -69,13 +75,13 @@ func TestDistributed_HTTP_ListensOnEdges(t *testing.T) {
 	// The /ping endpoint must NOT have a listens_on edge into it.
 	var pingID string
 	for _, n := range g.Nodes {
-		if n.Type == types.NodeEndpoint && n.QualifiedName == "http:/ping" {
+		if n.Type == types.NodeEndpoint && n.QualifiedName == "http:* /ping" {
 			pingID = n.ID
 			break
 		}
 	}
 	if pingID == "" {
-		t.Fatal("http:/ping Endpoint not found")
+		t.Fatal("http:* /ping Endpoint not found")
 	}
 	for _, e := range listensOn {
 		if e.Dst == pingID {
@@ -107,8 +113,8 @@ func TestDistributed_HTTP_MethodHandler_NoDangling(t *testing.T) {
 		nodeByID[g.Nodes[i].ID] = &g.Nodes[i]
 	}
 	methodRoutes := map[string]bool{
-		"http:/method-a": false,
-		"http:/method-b": false,
+		"http:* /method-a": false,
+		"http:* /method-b": false,
 	}
 	listensOn := edgesByType(g.Edges, types.EdgeListensOn)
 	for _, e := range listensOn {

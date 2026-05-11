@@ -335,6 +335,28 @@ hunk-graph.md의 §11 8개 결정 패턴 따라 사용자 합의 받음. W1 시�
   검토가 필요."* — Go regression guard를 모든 W stage acceptance criteria의
   P0 항목으로 격상.
 
+**Endpoint qname 규칙 (protocol별)** — §6.2 (B) 결정의 구체화 (W1.5
+2026-05-11 확정):
+
+| protocol | qname 포맷                | 예시                          | 비고                                                                       |
+|----------|---------------------------|-------------------------------|----------------------------------------------------------------------------|
+| http     | `http:METHOD /route`      | `http:GET /api/users`         | (method, path) 쌍이 unique key (REST semantics). Go stdlib `HandleFunc`에서 verb 미지정 시 `METHOD=*` (모든 verb 수신). Go 1.22+ `"GET /users"` pattern은 그대로 split. |
+| rpc      | `rpc:Service.Method`      | `rpc:UserService.Get`         | net/rpc Service.Method 단독 (이미 method가 식별자에 포함됨).               |
+| grpc     | `grpc:pkg.Service.Method` | `grpc:user.UserService.Get`   | proto 정의 따름 (W3에서 land).                                             |
+| ws       | `ws:/route[#msg]`         | `ws:/chat#text-message`       | path + optional message-type (W4 또는 이후 stage).                         |
+| graphql  | `graphql:opType.opName`   | `graphql:query.userById`      | (operation-type, name) (이후 stage).                                       |
+
+공통 패턴: `{sub_kind}:{protocol-specific-identifier}` — protocol-specific
+identifier가 각 protocol에서 unique key. `language` 필드는 emit한 parser
+식별용 (cross-language 매칭에는 무관 — 동일 qname이면 동일 Endpoint).
+
+**Go HTTP qname 끌어올림 (W1.5, 2026-05-11)** — 직전 W1 TS commit (`da502f4`)
+이 `http:METHOD /route` 포맷을 emit한 반면 기존 Go는 `http:/route`만 emit
+하고 method를 버렸음 (`internal/parse/golang/distributed.go`의 `_ = method`).
+W1.5에서 Go HTTP emit을 위 규칙에 맞춰 끌어올림 — TS·Go가 같은 (method, path)
+쌍에 대해 동일 Endpoint qname을 생성하므로 cross-language matching이
+자연스럽게 성립한다. 사용자 옵션 D 결정.
+
 ### §6.3 W2 — HTTP client matching 실패 처리 — **(B) AMBIGUOUS placeholder** ✅
 
 - (A) Drop (V0 기존 패턴 — `rpc_calls` matching fail 처리와 동일).
@@ -511,15 +533,16 @@ hunk-graph.md의 §11 8개 결정 패턴 따라 사용자 합의 받음. W1 시�
 
 1. ~~사용자 §6 결정 8개 답변~~ → **§6.1~§6.3 확정 2026-05-11** (§6.4~§6.8
    은 W2~W4 진입 시점에 다시 확인).
-2. **W1 first commit dispatch** — `internal/parse/typescript/distributed.go`
-   신규 + 4 fixture + unit test. Subagent에 본 spec §3.2 + §6.2 (B) + §7.0
-   Go regression guard + §7 W1 acceptance criteria 핸드오프.
-   - **Go regression이 깨지면 즉시 중단 + 사용자 보고** — 자동 재시도
-     금지.
-3. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
-  G5 카운트 증가 확인.
-4. **W2 dispatch** — W1 base 위에 client matching. W1과 마찬가지로
+2. ~~**W1 first commit dispatch**~~ → **land 2026-05-11 (commit `da502f4` +
+   follow-up `ee1a17b`)** — TS HTTP server endpoint detection.
+3. ~~**W1.5 Go HTTP qname 끌어올림**~~ → **land 2026-05-11** — Go HTTP
+   Endpoint qname을 `http:METHOD /route` 포맷으로 통일 (§6.2 보완 표 참조).
+   TS·Go가 동일 (method, path) 쌍에 동일 qname을 생성해 W2 dispatch matching의
+   사전 조건을 충족.
+4. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
+   G5 카운트 증가 확인.
+5. **W2 dispatch** — W1 + W1.5 base 위에 client matching. W1과 마찬가지로
    §7.0 Go regression guard 우선 검증.
-5. W3 / W4 진행은 W1+W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
+6. W3 / W4 진행은 W1+W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
 
 **End of design draft.**

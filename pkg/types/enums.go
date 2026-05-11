@@ -42,7 +42,12 @@ const (
 	NodeReturnStmt NodeType = "ReturnStmt"
 	NodeSwitchStmt NodeType = "SwitchStmt"
 	// Schema 1.3 (E3 — CKS G5 Distributed): handler/route topology entries.
-	// NodeEndpoint  : an HTTP/RPC route literal (`http:/users`, `rpc:Foo.Bar`).
+	// NodeEndpoint  : an HTTP/RPC route literal. Qname follows protocol-
+	//                  specific format (schema 1.9 §6.2):
+	//                    - http  : `http:METHOD /route`   (METHOD=`*` for any)
+	//                    - rpc   : `rpc:Service.Method`
+	//                    - grpc  : `grpc:pkg.Service.Method`  (W3)
+	//                    - ws    : `ws:/route[#msg]`          (later)
 	// NodeMessageType: a request/response message type a handler dispatches on
 	//                  (e.g. `pkg.MyRequest`). Appended at the end so existing
 	//                  positional indices stay stable (see TestAllNodeTypes_Stable).
