@@ -37,6 +37,10 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// the union of nodes from all files.
 	fileBySrcID := map[string]string{}
 	byName := map[string][]types.Node{}
+	// W-B W1: heritage edges target Class / Interface nodes only — we
+	// keep a separate type-restricted index so a same-named Function /
+	// Method can't pollute the resolution.
+	heritageByName := map[string][]types.Node{}
 	for _, r := range results {
 		out.Nodes = append(out.Nodes, r.Nodes...)
 		out.Edges = append(out.Edges, r.Edges...)
@@ -45,11 +49,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if n.Type == types.NodeFunction || n.Type == types.NodeMethod || n.Type == types.NodeClass {
 				byName[n.Name] = append(byName[n.Name], n)
 			}
+			if n.Type == types.NodeClass || n.Type == types.NodeInterface {
+				heritageByName[n.Name] = append(heritageByName[n.Name], n)
+			}
 		}
 	}
 
 	for _, r := range results {
 		for _, pr := range r.Pending {
+			if pr.DispatchKind == dispatchKindHeritage {
+				if edge, ok := resolveHeritageRef(pr, heritageByName, fileBySrcID); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			candidates := byName[pr.TargetQName]
 			if len(candidates) == 0 {
 				continue
@@ -66,6 +79,50 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 	return out, nil
+}
+
+// resolveHeritageRef resolves one W-B W1 heritage PendingRef (a single
+// `extends X` / `implements X` parent reference) against the indexed
+// Class / Interface tables. Locality rules:
+//
+//   - Same-file resolution → ConfExtracted.
+//   - Cross-file resolution → ConfInferred.
+//   - Unresolved → drop (graph.Validate rejects dangling edges).
+//
+// When multiple parents share an unqualified name across files (real-
+// world overlap: two `Base` classes in unrelated subtrees), we prefer a
+// same-file match first; otherwise pick the first cross-file candidate
+// — Sol's resolveInheritanceRef does the same and the failure mode is
+// identical (graph carries one edge, the alternative is silently
+// dropped). Heritage resolution intentionally does *not* fall back to
+// AMBIGUOUS — heritage is structural metadata, not a call site, and a
+// single deterministic pick keeps the graph stable across builds.
+func resolveHeritageRef(
+	pr parse.PendingRef,
+	heritageByName map[string][]types.Node,
+	fileBySrcID map[string]string,
+) (types.Edge, bool) {
+	candidates := heritageByName[pr.TargetQName]
+	if len(candidates) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := fileBySrcID[pr.SrcID]
+	// Same-file first.
+	for _, c := range candidates {
+		if srcFile != "" && c.FilePath == srcFile {
+			return types.Edge{
+				Src: pr.SrcID, Dst: c.ID, Type: pr.EdgeType,
+				Line: pr.Line, Count: 1, Confidence: types.ConfExtracted,
+			}, true
+		}
+	}
+	// Cross-file fallback — first candidate wins (deterministic on
+	// input order; results are appended in file-iteration order).
+	pick := candidates[0]
+	return types.Edge{
+		Src: pr.SrcID, Dst: pick.ID, Type: pr.EdgeType,
+		Line: pr.Line, Count: 1, Confidence: types.ConfInferred,
+	}, true
 }
 
 // chooseCandidate applies the locality + ambiguity rules to pick a

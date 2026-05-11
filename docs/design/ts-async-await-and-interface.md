@@ -9,8 +9,9 @@
 > **Status**: design draft 2026-05-11. Schema 1.10 slot reserved
 > 2026-05-11 (NodeAwaitPoint, EdgeAwaits appended to `pkg/types/enums.go`;
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
-> Detector implementation (W1 heritage + W2 async/await) is **not yet
-> started** — Phase 5 entry point.
+> **W1 heritage** ✅ **LANDED 2026-05-11** — `internal/parse/typescript/heritage.go`
+> + 5 fixtures + 4 test functions covering same-file / cross-file / unresolved
+> drop / edge-direction. W2 async/await 미착수 — Phase 5 next entry point.
 > **Out of scope**: cross-language async (Go ↔ TS HTTP — that's schema 1.9
 > W series), JSX render graph, React-specific hooks dependency graph,
 > TypeScript decorators (already partially captured via `queryDecorator`).
@@ -230,6 +231,34 @@ track-c §2.2 의 Go `instantiates` 와 평행하게 TS 도 같은 엣지 emit.
 5. Pass 2 cross-file resolution — 기존 패스 그대로 동작 확인
 
 추정 사이즈: 200~300 LOC + 4 fixture. 의존성 없음.
+
+#### LANDED 2026-05-11 (W-B W1)
+
+- 구현: `internal/parse/typescript/heritage.go` (284 LOC). Hand-rolled
+  walker over `class_declaration` + `interface_declaration` subtrees
+  (tree-sitter query 우회 — 사유: pair-of-clauses 구조 분해는 query
+  capture로 표현 어색).
+- Wire: `declarations.go::visit()` 에 `v.runHeritage()` 호출 추가
+  (queryClass / queryInterface 직후).
+- Resolver: `resolve.go::resolveHeritageRef()` — same-file=ConfExtracted,
+  cross-file=ConfInferred, 미해결=drop. Class/Interface 전용 인덱스
+  `heritageByName` 로 동명 Function/Method 오염 방지.
+- DispatchKind 태그: `"heritage"` (golang/grpc.go `"grpc"`, solidity/
+  inheritance.go `"inherit"` 와 동일 idiom).
+- 지원 shape:
+  - `class Derived extends Base implements IBase {}` → 1 EdgeExtends + 1 EdgeImplements
+  - `class Multi extends Base implements IFoo, IBar, IBaz {}` → 1 EdgeExtends + 3 EdgeImplements
+  - `interface IChild extends IBase {}` → 1 EdgeExtends
+  - `interface IUnion extends IFoo, IBar {}` → 2 EdgeExtends
+  - 트레일링 식별자 추출: bare identifier / `Ns.Foo` / `Foo<T>` 모두 처리
+- Fixtures: `testdata/heritage/{simple_extends,class_implements,
+  interface_extends,multiple_implements,cross_file_base,cross_file_child}.ts`.
+- 테스트: `heritage_test.go` 4 함수:
+  - `TestTSHeritage_FixtureMatrix` — 4 same-file fixture × (extends/implements) child→parent map 검증
+  - `TestTSHeritage_CrossFile` — base/child 분리 → ConfInferred 검증
+  - `TestTSHeritage_UnresolvedDropped` — child만 ParseFile하면 dangling 0
+  - `TestTSHeritage_EdgeDirection` — 모든 부모가 Src로 등장하지 않음 (방향 invariant)
+- 회귀: 25/25 PASS, vet clean. Go 빌드 영향 0 (TS 전용 변경).
 
 ### 4.2 W2 — async/await (A)
 

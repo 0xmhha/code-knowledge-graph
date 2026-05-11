@@ -74,6 +74,13 @@ func (v *declVisitor) visit() {
 	v.runQuery(queryEnum, types.NodeEnum)
 	v.runQuery(queryDecorator, types.NodeDecorator)
 	v.runImports()
+	// W-B W1 (schema 1.10 slots, 2026-05-11): emit extends / implements
+	// PendingRefs from class_heritage / extends_type_clause subtrees.
+	// Must run after queryClass / queryInterface so the SrcID anchors
+	// (computed independently here from the same name-identifier
+	// startByte) match the actual Class / Interface node IDs in v.nodes.
+	// See heritage.go for the full shape spec.
+	v.runHeritage()
 	// Walk function/method bodies for statement-level nodes (IfStmt,
 	// LoopStmt, SwitchStmt, ReturnStmt, CallSite) + emit cross-file
 	// PendingRefs anchored on each CallSite. Runs after the declaration

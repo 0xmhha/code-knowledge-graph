@@ -105,7 +105,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W | 의존성 | 병렬? |
 |---|--------|------|
 | W-A (Go lock 전파) | 없음 | ✅ **LANDED 2026-05-11** |
-| W-B W1 (TS heritage) | 없음 (schema bump 후) | ✅ W-A 와 병렬 |
+| W-B W1 (TS heritage) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-B W2 (TS async) | W-B W1 완료 권장 | 순차 |
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
