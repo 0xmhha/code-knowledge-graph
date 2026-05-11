@@ -320,6 +320,25 @@ WHERE e.type = 'implements' AND e.dst = (
 추정 사이즈: 50~100 LOC + 2 fixture. (가장 단순, 첫 작업으로 wrap-up
 가능)
 
+**Status — 2026-05-11**: ✅ **구현 완료**. SubKind 값 확정: plain `contract`도
+명시적으로 `SubKind="contract"` 발행 (기존 빈 문자열 → "contract" 로 승격,
+W1 의 interface 검출과 같은 라벨 idiom 유지). 변경 파일:
+- `internal/parse/solidity/abstract_library.go` (신규, ~170 LOC)
+- `internal/parse/solidity/abstract_library_test.go` (신규)
+- `internal/parse/solidity/queries.go` (`queryLibrary` 추가)
+- `internal/parse/solidity/declarations.go` (`runContractDecl` /
+  `runLibraryDecl` 진입, `nearestContractName` 가 library_declaration /
+  interface_declaration 까지 walk)
+- `internal/parse/solidity/testdata/subkind/{abstract,library,plain}.sol`
+- `internal/parse/solidity/testdata/sol_contract_golden.json` (sub_kind
+  필드만 추가, 노드/엣지 카운트 무변경)
+
+검증: 9 test PASS (`go test ./internal/parse/solidity/... -count 1`),
+`go vet ./...` clean, Go 영역 빌드 KPI diff = 0 (Sol 작업이 Go 그래프에
+영향 0). 빌드된 그래프에서 `SELECT name, sub_kind FROM nodes WHERE
+type='Contract'` 가 `Base/abstract`, `SafeMath/library`, `Simple/contract`
+세 row 정확히 반환.
+
 ### 4.5 W5 — 측정 + handoff
 
 OpenZeppelin / Aave / Uniswap 등 실세계 컨트랙트 빌드해서 KPI 측정:

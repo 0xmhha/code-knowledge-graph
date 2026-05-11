@@ -31,7 +31,7 @@
 | **W-D** | (cross) | `pkg/types/enums.go` stale comment 정정 | XS (~30 LOC) | P2 (but first) | 코드는 land 됨, commit 만 pending |
 | **W-A** | Go | Cross-function lock propagation (D1) | M (~300-400 LOC) | P1 | Spec 합의 완료, 구현 미시작 |
 | **W-B** | TS | async/await + heritage (extends/implements) | M (~700 LOC) | **P0** | Spec 합의 완료, 구현 미시작 |
-| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | Spec 합의 완료, 구현 미시작 |
+| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1/W2/W3/W6 미시작 |
 
 ### 1.1 참조 문서 경로
 
@@ -62,6 +62,13 @@
 - `~100 LOC` + 2 fixture
 - detector 변경만, enums.go / SCHEMA.md 무변경
 - 다른 세션 schema 1.9 작업과 마찰 0
+
+**Status — 2026-05-11**: ✅ **DONE**. plain `contract` 도 명시적으로
+`SubKind="contract"` 으로 라벨 (빈 문자열 → "contract" 로 승격, W1 의
+interface SubKind 와 idiom 일치). 변경 라인 합 ~390 (코드 215 + 테스트
+117 + fixture 38 + golden patch 2줄). Go regression diff = 0. 상세 변경
+은 `docs/design/solidity-inheritance-and-interface-dispatch.md` §4.4 의
+Status 블록 참조.
 
 ### Phase 4 — schema 1.10 bump (TS + Sol 합쳐 단일 PR)
 - W-B + W-C 의 신규 NodeType / EdgeType 을 한 번에 `enums.go` 에 append.

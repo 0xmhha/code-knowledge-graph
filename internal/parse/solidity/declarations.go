@@ -40,7 +40,12 @@ func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.
 }
 
 func (v *declVisitor) visit() {
-	v.runDecl(queryContract, types.NodeContract)
+	// W4: contract & library decls use SubKind-aware emit paths so the
+	// graph distinguishes plain / abstract / library variants. See
+	// abstract_library.go and docs/design/solidity-inheritance-and-
+	// interface-dispatch.md §2.1 / §4.4.
+	v.runContractDecl()
+	v.runLibraryDecl()
 	v.runDecl(queryFunction, types.NodeFunction)
 	v.runDecl(queryModifier, types.NodeModifier)
 	v.runDecl(queryEvent, types.NodeEvent)
@@ -326,10 +331,16 @@ func (v *declVisitor) collectABI() {
 // helpers
 
 // nearestContractName walks the parent chain looking for an enclosing
-// contract_declaration and returns its name (empty if none).
+// contract-like declaration and returns its name (empty if none).
+//
+// W4: also recognises `library_declaration` (Sol libraries hold function
+// definitions just like contracts do; their methods should be qualified
+// as "Library.func" the same way contract methods are). Reserved for
+// future extension: `interface_declaration` (W1 — interface methods).
 func nearestContractName(n *sitter.Node, src []byte) string {
 	for cur := n; cur != nil; cur = cur.Parent() {
-		if cur.Kind() == "contract_declaration" {
+		switch cur.Kind() {
+		case "contract_declaration", "library_declaration", "interface_declaration":
 			id := cur.ChildByFieldName("name")
 			if id != nil {
 				return id.Utf8Text(src)

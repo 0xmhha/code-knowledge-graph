@@ -15,6 +15,7 @@ package solidity
 //     `identifier` named child.
 const (
 	queryContract    = `(contract_declaration name: (identifier) @name) @decl`
+	queryLibrary     = `(library_declaration name: (identifier) @name) @decl`
 	queryFunction    = `(function_definition name: (identifier) @name) @decl`
 	queryModifier    = `(modifier_definition name: (identifier) @name) @decl`
 	queryEvent       = `(event_definition name: (identifier) @name) @decl`
