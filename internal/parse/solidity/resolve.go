@@ -56,19 +56,41 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		byName[nt][key] = append(byName[nt][key], id)
 	}
 
-	// W2 indexes:
-	//   - funcByQName: "Contract.func" → []nodeID — explicit override
+	// W2 indexes — populated in the same single pass over all per-file
+	// results below. The three maps work together so bare-override
+	// resolution can walk Function → enclosing Container → parent
+	// Containers → parent Function in O(1) per hop:
+	//
+	//   - funcByQName: "Container.func" → []nodeID — explicit override
 	//     lookup ("Parent.foo" TargetQName resolves here). The list is
 	//     plural because real-world Sol builds can contain duplicate
 	//     contract names across files (e.g. test fixtures with a shared
 	//     `Base` name in two unrelated subtrees); resolveOverridesRef
 	//     disambiguates by file path against the source function.
-	//   - containerNameByID: nodeID → unqualified name. Used by
-	//     bare-override resolution to label parent IDs from the
-	//     inheritance index. Reverse-direction map (not map[string][]ID)
-	//     because we always go ID → name, never the inverse.
+	//   - containerNameByID: containerID → unqualified name. ID-keyed
+	//     reverse-direction map used to label parent contract IDs from
+	//     the inheritance index when constructing the "Parent.method"
+	//     qname for funcByQName lookup. Sol allows three container kinds
+	//     (Contract / Interface / Library) — V0 W2 indexes the first two
+	//     (Library has no override semantics in Sol).
+	//   - containerIDByFuncID: funcID → enclosing containerID. Pre-built
+	//     reverse index that replaces the O(N) scan over funcByQName +
+	//     reverse scan over containerNameByID that bare-override
+	//     resolution used to do per PendingRef. Population is two-step
+	//     because Function ↔ Container association requires both nodes
+	//     loaded first (same-file + name-prefix match); see the second
+	//     loop below.
 	funcByQName := map[string][]string{}
 	containerNameByID := map[string]string{}
+	containerIDByFuncID := map[string]string{}
+
+	// containerByNameFile is a transient lookup map for the second pass —
+	// keyed by (name + file) so a Function's enclosing container can be
+	// resolved without scanning every container in the build. Sol
+	// functions cannot span files, so file-scoping is a complete
+	// disambiguator (two `Base` contracts in different files won't
+	// shadow each other).
+	containerByNameFile := map[string]string{}
 
 	for _, r := range results {
 		out.Nodes = append(out.Nodes, r.Nodes...)
@@ -89,15 +111,38 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			case types.NodeContract:
 				add(types.NodeContract, n.Name, n.ID)
 				containerNameByID[n.ID] = n.Name
+				containerByNameFile[n.Name+"|"+n.FilePath] = n.ID
 			case types.NodeInterface:
 				add(types.NodeInterface, n.Name, n.ID)
 				containerNameByID[n.ID] = n.Name
+				containerByNameFile[n.Name+"|"+n.FilePath] = n.ID
 			case types.NodeFunction:
 				// W2: explicit override `override(A,B)` queues a
 				// TargetQName of "Parent.method", so we index every Sol
 				// function by its qualified name. Bare-override resolution
 				// uses the same index, scoped by parent contract name.
 				funcByQName[n.QualifiedName] = append(funcByQName[n.QualifiedName], n.ID)
+			}
+		}
+	}
+
+	// Pass 1.5 — build containerIDByFuncID. Requires both Function and
+	// Container nodes already indexed (above), so it runs as a separate
+	// loop. Functions without a "Container.func" qname (file-level Sol
+	// functions outside any contract — legal but rare) are skipped:
+	// override semantics don't apply to them anyway.
+	for _, r := range results {
+		for _, n := range r.Nodes {
+			if n.Type != types.NodeFunction {
+				continue
+			}
+			dot := strings.IndexByte(n.QualifiedName, '.')
+			if dot < 0 {
+				continue
+			}
+			containerName := n.QualifiedName[:dot]
+			if cid, ok := containerByNameFile[containerName+"|"+n.FilePath]; ok {
+				containerIDByFuncID[n.ID] = cid
 			}
 		}
 	}
@@ -141,7 +186,8 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if pr.DispatchKind == dispatchKindOverride ||
 				pr.DispatchKind == dispatchKindOverrideExplicit {
 				edges := resolveOverridesRef(
-					pr, funcByQName, containerNameByID, parents, nodeFile,
+					pr, funcByQName, containerNameByID,
+					containerIDByFuncID, parents, nodeFile,
 				)
 				out.Edges = append(out.Edges, edges...)
 				continue
@@ -214,14 +260,12 @@ func buildInheritanceIndex(edges []types.Edge) map[string][]string {
 //     declares a same-name function. Unresolved (no parent declares it)
 //     → zero edges.
 //
-// The child's enclosing contract id is derived from
-// pr.SrcID directly — the source function's Src in
-// the W1 EdgeExtends/EdgeImplements edges is the contract node, not the
-// function. We instead walk every (childContractID, parentIDs) entry in
-// `parents` looking for the contract that contains pr.SrcID; that lookup
-// is keyed off the function's qname prefix, which runFunctionDecl
-// guarantees is "Contract.func" when the function sits inside a
-// contract / interface / library.
+// The child's enclosing contract is recovered via the pre-built
+// containerIDByFuncID reverse index (single hop, O(1)). The earlier
+// implementation scanned funcByQName to extract the qname prefix and
+// then scanned containerNameByID by (name + file) to recover the ID —
+// both passes are subsumed by the index. M1 + M3 (W-C W2 review,
+// 2026-05-12).
 //
 // Confidence policy mirrors W1: same-file → ConfExtracted, cross-file →
 // ConfInferred. Multiple parents in a single bare override fan out into
@@ -230,6 +274,7 @@ func resolveOverridesRef(
 	pr parse.PendingRef,
 	funcByQName map[string][]string,
 	containerNameByID map[string]string,
+	containerIDByFuncID map[string]string,
 	parents map[string][]string,
 	nodeFile map[string]string,
 ) []types.Edge {
@@ -261,36 +306,19 @@ func resolveOverridesRef(
 		}}
 
 	case dispatchKindOverride:
-		// Recover the enclosing contract of pr.SrcID. The function's qname
-		// is "Container.func", so we scan funcByQName for the qname whose
-		// ID list contains pr.SrcID. We then look up the container ID
-		// from the function's filePath + the qname prefix — but the prefix
-		// alone is ambiguous if multiple files declare a container of the
-		// same name. Disambiguate by matching on file: only the same-file
-		// container is a valid candidate (Sol functions can't span files).
-		container, ok := enclosingContainerName(pr.SrcID, funcByQName)
+		// Recover the enclosing contract of pr.SrcID via the pre-built
+		// reverse index. Sol functions can't span files, so the index
+		// pairs each funcID with exactly one containerID; missing entries
+		// represent file-level functions (no override semantics — drop).
+		contractID, ok := containerIDByFuncID[pr.SrcID]
 		if !ok {
-			return nil
-		}
-		// Locate the contract ID for the same-file container. The
-		// containerNameByID reverse map gives us a single hop without
-		// scanning funcByQName, but we still need the file-disambiguation
-		// step against the source function's file.
-		srcFile := nodeFile[pr.SrcID]
-		var contractID string
-		for cid, name := range containerNameByID {
-			if name == container && nodeFile[cid] == srcFile {
-				contractID = cid
-				break
-			}
-		}
-		if contractID == "" {
 			return nil
 		}
 		parentIDs := parents[contractID]
 		if len(parentIDs) == 0 {
 			return nil
 		}
+		srcFile := nodeFile[pr.SrcID]
 		method := pr.TargetQName
 		var out []types.Edge
 		for _, pid := range parentIDs {
@@ -333,44 +361,22 @@ func resolveOverridesRef(
 	return nil
 }
 
-// enclosingContainerName recovers the unqualified name of the contract /
-// interface / library that owns the given function ID. Returns the prefix
-// of the function's qualified name (everything before the first ".").
-//
-// Implementation: scan funcByQName for the entry whose ID list contains
-// funcID, then split on ".". O(N) over the number of distinct function
-// qnames in the build — sub-millisecond at real-world scale. A pre-built
-// reverse index would help only if W2 became the dominant Pass 2 cost
-// (it isn't — emits / has_modifier dominate).
-//
-// Returns ok=false when:
-//   - the function isn't in funcByQName (shouldn't happen — every Function
-//     node is indexed there in the same loop);
-//   - the qname carries no "." (file-level Sol function without an
-//     enclosing contract — V0 leaves these out of W2 scope, no resolver
-//     hook for non-contract overrides exists in Sol semantics anyway).
-func enclosingContainerName(
-	funcID string,
-	funcByQName map[string][]string,
-) (string, bool) {
-	for qname, ids := range funcByQName {
-		hit := false
+// pickSameFileCandidate returns the candidate ID whose file matches srcFile
+// when one exists, otherwise the first candidate. Used by W1 inheritance and
+// W2 explicit-override resolution to disambiguate homonymous targets across
+// files: a same-file resolution is structurally more likely correct (a
+// child won't usually inherit from a parent in an unrelated file with the
+// same name), and falling back to the first ID keeps cross-file resolution
+// working for genuine multi-file hierarchies. ids must be non-empty.
+func pickSameFileCandidate(ids []string, srcFile string, nodeFile map[string]string) string {
+	if srcFile != "" {
 		for _, id := range ids {
-			if id == funcID {
-				hit = true
-				break
+			if nodeFile[id] == srcFile {
+				return id
 			}
 		}
-		if !hit {
-			continue
-		}
-		dot := strings.IndexByte(qname, '.')
-		if dot < 0 {
-			return "", false
-		}
-		return qname[:dot], true
 	}
-	return "", false
+	return ids[0]
 }
 
 // resolveInheritanceRef resolves one W1 PendingRef (a single `is X` parent
@@ -407,14 +413,19 @@ func resolveInheritanceRef(
 ) (types.Edge, bool) {
 	// Locate the parent node — prefer Interface first to match solc's
 	// name-resolution behaviour (interfaces and contracts share one
-	// global namespace in Solidity).
+	// global namespace in Solidity). Within the matching type bucket,
+	// prefer a same-file candidate so homonymous parents declared across
+	// files don't shadow the locally-resolvable one. M2 (W-C W2 review,
+	// 2026-05-12) — explicit override path already does this; the
+	// inheritance path was the missing half.
+	srcFile := nodeFile[pr.SrcID]
 	var dstID string
 	var parentType types.NodeType
 	if ids := byName[types.NodeInterface][pr.TargetQName]; len(ids) > 0 {
-		dstID = ids[0]
+		dstID = pickSameFileCandidate(ids, srcFile, nodeFile)
 		parentType = types.NodeInterface
 	} else if ids := byName[types.NodeContract][pr.TargetQName]; len(ids) > 0 {
-		dstID = ids[0]
+		dstID = pickSameFileCandidate(ids, srcFile, nodeFile)
 		parentType = types.NodeContract
 	} else {
 		return types.Edge{}, false
