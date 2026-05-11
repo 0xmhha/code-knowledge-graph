@@ -271,6 +271,76 @@ func TestExtensions(t *testing.T) {
 	}
 }
 
+// TestNestedTypeCrossNamespace — reviewer (W3a Important #1) caught that
+// an rpc method referencing a nested message by partial path
+// (`rpc X(Outer.Inner)`) was resolving only via byBareName fallback or
+// not at all, because candidateForType produces `proto:Outer.Inner` while
+// the actual nested node carries `proto:pkg.Outer.Inner`. Fix lifts the
+// fallback to extract the trailing bare name from any partial path and
+// retry against byBareName.
+func TestNestedTypeCrossNamespace(t *testing.T) {
+	src := []byte(`syntax = "proto3";
+
+package svc;
+
+message Outer {
+  message Inner {
+    string label = 1;
+  }
+  string id = 1;
+}
+
+service S {
+  rpc Process(Outer.Inner) returns (Outer);
+}
+`)
+	p := New(".")
+	r, err := p.ParseFile("nested_ref.proto", src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	// Resolve runs in p.Parse via Parser.Resolve; ParseFile alone doesn't
+	// invoke Resolve. Drive the full path through Resolve to surface the
+	// uses_type edges (single-result resolve still exercises the matcher).
+	out, err := p.Resolve([]*parse.ParseResult{r})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	rpcMethodID := ""
+	for _, n := range out.Nodes {
+		if n.Type == types.NodeMethod && n.QualifiedName == "proto:svc.S.Process" {
+			rpcMethodID = n.ID
+			break
+		}
+	}
+	if rpcMethodID == "" {
+		t.Fatalf("missing Method proto:svc.S.Process; nodes=%s", debugNodes(out.Nodes))
+	}
+	// Inner is at qname `proto:svc.Outer.Inner`. The rpc reference
+	// `Outer.Inner` should resolve via the new trailing-bare-name fallback.
+	innerID := ""
+	for _, n := range out.Nodes {
+		if n.Type == types.NodeMessageType && n.QualifiedName == "proto:svc.Outer.Inner" {
+			innerID = n.ID
+			break
+		}
+	}
+	if innerID == "" {
+		t.Fatalf("missing nested MessageType proto:svc.Outer.Inner")
+	}
+	// uses_type edge from rpc Method → Inner MessageType must exist.
+	found := false
+	for _, e := range out.Edges {
+		if e.Type == types.EdgeUsesType && e.Src == rpcMethodID && e.Dst == innerID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("missing uses_type edge from rpc Process → Outer.Inner — nested-namespace fallback regressed")
+	}
+}
+
 // TestProto2GroupSkipped — reviewer (W3a Important #2) caught that the
 // proto2 `group` keyword had no dedicated branch in the message body
 // parse loop, leaving `group Body = N { ... }` to leak its trailing
