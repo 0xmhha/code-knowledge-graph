@@ -197,13 +197,28 @@ func (p *Parser) mergeFuncFieldTouches(src map[string]map[string]struct{}) {
 // → set of struct-Field node IDs touched by the body. Populated during
 // ParseFile when typesInfo is available; empty otherwise.
 //
-// Consumed by buildpipe's W-A cross-function lock propagation pass. The
-// caller MUST treat the returned map as read-only — the parser retains a
-// reference to the same map for the rest of its lifetime.
+// Consumed by buildpipe's W-A cross-function lock propagation pass.
+//
+// Returns a deep copy of the internal map so the parser's worker pool can
+// continue mutating its own state without risking a data race with the
+// caller. W-A review (2026-05-11 Important #1) caught that the prior
+// implementation `defer Unlock` then returned the live map reference —
+// safe today because runGoPipeline only calls this after parseConcurrent
+// completes, but a single re-ordering would surface a silent race. The
+// copy here is O(funcs × fields_touched), measured at ≪1 ms on the
+// CKG self-graph (15 lock-holders).
 func (p *Parser) FuncFieldTouches() map[string]map[string]struct{} {
 	p.funcFieldTouchesMu.Lock()
 	defer p.funcFieldTouchesMu.Unlock()
-	return p.funcFieldTouches
+	out := make(map[string]map[string]struct{}, len(p.funcFieldTouches))
+	for fn, fields := range p.funcFieldTouches {
+		cp := make(map[string]struct{}, len(fields))
+		for f := range fields {
+			cp[f] = struct{}{}
+		}
+		out[fn] = cp
+	}
+	return out
 }
 
 // lookupTyped returns the registered typedFile for path. Tries an exact

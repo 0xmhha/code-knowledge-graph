@@ -81,15 +81,20 @@
 
 ### 2.2 신뢰도 정책
 
-| 케이스 | Confidence |
-|--------|-----------|
-| (a) intra-function (이미 INFERRED) | INFERRED (그대로) |
-| (b) cross-function, callee 가 동일 mutex 의 Lock 도 acquire | EXTRACTED — locking 의도 명백 |
-| (b) cross-function, callee 는 lock 무관 | INFERRED |
-| (b) callee 가 *다른* mutex acquire | AMBIGUOUS (lock ordering bug 후보로 surface) |
+> **§5.0 Q2 통일 (2026-05-11)**: 아래 원안의 EXTRACTED/INFERRED/AMBIGUOUS
+> 3단 분기는 사용자 결정으로 **단일 INFERRED**로 합쳐졌다. W-A 구현
+> (`internal/buildpipe/lock_propagation.go`)은 모든 cross-fn 엣지를
+> `ConfInferred`로 emit하며, 본 §2.2 표는 *원안 설계 추적용 read-only*.
+> AMBIGUOUS는 lock-ordering bug surface 가치가 노이즈 비용을 못 넘는다고
+> 결정 — Recovery 패널 hybrid 패턴(schema 1.8 §11.3)은 W-A 영역에서
+> 활성화되지 않음. (W-A review 2026-05-11 Minor #7 정정)
 
-`AMBIGUOUS` 라벨은 사용자가 `Recovery panel` 류 surface에서 별도 확인할 수
-있게 한다 — schema 1.8 §11.3 hybrid 와 동일한 패턴.
+| 케이스 (원안) | Confidence (원안) | §5.0 Q2 후 실제 |
+|--------|-----------|----------|
+| (a) intra-function (이미 INFERRED) | INFERRED (그대로) | INFERRED (보존) |
+| (b) cross-function, callee 가 동일 mutex 의 Lock 도 acquire | EXTRACTED — locking 의도 명백 | INFERRED |
+| (b) cross-function, callee 는 lock 무관 | INFERRED | INFERRED |
+| (b) callee 가 *다른* mutex acquire | AMBIGUOUS (lock ordering bug 후보로 surface) | INFERRED |
 
 ### 2.3 새 엣지 타입은 없다
 
