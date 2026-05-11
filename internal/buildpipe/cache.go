@@ -141,6 +141,10 @@ func parserVersionFor(lang string) string {
 		return "go/" + runtime.Version()
 	case "ts", "sol":
 		return "tree-sitter/" + treeSitterModuleVersion()
+	case "proto":
+		// Hand-rolled lexer/parser (schema 1.9 §6.4) — ties to the host
+		// toolchain so a rebuild after parser edits invalidates the cache.
+		return "proto/handrolled/" + runtime.Version()
 	default:
 		return lang + "/unknown"
 	}

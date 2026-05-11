@@ -9,9 +9,10 @@ import (
 
 // Result groups file paths by language. Paths are RELATIVE to the walk root.
 type Result struct {
-	Go  []string
-	TS  []string
-	Sol []string
+	Go    []string
+	TS    []string
+	Sol   []string
+	Proto []string
 }
 
 // Walk walks root, classifies files by extension, and skips paths matching .ckgignore.
@@ -45,6 +46,8 @@ func Walk(root string) (*Result, error) {
 			r.TS = append(r.TS, rel)
 		case ".sol":
 			r.Sol = append(r.Sol, rel)
+		case ".proto":
+			r.Proto = append(r.Proto, rel)
 		}
 		return nil
 	})

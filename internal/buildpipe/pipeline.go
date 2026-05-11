@@ -166,12 +166,12 @@ func Run(opt Options) (persist.Manifest, error) {
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	discovery, _, goCount, tsCount, solCount, err := discoveryAll(opt.SrcRoot, opt.Languages, filter)
+	discovery, _, goCount, tsCount, solCount, protoCount, err := discoveryAll(opt.SrcRoot, opt.Languages, filter)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
-	log.Debug("discovery.end", "total", goCount+tsCount+solCount)
+	log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount, "proto", protoCount)
+	log.Debug("discovery.end", "total", goCount+tsCount+solCount+protoCount)
 
 	// (2) cache routing — three paths (G6 v4, schema 1.5):
 	//
@@ -189,9 +189,9 @@ func Run(opt Options) (persist.Manifest, error) {
 			return persist.Manifest{}, fmt.Errorf("cache diff: %w", derr)
 		}
 		if decisions.IsAllCached() {
-			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount)
+			return runShortCircuit(opt, log, decisions, old, goCount, tsCount, solCount, protoCount)
 		}
-		return runIncremental(opt, log, decisions, goCount, tsCount, solCount)
+		return runIncremental(opt, log, decisions, goCount, tsCount, solCount, protoCount)
 	}
 	if opt.NoCache {
 		log.Info("Cache: bypassed (--no-cache); full rebuild")
@@ -217,14 +217,16 @@ func runCold(opt Options, log *slog.Logger,
 		return persist.Manifest{}, err
 	}
 	if filter != nil {
-		preGo, preTS, preSol := len(goFiles), len(files.TS), len(files.Sol)
+		preGo, preTS, preSol, preProto := len(goFiles), len(files.TS), len(files.Sol), len(files.Proto)
 		goFiles = filter.FilterPaths(goFiles)
 		files.TS = filter.FilterPaths(files.TS)
 		files.Sol = filter.FilterPaths(files.Sol)
+		files.Proto = filter.FilterPaths(files.Proto)
 		log.Info("files-from applied",
 			"go", preGo, "go_after", len(goFiles),
 			"ts", preTS, "ts_after", len(files.TS),
-			"sol", preSol, "sol_after", len(files.Sol))
+			"sol", preSol, "sol_after", len(files.Sol),
+			"proto", preProto, "proto_after", len(files.Proto))
 	}
 
 	// (2)+(3) parse + link, per language
@@ -268,6 +270,21 @@ func runCold(opt Options, log *slog.Logger,
 		resolved = append(resolved, rg)
 		allPending = append(allPending, pending...)
 		log.Debug("pass1.end", "language", "sol", "nodes", len(rg.Nodes), "errs", n)
+	}
+	// W3a (schema 1.9): .proto schema parser. Hand-rolled lexer + recursive-
+	// descent — emits Service/Method/MessageType/Enum/Field/Package nodes plus
+	// uses_type pending refs for rpc request/response types. gRPC client/server
+	// detection in Go/TS lives in W3b/W3c.
+	if shouldRun("proto", opt.Languages) && len(files.Proto) > 0 {
+		log.Debug("pass1.start", "language", "proto", "files", len(files.Proto))
+		rg, pending, n, err := runProtoPipeline(opt.SrcRoot, files.Proto, log)
+		if err != nil {
+			return persist.Manifest{}, fmt.Errorf("proto pipeline: %w", err)
+		}
+		parseErrs += n
+		resolved = append(resolved, rg)
+		allPending = append(allPending, pending...)
+		log.Debug("pass1.end", "language", "proto", "nodes", len(rg.Nodes), "errs", n)
 	}
 
 	// (4) graph build + validate
@@ -315,7 +332,7 @@ func runCold(opt Options, log *slog.Logger,
 	}
 	log.Debug("persist.end")
 
-	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol),
+	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol), len(files.Proto),
 		g, pkgTree, parseErrs)
 	// Files: every discovered file becomes an entry. This is the cache
 	// fingerprint that subsequent builds will diff against. We computed

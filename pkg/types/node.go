@@ -11,7 +11,7 @@ type Node struct {
 	EndLine       int        `json:"end_line"       validate:"min=1"`
 	StartByte     int        `json:"start_byte"     validate:"min=0"`
 	EndByte       int        `json:"end_byte"       validate:"gtfield=StartByte"`
-	Language      string     `json:"language"       validate:"required,oneof=go ts sol"`
+	Language      string     `json:"language"       validate:"required,oneof=go ts sol proto"`
 	Visibility    string     `json:"visibility,omitempty"`
 	Signature     string     `json:"signature,omitempty"`
 	DocComment    string     `json:"doc_comment,omitempty"`

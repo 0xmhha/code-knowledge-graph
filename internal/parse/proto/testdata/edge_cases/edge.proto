@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package edge;
+
+// Edge-case coverage:
+//  - oneof field
+//  - map<> field
+//  - reserved field numbers + names
+//  - field options
+//  - optional (proto3 optional)
+//  - empty message body
+//  - service body with options on rpc
+
+service EdgeService {
+  rpc Run(RunRequest) returns (RunResponse) {
+    option (foo.bar) = "baz";
+  }
+}
+
+message RunRequest {
+  reserved 4, 7 to 9;
+  reserved "deprecated_field";
+
+  oneof payload {
+    string text = 1;
+    bytes binary = 2;
+  }
+
+  map<string, int64> counters = 3;
+  optional string trace_id = 5 [deprecated = true];
+}
+
+message RunResponse {}

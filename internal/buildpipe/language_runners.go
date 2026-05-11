@@ -17,6 +17,7 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/link"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
+	protop "github.com/0xmhha/code-knowledge-graph/internal/parse/proto"
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
@@ -265,6 +266,17 @@ func runSolPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Re
 	pending := collectPendingRefs(results)
 	rg, err := p.Resolve(results)
 	return rg, pending, errs, p, err
+}
+
+// runProtoPipeline drives Pass 1 + Pass 2 for `.proto` files (schema 1.9 W3a).
+// Mirrors runTSPipeline — proto has no cross-language ABI to surface back to
+// the caller, so the signature stays minimal.
+func runProtoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
+	p := protop.New(srcRoot)
+	results, errs := parseConcurrent(srcRoot, files, log, p.ParseFile, "proto")
+	pending := collectPendingRefs(results)
+	rg, err := p.Resolve(results)
+	return rg, pending, errs, err
 }
 
 // convertABI bridges solidity.ABISig (parser output) and link.ABISig (linker

@@ -25,6 +25,7 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	gop "github.com/0xmhha/code-knowledge-graph/internal/parse/golang"
+	protop "github.com/0xmhha/code-knowledge-graph/internal/parse/proto"
 	solp "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
@@ -38,22 +39,23 @@ import (
 // from the result before counting. This keeps the cache-decision logic in
 // sync with what runCold actually parses (--files-from is honoured by both
 // paths or neither — never one and not the other).
-func discoveryAll(srcRoot string, languages []string, filter *filterlist.FilterList) ([]DiscoveredFile, persist.Manifest, int, int, int, error) {
+func discoveryAll(srcRoot string, languages []string, filter *filterlist.FilterList) ([]DiscoveredFile, persist.Manifest, int, int, int, int, error) {
 	var lc persist.Manifest // language counts only — caller fills full manifest later
 	files, err := detect.Walk(srcRoot)
 	if err != nil {
-		return nil, lc, 0, 0, 0, fmt.Errorf("detect: %w", err)
+		return nil, lc, 0, 0, 0, 0, fmt.Errorf("detect: %w", err)
 	}
 	goFiles, err := detect.GoFiles(srcRoot)
 	if err != nil {
-		return nil, lc, 0, 0, 0, fmt.Errorf("detect go: %w", err)
+		return nil, lc, 0, 0, 0, 0, fmt.Errorf("detect go: %w", err)
 	}
 	if filter != nil {
 		goFiles = filter.FilterPaths(goFiles)
 		files.TS = filter.FilterPaths(files.TS)
 		files.Sol = filter.FilterPaths(files.Sol)
+		files.Proto = filter.FilterPaths(files.Proto)
 	}
-	out := make([]DiscoveredFile, 0, len(goFiles)+len(files.TS)+len(files.Sol))
+	out := make([]DiscoveredFile, 0, len(goFiles)+len(files.TS)+len(files.Sol)+len(files.Proto))
 	if shouldRun("go", languages) {
 		for _, p := range goFiles {
 			out = append(out, DiscoveredFile{Path: filepath.ToSlash(p), Language: "go"})
@@ -69,7 +71,12 @@ func discoveryAll(srcRoot string, languages []string, filter *filterlist.FilterL
 			out = append(out, DiscoveredFile{Path: filepath.ToSlash(p), Language: "sol"})
 		}
 	}
-	return out, lc, len(goFiles), len(files.TS), len(files.Sol), nil
+	if shouldRun("proto", languages) {
+		for _, p := range files.Proto {
+			out = append(out, DiscoveredFile{Path: filepath.ToSlash(p), Language: "proto"})
+		}
+	}
+	return out, lc, len(goFiles), len(files.TS), len(files.Sol), len(files.Proto), nil
 }
 
 // readOldManifestFromDB returns nil if the backing store is missing or
@@ -134,7 +141,7 @@ func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
 //     are inserted last (cached refs survived FK CASCADE — no re-insert).
 func runIncremental(opt Options, log *slog.Logger,
 	decisions CacheDecisions,
-	goCount, tsCount, solCount int) (persist.Manifest, error) {
+	goCount, tsCount, solCount, protoCount int) (persist.Manifest, error) {
 	log.Info(decisions.FormatLogLine())
 	store, err := openStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
@@ -240,7 +247,7 @@ func runIncremental(opt Options, log *slog.Logger,
 		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
 
-	m := buildManifestSkeleton(opt, goCount, tsCount, solCount, g, pkgTree, parseErrs)
+	m := buildManifestSkeleton(opt, goCount, tsCount, solCount, protoCount, g, pkgTree, parseErrs)
 	m.Files = buildFileEntries(decisions, g.Nodes, g.Edges)
 	setStaleness(&m, log)
 	if err := store.SetManifest(m); err != nil {
@@ -320,6 +327,15 @@ func runLanguagePipelines(srcRoot string, dirty, cached map[string][]string,
 		}
 		parseErrs += n
 		solParser = p
+		resolved = append(resolved, rg)
+		dirtyPending = append(dirtyPending, pending...)
+	}
+	if files := dirty["proto"]; len(files) > 0 || hasCached(cached, "proto") {
+		rg, pending, n, err := runProtoPipelineIncremental(srcRoot, files, cached["proto"], reverseDirty, store, log)
+		if err != nil {
+			return nil, nil, 0, false, nil, fmt.Errorf("proto incremental: %w", err)
+		}
+		parseErrs += n
 		resolved = append(resolved, rg)
 		dirtyPending = append(dirtyPending, pending...)
 	}
@@ -447,7 +463,7 @@ type TopicTreeForPersist = persist.TopicTreeInput
 // runShortCircuit handles the all-cached, no-removed case: nothing to parse,
 // nothing to delete. Just refresh the manifest timestamp + staleness.
 func runShortCircuit(opt Options, log *slog.Logger, decisions CacheDecisions,
-	old *persist.Manifest, goCount, tsCount, solCount int) (persist.Manifest, error) {
+	old *persist.Manifest, goCount, tsCount, solCount, protoCount int) (persist.Manifest, error) {
 	log.Info(decisions.FormatLogLine() + " (no source changes; manifest timestamp refreshed)")
 	store, err := openStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
@@ -457,7 +473,9 @@ func runShortCircuit(opt Options, log *slog.Logger, decisions CacheDecisions,
 	// Old manifest fields stay; bump timestamp + recompute staleness.
 	m := *old
 	m.BuildTimestamp = time.Now().UTC().Format(time.RFC3339)
-	m.Languages = map[string]int{"go": goCount, "ts": tsCount, "sol": solCount}
+	m.Languages = map[string]int{
+		"go": goCount, "ts": tsCount, "sol": solCount, "proto": protoCount,
+	}
 	setStaleness(&m, log)
 	if err := store.SetManifest(m); err != nil {
 		return persist.Manifest{}, err
@@ -654,6 +672,55 @@ func runTSPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 	return rg, dirtyPending, errs, err
 }
 
+// runProtoPipelineIncremental mirrors runTSPipelineIncremental for `.proto`.
+// proto has no cross-language ABI surface (W3a scope — gRPC client/server
+// detection lives in W3b/W3c), so the signature matches the TS variant.
+// See C1 optimization note on runGoPipelineIncremental for reverseDirty
+// semantics.
+func runProtoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
+	reverseDirty map[string]bool, store persist.Store, log *slog.Logger) (*parse.ResolvedGraph, []persist.PendingRefRow, int, error) {
+	p := protop.New(srcRoot)
+	results := []*parse.ParseResult{}
+	errs := 0
+	for _, rel := range dirtyFiles {
+		full := filepath.Join(srcRoot, rel)
+		src, err := os.ReadFile(full)
+		if err != nil {
+			log.Warn("proto read", "path", full, "err", err)
+			errs++
+			continue
+		}
+		r, err := p.ParseFile(full, src)
+		if err != nil {
+			log.Warn("proto parse", "path", full, "err", err)
+			errs++
+			continue
+		}
+		stampFilePath(r)
+		results = append(results, r)
+	}
+	dirtyPending := collectPendingRefs(results)
+	for _, rel := range cachedFiles {
+		nodes, err := store.NodesByFilePath(rel)
+		if err != nil {
+			return nil, nil, errs, fmt.Errorf("reload proto nodes for %s: %w", rel, err)
+		}
+		var pending []parse.PendingRef
+		if reverseDirty[rel] {
+			refs, err := store.PendingRefsByFilePath(rel)
+			if err != nil {
+				return nil, nil, errs, fmt.Errorf("reload proto pending_refs for %s: %w", rel, err)
+			}
+			pending = pendingRefsFromRows(refs)
+		}
+		results = append(results, &parse.ParseResult{
+			Path: rel, Nodes: nodes, Pending: pending,
+		})
+	}
+	rg, err := p.Resolve(results)
+	return rg, dirtyPending, errs, err
+}
+
 // runSolPipelineIncremental mirrors runGoPipelineIncremental for Solidity.
 // Returns the parser instance for caller use (xlang ABI source).
 // See C1 optimization note on runGoPipelineIncremental.
@@ -724,14 +791,16 @@ func extractBlobsForFiles(root string, nodes []types.Node, wanted []string) map[
 // buildManifestSkeleton fills the non-Files portion of the new manifest. The
 // Files block is set separately so cold and incremental paths share the
 // per-file population logic.
-func buildManifestSkeleton(opt Options, goCount, tsCount, solCount int,
+func buildManifestSkeleton(opt Options, goCount, tsCount, solCount, protoCount int,
 	g *graph.Graph, pkgTree *cluster.PkgTree, parseErrs int) persist.Manifest {
 	return persist.Manifest{
 		SchemaVersion:  SchemaVersion,
 		CKGVersion:     opt.CKGVersion,
 		BuildTimestamp: time.Now().UTC().Format(time.RFC3339),
 		SrcRoot:        opt.SrcRoot,
-		Languages:      map[string]int{"go": goCount, "ts": tsCount, "sol": solCount},
+		Languages: map[string]int{
+			"go": goCount, "ts": tsCount, "sol": solCount, "proto": protoCount,
+		},
 		Stats: map[string]int{
 			"nodes":          len(g.Nodes),
 			"edges":          len(g.Edges),

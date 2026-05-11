@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package shop.orders;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/example/shop/orders";
+
+service OrderService {
+  rpc Place(PlaceOrderRequest) returns (PlaceOrderResponse);
+  rpc Cancel(CancelOrderRequest) returns (CancelOrderResponse) {
+    option deadline = "5s";
+  }
+  rpc Stream(StreamRequest) returns (stream StreamResponse);
+}
+
+service InventoryService {
+  rpc Reserve(ReserveRequest) returns (ReserveResponse);
+}
+
+message PlaceOrderRequest {
+  string sku = 1;
+  int32 quantity = 2;
+}
+
+message PlaceOrderResponse {
+  string order_id = 1;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+}
+
+message CancelOrderResponse {}
+
+message StreamRequest {}
+message StreamResponse {}
+
+message ReserveRequest {
+  string sku = 1;
+}
+
+message ReserveResponse {
+  bool ok = 1;
+}
