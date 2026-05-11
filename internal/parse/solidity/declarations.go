@@ -54,7 +54,13 @@ func (v *declVisitor) visit() {
 	v.runContractDecl()
 	v.runLibraryDecl()
 	v.runInterfaceDecl()
-	v.runDecl(queryFunction, types.NodeFunction)
+	// W2: function emit is SubKind-aware (virtual / override / virtual_override
+	// / function). The generic runDecl path is bypassed for functions so the
+	// modifier scan and EdgeOverrides PendingRef emission share a single AST
+	// walk. Node IDs and the `defines` edge stay identical to runDecl, so
+	// downstream consumers (ABI, mapping writes, emits, modifier_invocation)
+	// continue to resolve against the same Function node.
+	v.runFunctionDecl()
 	v.runDecl(queryModifier, types.NodeModifier)
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)

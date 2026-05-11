@@ -350,6 +350,54 @@ WHERE e.type = 'implements' AND e.dst = (
 
 추정 사이즈: 200~300 LOC + 3 fixture. enums.go 변경.
 
+**Status — 2026-05-11**: ✅ **LANDED**. 실제 변경:
+- `internal/parse/solidity/overrides.go` (신규, ~230 LOC) — virtual /
+  override modifier scan, function SubKind 라벨링
+  (`function`/`virtual`/`override`/`virtual_override`), EdgeOverrides
+  PendingRef 큐잉. 두 dispatch kind (bare `override` → resolver 가
+  parents walk; `override(A,B)` → 명시적 parent 별 직접 lookup).
+- `internal/parse/solidity/overrides_test.go` (신규, ~250 LOC) — 3 test
+  function (SingleFile / CrossFile / W1Regression). 11 subtest PASS.
+- `internal/parse/solidity/declarations.go` — `runDecl(queryFunction,
+  NodeFunction)` 을 `runFunctionDecl()` (SubKind-aware) 로 교체. 다른
+  decl 경로는 그대로.
+- `internal/parse/solidity/resolve.go` — Pass 2 를 2a (W1 inheritance) /
+  2b (W2 overrides + 기존 emits/has_modifier/writes_mapping) 로 분리.
+  W2 bare-override 처리는 W1 의 EdgeExtends/EdgeImplements 인접 리스트를
+  토대로 부모 walk; 동일 contract/function 이름이 여러 파일에 존재할 때
+  file-scoped 매칭으로 동명이접 (homonym) 해소.
+- `internal/parse/solidity/testdata/overrides/` 6 fixture:
+  `simple_override.sol` / `super_call.sol` / `virtual_no_override.sol` /
+  `multiple_inheritance_override.sol` + `cross_file_parent.sol` +
+  `cross_file_child.sol`.
+- `internal/parse/solidity/testdata/sol_contract_golden.json` — Function
+  노드 sub_kind="function" 추가 (`-update` 자동 갱신, 노드/엣지 카운트
+  무변경).
+
+**KPI (build --lang=sol on `testdata/overrides/`)**:
+- 29 nodes / 35 edges total
+- EdgeOverrides = 6 (5 EXTRACTED, 1 INFERRED = ChildVault→BaseVault)
+- per-fixture breakdown: simple=1, super_call=2 (Mid→Base, Top→Mid),
+  virtual_no_override=0, multi_explicit=2 (C→A, C→B), cross_file=1
+- Function SubKind 라벨 모든 fixture 검증: virtual / override /
+  virtual_override / function
+
+**Verification**:
+- `go test ./internal/parse/solidity/... -count 1` 전 PASS (golden 포함)
+- `go test ./... -count 1` 25/25 PASS
+- `go vet ./...` clean
+- §7.0 Go regression — `--lang=go` baseline diff = 0 (Go-only 빌드는
+  Sol 작업 영향 없음, 8개 edge type 카운트 그대로)
+- W1 회귀 0 — testdata/inheritance 에서 EdgeExtends 8 / EdgeImplements 5
+  유지 (사전 baseline 과 동일). EdgeOverrides 는 abstract_extends.sol 의
+  Concrete.thing→AbstractBase.thing 1건 신규 emit (W4 fixture 가 W2 로
+  덤으로 검출됨, 자연스러운 부수효과)
+
+**Scope split note**: `super.foo()` body-walk 은 design §3.3 의 후반부
+설명대로 declaration-time EdgeOverrides 와 분리해 W3 (interface dispatch)
+와 같은 resolver 경로를 공유할 수 있어 W2 atomic scope 밖. W2 fixture
+super_call.sol 은 declaration-time override 체인만 검증한다.
+
 ### 4.3 W3 — Interface dispatch
 
 1. body walk 에서 `IFoo(addr).bar()` 패턴 인식

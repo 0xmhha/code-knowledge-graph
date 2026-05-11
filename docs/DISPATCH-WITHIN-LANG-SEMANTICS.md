@@ -31,7 +31,7 @@
 | **W-D** | (cross) | `pkg/types/enums.go` stale comment 정정 | XS (~30 LOC) | P2 (but first) | 코드는 land 됨, commit 만 pending |
 | **W-A** | Go | Cross-function lock propagation (D1) | M (~300-400 LOC) | P1 | ✅ **LANDED 2026-05-11** (Stage B DFS depth=5, opt-in `--lock-propagation`) |
 | **W-B** | TS | async/await + heritage (extends/implements) | M (~700 LOC) | **P0** | Spec 합의 완료, 구현 미시작 |
-| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1 (inheritance / is-clause) ✅ 2026-05-11 land; W2/W3/W6 미시작 |
+| **W-C** | Sol | Inheritance + interface dispatch + using For | L (~1100-1200 LOC) | **P0** | W4 (abstract/library SubKind) ✅ 2026-05-11 land; W1 (inheritance / is-clause) ✅ 2026-05-11 land; W2 (virtual/override) ✅ 2026-05-11 land; W3/W6 미시작 |
 
 ### 1.1 참조 문서 경로
 
@@ -108,7 +108,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-B W1 (TS heritage) | 없음 (schema bump 후) | ✅ W-A 와 병렬 |
 | W-B W2 (TS async) | W-B W1 완료 권장 | 순차 |
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
-| W-C W2 (Sol virtual/override) | W-C W1 완료 | 순차 |
+| W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | 순차 |
 | W-C W6 (Sol using For) | W-C W1 완료 | 순차 또는 마지막 |
 
@@ -127,6 +127,17 @@ W-C W1 (Sol inheritance `is`-clause) ✅ landed.
 INFERRED, 나머지 EXTRACTED). 상세는
 `docs/design/solidity-inheritance-and-interface-dispatch.md` §4.1 Status
 블록 참조. W-C W2 (virtual/override) 진입 unblock.
+
+W-C W2 (Sol virtual/override modifier → EdgeOverrides) ✅ landed.
+`internal/parse/solidity/overrides.go` (~230 LOC) +
+`internal/parse/solidity/overrides_test.go` (~250 LOC) + 6 fixture +
+resolver 2-pass split (Pass 2a W1 inheritance, Pass 2b W2 overrides).
+같은 빌드 (testdata/overrides) 에서 EdgeOverrides 6 emit
+(simple=1 / super_call=2 / multi_explicit=2 / cross_file=1; 5 EXTRACTED
++ 1 INFERRED). Function SubKind 라벨링 `{function, virtual, override,
+virtual_override}` 모두 적용. W1 회귀 0 (EdgeExtends 8 / EdgeImplements
+5 보존). §7.0 Go regression `--lang=go` diff = 0. W-C W3 (interface
+dispatch AMBIGUOUS) 진입 unblock.
 
 ### Phase 6 — 측정 + 핸드오프
 - 각 spec 의 `§4 측정` 단계 (self-graph / 실세계 corpus 빌드)

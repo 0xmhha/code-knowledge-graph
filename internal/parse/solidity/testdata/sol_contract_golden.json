@@ -32,7 +32,8 @@
       "out_degree": 0,
       "pagerank": 0,
       "usage_score": 0,
-      "confidence": "EXTRACTED"
+      "confidence": "EXTRACTED",
+      "sub_kind": "function"
     },
     {
       "id": "4839dadb79472c7e",
@@ -101,7 +102,8 @@
       "out_degree": 0,
       "pagerank": 0,
       "usage_score": 0,
-      "confidence": "EXTRACTED"
+      "confidence": "EXTRACTED",
+      "sub_kind": "function"
     },
     {
       "id": "ae15361f06fe84ed",
