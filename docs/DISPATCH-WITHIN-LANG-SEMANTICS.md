@@ -80,9 +80,22 @@ Status 블록 참조.
   - `NodeContract.SubKind`: `{"contract","interface","abstract","library"}`
   - `NodeFunction.SubKind`: `{"function","async","virtual","override",
     "virtual_override","fallback","receive"}`
-- `docs/SCHEMA.md` 갱신: 노드 34 → 35, 엣지 35 → 37
+- `docs/SCHEMA.md` 갱신: 노드 34 → 35, 엣지 38 → 40 (schema 1.9 W2/W3b
+  까지 흡수한 카운트 기준).
 - detector 변경 없음 (slot 만 예약). 회귀: `TestAllNodeTypes_Stable` +
   `TestAllEdgeTypes_Stable` + `pkg/types/...` 전체.
+
+**Status — 2026-05-11**: ✅ **LANDED**. Schema `1.9` → `1.10` bump in
+`internal/buildpipe/cache.go`. enum slots:
+- `NodeAwaitPoint` → AllNodeTypes() index 34 (W-B)
+- `EdgeAwaits` → AllEdgeTypes() index 38 (W-B)
+- `EdgeOverrides` → AllEdgeTypes() index 39 (W-C)
+
+8 files touched (enums.go, types_test.go, cache.go, sqlite.go, SCHEMA.md,
+DISPATCH-WITHIN-LANG-SEMANTICS.md, ts-async-await-and-interface.md,
+solidity-inheritance-and-interface-dispatch.md). Detector code 0. Go
+regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
+(new slots are unused — no rows emitted).
 
 **⚠️ schema 1.9 작업과 충돌 가능성 1건**: 다른 세션도 enums.go 에 append
 하고 있을 수 있음. **이 PR 진입 전 main 의 enums.go 최신 상태 반드시

@@ -59,10 +59,20 @@ import (
 // missing-Endpoint TS graph view on first 1.9 build. Per §6.1 of the
 // design spec, future W2/W3/W4 stages (HTTP client matching, gRPC,
 // message queue) will stay on 1.9 and append-only.
+// Bumped from "1.9" to "1.10" by within-language semantics Phase 4
+// (2026-05-11): slot reservation for W-B (`NodeAwaitPoint` + `EdgeAwaits`,
+// TS async/await suspension flow) and W-C (`EdgeOverrides`, Solidity
+// virtual/override semantics). detectors land in Phase 5 — this commit
+// is slot-only, so pre-1.10 DBs are byte-identical in their existing
+// rows but the cache key flip forces a cold rebuild on first 1.10 run
+// for symmetry with prior bumps. No new DDL (the new enum literals
+// fit existing nodes.type / edges.type TEXT columns); see
+// docs/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4 and
+// docs/design/{ts-async-await-and-interface,solidity-inheritance-and-interface-dispatch}.md.
 //
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.9"
+const SchemaVersion = "1.10"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

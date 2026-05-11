@@ -6,7 +6,11 @@
 > `implements`, `extends`, `declaration merging` — neither of which is
 > currently emitted.
 >
-> **Status**: design draft 2026-05-11. No code changes.
+> **Status**: design draft 2026-05-11. Schema 1.10 slot reserved
+> 2026-05-11 (NodeAwaitPoint, EdgeAwaits appended to `pkg/types/enums.go`;
+> see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
+> Detector implementation (W1 heritage + W2 async/await) is **not yet
+> started** — Phase 5 entry point.
 > **Out of scope**: cross-language async (Go ↔ TS HTTP — that's schema 1.9
 > W series), JSX render graph, React-specific hooks dependency graph,
 > TypeScript decorators (already partially captured via `queryDecorator`).
@@ -127,6 +131,12 @@
   존재 — 새 type 추가 없음.
 
 bump: schema 1.8 → 1.10 (1.9 는 cross-language interop 으로 예약).
+
+**Status — 2026-05-11**: ✅ schema 1.10 slot **reserved**. `NodeAwaitPoint`
+appended at `AllNodeTypes()` index 34, `EdgeAwaits` at `AllEdgeTypes()`
+index 38. `EdgeAsyncCall` 은 §5 Q3 결정 따라 잠재적으로 추가 가능 — 본
+Phase 4 bump 에서는 미포함 (필요 시 별도 후속 PR). Detector emission 은
+Phase 5 (W2) 진입 시까지 0 — `internal/parse/typescript/*` 변경 없음.
 
 ---
 

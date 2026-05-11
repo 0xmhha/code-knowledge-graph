@@ -1,13 +1,10 @@
 # CKG Schema (V0)
 
-Schema version: **1.8** (Hunk-graph H1+H2 — added `NodeHunk` (one block
-of changed lines per commit×file) and three edges (`has_hunk`, `adjacent`,
-`modifies`). Patch text lives in `blobs.source` gzip-compressed, capped
-at 64KB. Confidence enum gained `AMBIGUOUS` semantics for unreachable
-history (see hunk-graph.md §11.3). Pre-1.8 DBs lack the Hunk rows and
-edges; the file-level cache treats every schema bump as cache-invalidating
-so the next `ckg build` falls into the cold path on first run with this
-binary.)
+Schema version: **1.10** (within-language semantics Phase 4 — slot
+reservation for `NodeAwaitPoint` (W-B, TS async/await suspension), and
+edges `awaits` (W-B) + `overrides` (W-C, Solidity virtual/override).
+Detectors land in Phase 5; this bump is enum slots + cache-key only,
+no DDL. See `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4.)
 
 A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
 incremental cache infrastructure (FK ON DELETE CASCADE on
@@ -17,17 +14,24 @@ G6v3 (1.4 → 1.5) added pending_refs persistence; P2 (1.5 → 1.6) added
 context-propagation edges; Track C P1b (1.6 → 1.7) added the optional
 `dispatch_kind` metadata column on edges (populated only for `invokes`
 to disambiguate interface_method / func_value / method_value / closure);
-Hunk-graph H1+H2 (1.7 → 1.8) added NodeHunk + has_hunk/adjacent/modifies.
+Hunk-graph H1+H2 (1.7 → 1.8) added NodeHunk + has_hunk/adjacent/modifies;
+schema-1.9-spec W1 (1.8 → 1.9) reused NodeEndpoint for TypeScript HTTP
+server detection (no new enum literals), W2 appended `http_calls` (TS+Go
+HTTP client call sites), W3b appended `grpc_listens_on` + `grpc_calls`
+(Go gRPC server/client detection); within-language semantics Phase 4
+(1.9 → 1.10) appended `NodeAwaitPoint` + edges `awaits` (W-B) and
+`overrides` (W-C) as slot reservations ahead of the Phase 5 detectors.
 All bumps invalidate the file-level cache by design.
 
-## Node types (34)
+## Node types (35)
 
 `Package, File, Struct, Interface, Class, TypeAlias, Enum, Contract,
 Mapping, Event, Function, Method, Modifier, Constructor, Constant,
 Variable, Field, Parameter, LocalVariable, Import, Export, Decorator,
 Goroutine, Channel, Mutex, IfStmt, LoopStmt, CallSite, ReturnStmt, SwitchStmt,
 Endpoint, MessageType,
-Commit, Hunk`
+Commit, Hunk,
+AwaitPoint`
 
 LoopStmt uses `sub_kind ∈ {for, while, range, for_in, for_of}`.
 
@@ -82,7 +86,16 @@ to `confidence='EXTRACTED'` so the LLM never sees code paths that were
 rolled back by force-push; the human Recovery panel surfaces AMBIGUOUS
 explicitly.
 
-## Edge types (35)
+`AwaitPoint` (W-B, schema 1.10): **slot-reserved** statement-level node
+for TypeScript `await` expressions. One node per `await` site so graph
+queries can answer "where does control yield, and to which
+AsyncCallSite?". The Phase 4 bump (2026-05-11) only reserves the enum
+slot — the TS parser does not emit AwaitPoint nodes yet; the detector
+lands in Phase 5 (W-B W2). See
+`docs/design/ts-async-await-and-interface.md §2.1 + §3.2` and
+`docs/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4`.
+
+## Edge types (40)
 
 `contains, defines, calls, invokes, uses_type, instantiates, references,
 reads_field, writes_field, imports, exports, implements, extends,
@@ -92,7 +105,10 @@ acquires_lock, releases_lock, accessed_under_lock,
 listens_on, handles_message, rpc_calls,
 changed_in, blame,
 timeout_path, cancellation_path,
-has_hunk, adjacent, modifies`
+has_hunk, adjacent, modifies,
+http_calls,
+grpc_listens_on, grpc_calls,
+awaits, overrides`
 
 `acquires_lock`, `releases_lock`, `accessed_under_lock` are **slot-reserved**
 for B1 (Wave 5) — same status as `NodeMutex` above. The viewer registers
@@ -150,6 +166,46 @@ inside the same file. Whitelisted to FunctionLike + TypeLike + Field-ish
 (13 node types) so noise-level statement nodes (CallSite / IfStmt / …)
 don't blow up the edge count without retrieval signal. See
 `docs/design/hunk-graph.md §4` for the whitelist rationale.
+
+`http_calls` (schema 1.9 W2): caller `Function`/`Method` → `Endpoint`
+when the function invokes an HTTP client (TS: `fetch`, `axios`, `useSWR`,
+`useQuery`; Go: `http.Get` / `http.Post` / `http.NewRequest` /
+`(*http.Client).Get/Post/Do`). Target resolution uses a 2-stage cascade
+(schema-1.9-spec §6.9): (1) specific-verb lookup `http:METHOD /path`,
+(2) wildcard fallback `http:* /path`; on miss the matcher synthesises
+an `AMBIGUOUS` placeholder `Endpoint` (schema-1.9-spec §6.3 (B)). Path
+matching is **exact** (§3.3 decision — false-positives across distinct
+services with overlapping path suffixes are worse than the
+false-negatives exact-match incurs in well-curated monorepos).
+
+`grpc_listens_on` (schema 1.9 W3b): server-impl `Method` → `Endpoint`
+when the file calls `pb.RegisterXXXServer(s, &impl{})`. Each method on
+the impl receiver type whose name matches an RPC method on the generated
+`XServer` interface emits one edge to a `grpc:Service.Method` Endpoint
+(language=`go`, sub_kind=`grpc`).
+`grpc_calls` (schema 1.9 W3b): caller `Function`/`Method` → `Endpoint`
+when the body calls `<stub>.RpcMethod(ctx, req)` where `stub` was
+assigned from `pb.NewXXXClient(conn)`. Like `http_calls`, on miss the
+matcher synthesises an `AMBIGUOUS` placeholder Endpoint
+(language=`external`). Confidence split (schema-1.9-spec §6.5 (C)):
+typesInfo-confirmed → `EXTRACTED`, AST-only suffix-matcher → `INFERRED`,
+unresolved stub type → `AMBIGUOUS` placeholder.
+
+`awaits` (W-B, schema 1.10): **slot-reserved** edge for TypeScript
+async-suspension flow. `Function`/`Method` → `AwaitPoint`, and
+`AwaitPoint` → `AsyncCallSite`. No emission yet — Phase 5 (W-B W2) will
+populate the slot. Direction encodes "this function suspends here" /
+"this suspension awaits that call". See
+`docs/design/ts-async-await-and-interface.md §2.1 + §3.2`.
+
+`overrides` (W-C, schema 1.10): **slot-reserved** edge for Solidity
+virtual/override semantics. `Method` → `Method` between a child
+contract's method that overrides a parent's `virtual` method.
+Direction = child → parent (Q4 decision in solidity-inheritance spec
+§5.0). Distinct from `implements` (interface satisfaction) because
+`overrides` is concrete-to-concrete virtual dispatch resolution. No
+emission yet — Phase 5 (W-C W2) will populate the slot. See
+`docs/design/solidity-inheritance-and-interface-dispatch.md §2.1 + §3.3`.
 
 ## Edge metadata: `dispatch_kind` (schema 1.7)
 

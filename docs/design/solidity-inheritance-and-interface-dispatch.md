@@ -7,7 +7,12 @@
 > single most common pattern in real-world Solidity that the current parser
 > cannot model.
 >
-> **Status**: design draft 2026-05-11. No code changes.
+> **Status**: design draft 2026-05-11. W4 (abstract/library SubKind)
+> ✅ landed 2026-05-11 (commit `f7a8515`). Schema 1.10 slot for
+> `EdgeOverrides` reserved 2026-05-11 (appended to `pkg/types/enums.go`;
+> see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
+> W1 / W2 / W3 / W6 detector implementation is **not yet started** —
+> Phase 5 entry point.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -140,6 +145,15 @@
 - 기존 `SubKind` 컬럼 활용 — 마이그레이션 없음.
 - bump: schema 1.8 → 1.10 (1.9 cross-language 와 동시 진행 시 1.11 가능).
   TS spec 과 bump 통합 가능성은 §5.Q8.
+
+**Status — 2026-05-11**: ✅ schema 1.10 slot **reserved**. `EdgeOverrides`
+appended at `AllEdgeTypes()` index 39 (W-B `EdgeAwaits` 가 index 38 을
+점유). `EdgeImplements` / `EdgeExtends` 는 enum 에 이미 존재 — 새 추가
+없음. SubKind 값 확장 (`NodeContract.SubKind` ⊇ {abstract, library},
+`NodeFunction.SubKind` ⊇ {virtual, override, virtual_override, fallback,
+receive}) 은 문자열 컨벤션이라 enum 변경 불필요. Detector emission 은
+Phase 5 (W1/W2/W3/W6) 진입 시까지 0 — `internal/parse/solidity/*` 본
+Phase 4 bump 에서는 무변경.
 
 ---
 

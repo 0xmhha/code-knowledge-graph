@@ -74,6 +74,14 @@ func (s *sqliteStore) Close() error { return s.db.Close() }
 // landing site for future 1.9 column additions (e.g. W2 http_calls suffix
 // match needs no new column, W4 Topic node reuses NodeMessageType-shaped
 // columns).
+//
+// Schema 1.9 → 1.10 (within-language semantics Phase 4, 2026-05-11): no
+// DDL change — the new enum literals (`NodeAwaitPoint`, `EdgeAwaits`,
+// `EdgeOverrides`) ride the existing `nodes.type` / `edges.type` TEXT
+// columns. The bump is purely a cache-key contributor so pre-1.10 DBs
+// drop into the cold path on first build with the new binary; once the
+// Phase 5 detectors land they will populate the slot under the same
+// schema version. No Migrate work required here.
 func (s *sqliteStore) Migrate() error {
 	if _, err := s.db.Exec(schemaSQL); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
@@ -85,6 +93,7 @@ func (s *sqliteStore) Migrate() error {
 		return fmt.Errorf("migrate dispatch_kind on pending_refs: %w", err)
 	}
 	// Schema 1.9: no migrations required (see func docstring).
+	// Schema 1.10: no migrations required — slot-only enum bump.
 	return nil
 }
 

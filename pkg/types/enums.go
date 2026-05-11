@@ -1,10 +1,12 @@
 package types
 
-// NodeType enumerates the 34 node kinds (spec §5.1; v0.2 schema 1.1 added
+// NodeType enumerates the 35 node kinds (spec §5.1; v0.2 schema 1.1 added
 // Mutex; schema 1.3 appended Endpoint + MessageType for CKS G5 Distributed;
 // schema 1.4 appended Commit for CKS G6 Temporal — git history nodes;
 // schema 1.8 appended Hunk for CKS G6 Temporal Hunk-graph — one block of
-// changed lines per (commit, file)).
+// changed lines per (commit, file); schema 1.10 appended AwaitPoint for
+// within-language semantics Phase 4 — W-B TS async/await suspension points
+// (slot reserved; detector lands in Phase 5)).
 type NodeType string
 
 const (
@@ -82,9 +84,19 @@ const (
 	// Appended at the end so existing positional indices stay stable
 	// (TestAllNodeTypes_Stable).
 	NodeHunk NodeType = "Hunk"
+	// Schema 1.10 (within-language semantics Phase 4 — W-B TS async/await):
+	// statement-level node emitted at each `await` expression in TypeScript
+	// source. Marks an async suspension point so graph queries can answer
+	// "where does control yield, and to which AsyncCallSite?". Slot
+	// reserved 2026-05-11; detector lands in Phase 5 (W-B W2). See
+	// docs/design/ts-async-await-and-interface.md §2.1 + §3.2 and
+	// docs/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4. Appended at the
+	// end so existing positional indices stay stable
+	// (TestAllNodeTypes_Stable).
+	NodeAwaitPoint NodeType = "AwaitPoint"
 )
 
-// AllNodeTypes returns all 34 node types in a stable order.
+// AllNodeTypes returns all 35 node types in a stable order.
 // NOTE: identifier names are stable; positional indices are load-bearing
 // only for tests that snapshot the full slice (TestAllNodeTypes_Stable).
 // NodeMutex was inserted at index 24 to keep the concurrency family
@@ -99,6 +111,8 @@ const (
 // distinct family from everything above. NodeHunk (schema 1.8, Hunk-graph
 // H1) is appended at index 33 — same temporal family as NodeCommit but
 // finer-grained (one block of changed lines, not a whole commit).
+// NodeAwaitPoint (schema 1.10, W-B) is appended at index 34 — TS async
+// suspension family, slot reserved before the Phase 5 detector lands.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -111,10 +125,11 @@ func AllNodeTypes() []NodeType {
 		NodeEndpoint, NodeMessageType,
 		NodeCommit,
 		NodeHunk,
+		NodeAwaitPoint,
 	}
 }
 
-// EdgeType enumerates the 38 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
+// EdgeType enumerates the 40 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS
 // G6 Temporal — git history derived; schema 1.6 appended timeout_path /
@@ -123,7 +138,10 @@ func AllNodeTypes() []NodeType {
 // then `modifies` for the H2 AST-overlap stage; schema 1.9 W2 appended
 // `http_calls` — caller Function → Endpoint (HTTP client call sites);
 // schema 1.9 W3b appended `grpc_listens_on` + `grpc_calls` — Go gRPC
-// server/client detection).
+// server/client detection; schema 1.10 appended `awaits` (W-B, TS async
+// suspension flow) + `overrides` (W-C, Solidity virtual/override semantics)
+// for within-language semantics Phase 4 — slots reserved 2026-05-11,
+// detectors land in Phase 5).
 type EdgeType string
 
 const (
@@ -286,10 +304,34 @@ const (
 	// snapshots stay stable.
 	EdgeGRPCListensOn EdgeType = "grpc_listens_on"
 	EdgeGRPCCalls     EdgeType = "grpc_calls"
+	// Schema 1.10 (within-language semantics Phase 4 — slots reserved
+	// 2026-05-11; detectors land in Phase 5):
+	//   awaits   (W-B): Function/Method → AwaitPoint, and AwaitPoint →
+	//                   AsyncCallSite. Marks async suspension flow in
+	//                   TypeScript source so graph queries can answer
+	//                   "where does control yield, and what call awaits
+	//                   here?". See docs/design/ts-async-await-and-interface.md
+	//                   §2.1 + §3.2.
+	//   overrides (W-C): Method → Method between a child contract's method
+	//                   that overrides a parent's `virtual` method in
+	//                   Solidity. Direction = child → parent (Q4 decision
+	//                   in solidity-inheritance spec §5.0). Distinct from
+	//                   `implements` (interface satisfaction) because
+	//                   `overrides` is concrete-to-concrete virtual
+	//                   dispatch resolution. See
+	//                   docs/design/solidity-inheritance-and-interface-dispatch.md
+	//                   §2.1 + §3.3.
+	//
+	// Appended at the end so existing edge-type hash positions / test
+	// snapshots stay stable.
+	EdgeAwaits    EdgeType = "awaits"
+	EdgeOverrides EdgeType = "overrides"
 )
 
-// AllEdgeTypes returns all 38 edge types in stable order.
+// AllEdgeTypes returns all 40 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
+// EdgeAwaits (W-B) + EdgeOverrides (W-C) are appended at indices 38-39
+// for schema 1.10 (slot-only; detectors land in Phase 5).
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
 		EdgeContains, EdgeDefines, EdgeCalls, EdgeInvokes, EdgeUsesType,
@@ -304,6 +346,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeHasHunk, EdgeAdjacent, EdgeModifies,
 		EdgeHTTPCalls,
 		EdgeGRPCListensOn, EdgeGRPCCalls,
+		EdgeAwaits, EdgeOverrides,
 	}
 }
 
