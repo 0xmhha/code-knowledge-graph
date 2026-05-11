@@ -306,37 +306,46 @@ W1 land 시:
 
 ---
 
-## §6. §11.x 형식 결정 항목 (사용자 답변 대기)
+## §6. §11.x 형식 결정 항목 (사용자 답변 — 2026-05-11 confirmed §6.1~§6.3)
 
 hunk-graph.md의 §11 8개 결정 패턴 따라 사용자 합의 받음. W1 시작 전
-모두 답 받기 권장 (W3까지는 답 미루기 가능).
+필수인 §6.1~§6.3은 답변 확정. §6.4~§6.8은 W2~W4 진입 시점에 다시 확인.
 
-### §6.1 Stage 단위 schema bump
+### §6.1 Stage 단위 schema bump — **(A) 1.9 한 번** ✅
 
 - (A) 1.9 한 번 — W1~W4 모두 1.9 안에 점진 append.
 - (B) Stage마다 bump (1.9 / 1.10 / 1.11 / 1.12) — incremental cache
   invalidation을 stage마다 발생시킴.
-- 추천: **(A)** — 사용자가 한 stage만 enable하지 않을 것이라 cache
-  invalidation 의미 없음. 다만 H1처럼 *finalised when full set lands*.
+- **확정 (2026-05-11): (A) 1.9 한 번. 단 사용자 추가 조건 — "schema
+  변경이 있으면 추가 작업"으로 인식.** 즉 W1 land 시점에 SchemaVersion
+  1.8 → 1.9 bump (`internal/buildpipe/cache.go`)는 schema-changing
+  작업으로 다루며 cache invalidation을 명시. 이후 W2~W4 stage는 new
+  edge type append만으로 1.9 유지 (enum append-only는 cache-key 변화
+  없으나 *새 detection 결과가 그래프에 새 edges 등장* → 사용자 의도상
+  schema 변경에 준한 검증 필요).
 
-### §6.2 W1 — `ts_listens_on` 별도 edge type vs `listens_on` 재사용
+### §6.2 W1 — `ts_listens_on` 별도 edge type vs `listens_on` 재사용 — **(B) 재사용** ✅
 
 - (A) 별도 `ts_listens_on` — 언어 식별이 쉬워 viewer pill 분리 가능.
 - (B) 동일 `listens_on` — Go와 같은 semantics, viewer 필터 단순.
-- 추천: **(B)** — graph 질의 *"이 endpoint를 누가 listen하나"*는
-  언어와 무관한 의미. 언어 구분이 필요하면 dst node의 `language`
-  필드로 식별.
+- **확정 (2026-05-11): (B) Go와 동일 `listens_on` 재사용.** Endpoint
+  노드의 `language` 필드 (현재 Go emit은 `language='go'`)로 언어 구분.
+- **사용자 추가 제약 (load-bearing — §7.0 참조)**: *"TS를 위한 작업으로
+  인하여, Golang을 위한 작업이 절대 깨져서는 안 된다. 작업마다 테스트
+  검토가 필요."* — Go regression guard를 모든 W stage acceptance criteria의
+  P0 항목으로 격상.
 
-### §6.3 W2 — HTTP client matching 실패 처리
+### §6.3 W2 — HTTP client matching 실패 처리 — **(B) AMBIGUOUS placeholder** ✅
 
 - (A) Drop (V0 기존 패턴 — `rpc_calls` matching fail 처리와 동일).
 - (B) Placeholder Endpoint with `AMBIGUOUS` confidence (`§11.3` 패턴).
 - (C) `external:` prefix Endpoint (e.g. `http:GET external:/api/x`)
   with INFERRED.
-- 추천: **(B)** — H3 retrieval boundary가 이미 AMBIGUOUS를 LLM에서
-  숨기는 패턴 확립. 사용자 surface (Recovery 패널 같은)에서는
-  unmatched calls를 명시적으로 보여줘 monorepo 외부 API 의존성
-  audit 가능.
+- **확정 (2026-05-11): (B) AMBIGUOUS placeholder.** H3 retrieval
+  boundary의 `llmSafeStoreReader` wrapper가 이미 AMBIGUOUS를 LLM에서
+  숨기므로 자연 정합. 사용자 surface (Recovery 패널 또는 별도
+  "External APIs" 패널 신설 — W2 시점에 결정) 에서 unmatched calls를
+  명시적으로 노출해 monorepo 외부 API 의존성 audit 가능.
 
 ### §6.4 W3 — `.proto` parser 선택
 
@@ -387,16 +396,55 @@ hunk-graph.md의 §11 8개 결정 패턴 따라 사용자 합의 받음. W1 시�
 
 ## §7. Acceptance criteria per stage
 
+### §7.0 Go regression guard (모든 stage 공통 — P0, 사용자 명시 §6.2)
+
+**Load-bearing constraint**: TS / `.proto` / message-queue 신규 작업으로
+인해 기존 Go 동작이 깨져서는 안 된다. 모든 W stage commit 전 다음 확인
+필수:
+
+- [ ] `go test ./... -count 1` 전 패키지 PASS — Go parser / distributed.go
+  / pkg/evidence / internal/server / internal/mcp 등 23/23 ok.
+- [ ] `go vet ./...` clean.
+- [ ] **Go-only fixture 그래프 비교**: 작업 전 baseline build 산출물
+  (`/tmp/ckg-go-baseline`)과 작업 후 build 산출물의 노드/엣지 count
+  diff = 0 (또는 의도된 변화만, e.g. Go HTTP client patterns은 W2 시점
+  에 의도된 증분만 허용).
+  ```bash
+  # baseline (작업 전):
+  ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-go-baseline --no-cache --lang=go
+  sqlite3 /tmp/ckg-go-baseline/graph.db "SELECT type, COUNT(*) FROM edges GROUP BY type" > /tmp/baseline.txt
+
+  # 작업 후:
+  ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-go-after --no-cache --lang=go
+  sqlite3 /tmp/ckg-go-after/graph.db "SELECT type, COUNT(*) FROM edges GROUP BY type" > /tmp/after.txt
+  diff /tmp/baseline.txt /tmp/after.txt   # 의도된 변화만 (W1은 0)
+  ```
+- [ ] `internal/parse/golang/distributed_test.go` (E3 Go HTTP/JSON-RPC
+  핸들러 검증)가 변경 없이 PASS — TS 작업이 Go distributed pass의
+  공유 헬퍼 (Endpoint dedup, messageNodeIDs 등)를 수정해야 한다면
+  명시적 diff 표기.
+- [ ] go-stablenet self-graph 또는 동등 corpus build 시 Go 노드/엣지
+  카운트가 baseline ± 0 (TS-only 추가는 Go count에 영향 0이어야 함).
+
+### §7.W stage별 criteria
+
 ### W1 (TS HTTP server)
 
+- [ ] **§7.0 Go regression guard 통과** (가장 먼저 — TS 작업이 Go
+  parser / shared helper에 영향 주지 않음 확인).
 - [ ] testdata 4 fixtures (Express / Fastify / Hono / Next.js) 모두
-  parse → Endpoint node 적어도 1개 + `listens_on` (or `ts_listens_on`)
-  edge 적어도 1개.
+  parse → Endpoint node 적어도 1개 + `listens_on` edge 적어도 1개
+  (Endpoint의 `language='ts'` 명시).
 - [ ] 같은 route 중복 dedup.
 - [ ] Computed route는 INFERRED + 라벨에 "<computed>" 표기.
 - [ ] CKG self-graph (Next.js viewer 포함) build 후 `/api/edges/counts`
   G5 카운트가 W1 land 전 대비 비례 증가.
 - [ ] go test ./internal/parse/typescript/... PASS.
+- [ ] `pkg/types/enums.go` 변경 없음 (§6.2 (B) — `listens_on` 재사용).
+- [ ] `internal/buildpipe/cache.go` SchemaVersion `"1.8"` → `"1.9"`
+  bump (§6.1 schema-changing 작업 인식).
+- [ ] `internal/persist/sqlite.go::Migrate` 갱신 (1.8 → 1.9 stub —
+  새 column 없으나 version 인식만 추가).
 
 ### W2 (HTTP client matching)
 
@@ -461,14 +509,17 @@ hunk-graph.md의 §11 8개 결정 패턴 따라 사용자 합의 받음. W1 시�
 
 ## §10. 다음 단계
 
-1. **사용자 §6 결정 8개 답변** (W1 시작 전 §6.1~§6.3 필수 / §6.4~§6.8
-   은 W2~W4 시점에 받아도 무방).
+1. ~~사용자 §6 결정 8개 답변~~ → **§6.1~§6.3 확정 2026-05-11** (§6.4~§6.8
+   은 W2~W4 진입 시점에 다시 확인).
 2. **W1 first commit dispatch** — `internal/parse/typescript/distributed.go`
-   신규 + 4 fixture + unit test. Subagent에 본 spec §3.2 + §6.2 결정
-   + §7 W1 acceptance criteria 핸드오프.
+   신규 + 4 fixture + unit test. Subagent에 본 spec §3.2 + §6.2 (B) + §7.0
+   Go regression guard + §7 W1 acceptance criteria 핸드오프.
+   - **Go regression이 깨지면 즉시 중단 + 사용자 보고** — 자동 재시도
+     금지.
 3. **W1 land 후 viewer 검증** — self-graph build → Endpoint 노드 등장 +
   G5 카운트 증가 확인.
-4. **W2 dispatch** — W1 base 위에 client matching.
-5. W3 / W4 진행은 W1+W2 사이즈를 보고 사용자 확정.
+4. **W2 dispatch** — W1 base 위에 client matching. W1과 마찬가지로
+   §7.0 Go regression guard 우선 검증.
+5. W3 / W4 진행은 W1+W2 사이즈 + 사용자 추가 결정 (§6.4~§6.6) 따라 분기.
 
 **End of design draft.**
