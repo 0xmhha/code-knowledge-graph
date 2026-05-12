@@ -85,7 +85,7 @@ func (v *declVisitor) visit() {
 	// member_expression that fits `<identifier>.<identifier>(...)` and
 	// queues a PendingRef that Pass 2 resolves through the binding map.
 	// State-variable receivers only (Q9-2 (a) V0 limit); parameter
-	// receivers + chaining are V1.1 follow-up.
+	// receivers added in V1.1 via emitParameterMetaPending in overrides.go.
 	v.runUsingForCalls()
 	v.collectABI()
 }

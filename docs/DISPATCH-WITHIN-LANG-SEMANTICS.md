@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var + V1.1 parameter; return chaining / free-fn form / file-level / inherited V1.2+) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var + V1.1 parameter + V1.2 inherited; return chaining / free-fn form V1.3+; file-level blocked by grammar) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,23 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.2 (Sol `using For` inherited binding propagation) ✅ landed
+2026-05-12. 처음 V1.2 = file-level using (0.8.13+) 로 시작했으나
+tree-sitter-solidity v1.2.13 grammar 가 source_file scope 의
+using_directive 를 ERROR node 로 parse 함을 AST dump 로 확인 (cmd_probe
+임시 도구 사용 + 제거). file-level 작업물 revert + grammar 한계
+spec/queries.go 노트로 보존. V1.2 scope 를 **inherited using directive**
+로 재설정: W1 inheritance graph 의 parents adjacency 재사용, Pass 2
+binding map 사전 빌드 직후 BFS 로 ancestor 의 bindings 를 descendant
+에 merge. child-scope typeName entry 보존 (Solidity scoping — local
+shadows inherited). cycle 방어 visited set. EdgeUsesFor 는 parent 의
+declaration site 에만 emit — Child 에 synthetic edge 안 만듦 (graph
+가 "어디 declared 됐나" 정확히 표현). 3 fixture + 3 test
+(inherited_basic, inherited_multi_level transitive BFS, inherited_child_
+overrides shadow). 25/25 PASS, vet clean. V1.3+ carry-over:
+return-value chaining, free-function form, file-level (grammar
+업그레이드 후).
 
 W-B W1 (TS heritage `extends`/`implements`) ✅ landed.
 `internal/parse/typescript/heritage.go` (284 LOC) + 6 fixture +

@@ -14,11 +14,13 @@
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
 > emit. W6 V1.0 (state-variable receiver dispatch) ✅ **LANDED 2026-05-12**.
-> W6 V1.1 (parameter receiver dispatch) ✅ **LANDED 2026-05-12** —
-> function parameter type 인덱스 (funcID, paramName → typeName) 추가
-> + resolveUsingForCallRef 의 receiver lookup 에 state-var → parameter
-> fallback 도입. 3 fixture + 3 test. return chaining / free-function form
-> / file-level using / inherited using 만 V1.2+ follow-up 으로 남음.
+> W6 V1.1 (parameter receiver dispatch) ✅ **LANDED 2026-05-12**.
+> W6 V1.2 (inherited using directive) ✅ **LANDED 2026-05-12** — BFS
+> over the W1 inheritance graph propagates parent's binding map down
+> to descendants (child-scope binding shadows inherited per Solidity
+> scoping). 3 fixture + 3 test. file-level using (0.8.13+) 는 tree-
+> sitter-solidity v1.2.13 grammar 한계로 ERROR-node parse → V1.x 분리.
+> return-value chaining / free-function form 만 V1.3+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -785,10 +787,67 @@ V1.0 carry-over (V1.1+ follow-up)
 
 V1.1 carry-over (V1.2+ follow-up)
 - Return-value chaining (`foo().add(x)`): 정적 추론 인프라 필요
-  (call-expression 의 return type 추적).
-- Free-function form: 별도 AST (using_alias).
-- File-level using directive (module-scope binding).
-- Inherited using directive (base contract → child 상속).
+  (call-expression 의 return type 추적). **V1.3+**
+- Free-function form: 별도 AST (using_alias). **V1.3+**
+- File-level using directive (module-scope binding). **grammar 한계
+  (v1.2.13 ERROR-node) — V1.x grammar 업그레이드 후 진입**
+- Inherited using directive (base contract → child 상속). **V1.2 LANDED
+  2026-05-12** (아래 블록).
+
+#### LANDED 2026-05-12 (W-C W6 V1.2 — inherited using directive)
+
+- 구현 추가:
+  - `internal/parse/solidity/resolve.go`: Pass 2 binding 사전 빌드
+    loop 직후, 모든 container 에 대해 inheritance graph 의 ancestors
+    를 BFS 로 순회하면서 각 ancestor 의 bindings 를 descendant 에
+    merge. child-scope 의 typeName entry 는 보존 (Solidity scoping
+    semantics — local declaration shadows inherited).
+  - cycle 방어: visited set per child 로 inheritance loop 방지.
+  - parents adjacency 재사용: W1 inheritance graph 의 결과물 `parents`
+    map 그대로 활용 — 새 인프라 없이 V1.2 처리.
+- 구현 제거 (V1.2 attempted file-level using 의 revert):
+  - 처음 V1.2 = file-level using directive 로 시작했으나 tree-sitter-
+    solidity v1.2.13 grammar 가 `using LibName for T;` (0.8.13+
+    source_file 직접 child) 를 ERROR-node 로 parse 함을 AST dump 로
+    확인 (cmd_probe 임시 도구 사용 후 제거).
+  - 작성한 `runUsingForFile` / `dispatchKindUsingForFile` / fan-out
+    로직 전부 revert. spec/queries.go 에 grammar 한계 노트만 보존.
+  - file-level 는 grammar 업그레이드 시 별도 작업으로 진입.
+- Architecture (V1.2 BFS pseudocode):
+  ```
+  for each childID in containerNameByID:
+      visited = {childID}
+      queue = parents[childID]
+      while queue not empty:
+          ancestorID = queue.pop_front()
+          if ancestorID in visited: continue
+          visited.add(ancestorID)
+          for (typeName, libName) in bindings[ancestorID]:
+              if typeName not in bindings[childID]:
+                  bindings[childID][typeName] = libName
+          queue.extend(parents[ancestorID])
+  ```
+- Confidence: V1.2 propagation 은 binding map 만 채움 — EdgeUsesFor 는
+  parent 의 declaration site 에만 emit (Child 에 synthetic edge 안
+  만듦). 의미: graph 가 "어디 binding 이 declared 됐나" 를 정확히
+  표현하고, 동시에 dispatch resolution 은 inherited binding 도 인식.
+- Fixtures: `testdata/using_for_v12/{inherited_basic, inherited_multi_level,
+  inherited_child_overrides}.sol`.
+- 테스트: `using_for_v12_test.go` 3 함수:
+  - `TestUsingForV12_InheritedBasic` — single-level: Child.bump →
+    ParentLib.inc 검증. EdgeUsesFor 는 Parent → ParentLib 만 (Child
+    에 synthetic 없음).
+  - `TestUsingForV12_InheritedMultiLevel` — Grand → Parent → Child
+    transitive BFS: Parent.tap + Child.tap2 모두 GrandLib.tap 으로
+    resolve.
+  - `TestUsingForV12_InheritedChildOverrides` — child-scope binding
+    이 inherited binding 을 shadow 함을 검증 (Solidity scoping).
+- 회귀: 25/25 PASS, vet clean. §7.0 Go regression: Sol-only.
+
+V1.2 carry-over (V1.3+ follow-up)
+- Return-value chaining (`foo().add(x)`).
+- Free-function form `using {f1, f2} for T`.
+- File-level using directive (0.8.13+) — grammar 업그레이드 후.
 
 #### 4.6.5 §3.5 갱신 예정
 

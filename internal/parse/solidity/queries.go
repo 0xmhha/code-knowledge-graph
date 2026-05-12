@@ -89,3 +89,17 @@ const (
 					source: (_) @type) @stmt))
 	]`
 )
+
+// W6 V1.2 grammar limitation note (2026-05-12)
+//
+// File-level using directive (Solidity 0.8.13+, `using LibName for T;`
+// at module scope outside any contract body) was attempted as the first
+// V1.2 candidate but blocked by tree-sitter-solidity v1.2.13: the
+// grammar's node-types.json lists `using_directive` as a valid
+// source_file child, but the parser actually wraps such directives in
+// ERROR nodes — meaning the lexer/grammar rules don't recognise this
+// 0.8.13+ syntax yet (verified via AST dump 2026-05-12). Until the
+// vendored grammar is bumped to a version that supports the new
+// directive position, V1.2 lands the *Inherited using directive*
+// carry-over instead. File-level handling deferred to V1.x once the
+// grammar dependency upgrades.

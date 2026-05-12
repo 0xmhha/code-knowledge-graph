@@ -255,6 +255,50 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 
+	// W6 V1.2 (2026-05-12) — propagate inherited bindings down the
+	// inheritance graph so a child contract picks up its parent's
+	// `using` declarations. Solidity 0.8.13+ formalises this via
+	// `internal using`, but in practice solc treats child-visible
+	// using directives this way for backwards-compat; the grammar
+	// doesn't separate the `internal` keyword at the using_directive
+	// level, so V0 treats every contract-scope using as inherited.
+	//
+	// Algorithm: BFS over the inheritance graph (child → parents)
+	// merging each ancestor's bindings into the descendant. Child's
+	// own typeName entries are NEVER overwritten (per Solidity scoping
+	// — local declaration shadows inherited). Inheritance via
+	// EdgeImplements (contract → interface) is included because
+	// interfaces can in principle carry `using` directives too
+	// (rare, but legal); intersection with parent's contract subkind
+	// happens implicitly because interfaces with no using directives
+	// contribute no entries.
+	//
+	// Cycle defence: visited set per starting child prevents infinite
+	// loops on accidental inheritance cycles (Solidity forbids them
+	// but a partial parse could produce one).
+	for childID := range containerNameByID {
+		visited := map[string]bool{childID: true}
+		queue := append([]string(nil), parents[childID]...)
+		for len(queue) > 0 {
+			ancestorID := queue[0]
+			queue = queue[1:]
+			if visited[ancestorID] {
+				continue
+			}
+			visited[ancestorID] = true
+			for typeName, libName := range bindings[ancestorID] {
+				if bindings[childID] == nil {
+					bindings[childID] = map[string]string{}
+				}
+				// Don't clobber a child-scope binding.
+				if _, exists := bindings[childID][typeName]; !exists {
+					bindings[childID][typeName] = libName
+				}
+			}
+			queue = append(queue, parents[ancestorID]...)
+		}
+	}
+
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
 	// rely on the `parents` index built between the two sub-passes.
