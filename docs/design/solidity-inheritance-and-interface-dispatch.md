@@ -69,10 +69,14 @@
 > QnameAndStart 확장.
 > V1.25 free function regression guard — Sol 0.7.4+ file-level
 > function_definition. phantom EdgeCalls 미생성 확정.
-> V1.26 ✅ **abstract contract body scope regression guard** — abstract
-> 가 contract_declaration AST kind 와 동일 (W4 SubKind 만 다름). V1.x
-> using-for indexing 이 abstract 도 자동 cover 함을 fixture 로 잠금.
-> Block-scoped shadowing 정확화 / module-import 만 V1.27+ follow-up.
+> V1.26 abstract contract body scope regression guard — abstract 가
+> contract_declaration AST kind 와 동일. V1.x using-for indexing 이
+> abstract 도 자동 cover 함을 fixture 로 잠금.
+> V1.27 ✅ **inherited modifier `using` regression guard** — V1.0
+> binding + V1.2 inheritance propagation + V1.22 modifier scope 의
+> 교집합. Parent 의 modifier body 가 Parent 의 using-for binding 으로
+> 정상 dispatch, child inheritance 가 perturb 하지 않음을 확정.
+> Block-scoped shadowing 정확화 / module-import 만 V1.28+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
