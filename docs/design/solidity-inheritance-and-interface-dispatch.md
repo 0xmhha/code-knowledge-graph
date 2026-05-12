@@ -83,15 +83,19 @@
 > V1.30 block-scoped shadowing (V0 first-decl-wins) — outer-decl 보존.
 > V2.0 line-range scope-aware localVar lookup — V1.30 V0 trade-off
 > 해소, narrowest-scope-wins.
-> V2.1 ✅ **interface receiver via using-for guard** + multi-binding
-> known limitation lock. (a) `using Helper for IToken; IToken token;
-> token.method()` 가 V0/V1.0 의 typeName-based binding map 으로 정상
-> 동작함을 fixture 로 잠금 — real-world DeFi (Uniswap, OpenZeppelin)
-> 패턴. (b) `using A for uint256; using B for uint256;` 의 V0 single-
-> value binding overwrite 가 second-wins 동작함을 명시적으로 lock —
-> V2.2+ 에서 multi-value binding 으로 fix 시 이 test 업데이트 필요.
-> V2.1 carry-over (V2.2+): multi-binding fix / byte 정밀도 / module-
-> import 추가 / Grammar-blocked.
+> V2.1 interface receiver via using-for guard + multi-binding known
+> limitation lock.
+> V2.2 ✅ **multi-binding for same type** — V2.1 의 known limitation
+> 해소. bindings 를 `map[contractID]map[typeName][]libraryName` 으로
+> 확장 (single-value → multi-value). Pre-build sweep append. 신규
+> helper `resolveBindingLib` 가 multi-bound libs 중 method 존재
+> 라이브러리 첫 hit 선택 — Solidity 의 "directives apply in order,
+> first method match wins" semantics 정합. 10 lookup site (V1.0/V1.3-
+> V1.13) 의 binding+library lookup 코드를 helper 호출로 통일 (~50
+> LOC reduction). V2.1 multi-binding limitation test 가 정상 EdgeCalls
+> assert 로 promoted.
+> V2.2 carry-over (V2.3+): byte 정밀도 (V2.0 의 line-based fallback)
+> / module-import 추가 / Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

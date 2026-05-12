@@ -26,7 +26,12 @@ import (
 //                                 function-local variable receiver
 //                                 dispatch; resolver fallback after
 //                                 stateVarTypes → paramTypes).
-type bindingMap map[string]map[string]string
+// bindingMap (V2.2 onwards): contractID → (typeName | "*") → []libraryName.
+// Multi-value to support `using A for uint256; using B for uint256;`
+// where both libraries apply and each provides different methods. V0
+// pre-V2.2 was single-value and second-wins overwrite; V2.2 appends
+// per directive and resolution tries each library until a method hit.
+type bindingMap map[string]map[string][]string
 type stateVarTypeMap map[string]map[string]string
 type paramTypeMap map[string]map[string]string
 type funcReturnTypeMap map[string]string
@@ -279,9 +284,12 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				libName := pr.TargetQName[:sep]
 				typeName := pr.TargetQName[sep+1:]
 				if bindings[pr.SrcID] == nil {
-					bindings[pr.SrcID] = map[string]string{}
+					bindings[pr.SrcID] = map[string][]string{}
 				}
-				bindings[pr.SrcID][typeName] = libName
+				// V2.2: append (was overwrite). Multi-binding (multiple
+				// `using` directives for the same type) preserves each
+				// library so resolution can try them in order.
+				bindings[pr.SrcID][typeName] = append(bindings[pr.SrcID][typeName], libName)
 			case dispatchKindUsingForParamType:
 				// TargetQName encoding from emitParameterMetaPending:
 				// `paramName|typeName`.
@@ -366,13 +374,18 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				continue
 			}
 			visited[ancestorID] = true
-			for typeName, libName := range bindings[ancestorID] {
+			for typeName, libNames := range bindings[ancestorID] {
 				if bindings[childID] == nil {
-					bindings[childID] = map[string]string{}
+					bindings[childID] = map[string][]string{}
 				}
-				// Don't clobber a child-scope binding.
+				// Don't clobber a child-scope binding. V2.2 multi-value
+				// semantics: only propagate the inherited list when the
+				// child has no binding for this type at all.
 				if _, exists := bindings[childID][typeName]; !exists {
-					bindings[childID][typeName] = libName
+					// Defensive clone so child / ancestor share no slice.
+					cloned := make([]string, len(libNames))
+					copy(cloned, libNames)
+					bindings[childID][typeName] = cloned
 				}
 			}
 			queue = append(queue, parents[ancestorID]...)
@@ -847,6 +860,35 @@ func lookupReceiverType(
 	return ""
 }
 
+// resolveBindingLib — W-C W6 V2.2 (2026-05-12). Iterates the
+// multi-value binding list for (typeName | "*") and returns the
+// libIDs of the first library whose `<lib>.<methodName>` qname is
+// indexed in funcByQName. Used by every V1.x resolver path that
+// otherwise had identical `bindMap[typeName] → libName → funcByQName`
+// lookup chains.
+//
+// Wildcard fallback (`*` key) only consulted when no specific
+// binding exists for typeName. Within either list, the first library
+// to have the method wins — preserves Solidity's "directives apply
+// in order, first method match wins" semantics for multi-binding
+// while keeping single-binding behavior identical to pre-V2.2.
+func resolveBindingLib(
+	bindMap map[string][]string,
+	typeName, methodName string,
+	funcByQName map[string][]string,
+) ([]string, bool) {
+	libs := bindMap[typeName]
+	if len(libs) == 0 {
+		libs = bindMap["*"]
+	}
+	for _, lib := range libs {
+		if ids := funcByQName[lib+"."+methodName]; len(ids) > 0 {
+			return ids, true
+		}
+	}
+	return nil, false
+}
+
 // selectLocalDecl picks the narrowest local declaration whose scope
 // range contains useSiteLine. When useSiteLine is 0 (caller has no
 // use-site context — e.g. emit walks), falls back to the first decl
@@ -936,20 +978,9 @@ func resolveUsingForCallRef(
 	if typeName == "" {
 		return types.Edge{}, false
 	}
-	bindMap := bindings[contractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[typeName]
-	if !hit {
-		// Wildcard fallback per Q9-3 (a).
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	ids := funcByQName[libName+"."+methodName]
-	if len(ids) == 0 {
+	// V2.2: multi-binding aware resolution via resolveBindingLib.
+	ids, ok := resolveBindingLib(bindings[contractID], typeName, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
@@ -1039,19 +1070,9 @@ func resolveUsingForChainCallRef(
 	if !ok || returnType == "" {
 		return types.Edge{}, false
 	}
-	bindMap := bindings[contractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[returnType]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	ids := funcByQName[libName+"."+methodName]
-	if len(ids) == 0 {
+	// V2.2: multi-binding aware resolution via resolveBindingLib.
+	ids, ok := resolveBindingLib(bindings[contractID], returnType, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
@@ -1140,19 +1161,9 @@ func resolveUsingForCrossChainCallRef(
 	if !ok || returnType == "" {
 		return types.Edge{}, false
 	}
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[returnType]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// V2.2: multi-binding aware resolution.
+	libIDs, ok := resolveBindingLib(bindings[callerContractID], returnType, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
@@ -1247,21 +1258,9 @@ func resolveUsingForDeepChainCallRef(
 	if !ok || returnType2 == "" {
 		return types.Edge{}, false
 	}
-	// Step 6: binding lookup on returnType2.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[returnType2]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	// Step 7: library function lookup.
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// Step 6-7: V2.2 multi-binding aware binding + library lookup.
+	libIDs, ok := resolveBindingLib(bindings[callerContractID], returnType2, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
@@ -1353,21 +1352,9 @@ func resolveUsingForDeepCrossChainCallRef(
 	if !ok || returnType2 == "" {
 		return types.Edge{}, false
 	}
-	// Step 7: binding lookup on returnType2.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[returnType2]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	// Step 8: library function.
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// Step 7-8: V2.2 multi-binding aware lookup.
+	libIDs, ok := resolveBindingLib(bindings[callerContractID], returnType2, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
@@ -1475,21 +1462,9 @@ func resolveUsingForTripleChainCallRef(
 	if !ok || returnType3 == "" {
 		return types.Edge{}, false
 	}
-	// Step 8: binding lookup on returnType3.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[returnType3]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	// Step 9: library function.
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// Step 8-9: V2.2 multi-binding aware lookup.
+	libIDs, ok := resolveBindingLib(bindings[callerContractID], returnType3, methodName, funcByQName)
+	if !ok {
 		return types.Edge{}, false
 	}
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
@@ -1621,21 +1596,9 @@ func resolveUsingForGenericChainCallRef(
 		currentNamespace = returnType
 	}
 
-	// Binding lookup on the final return type.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[currentNamespace]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	// Library function lookup.
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// V2.2 multi-binding aware lookup on the final return type.
+	libIDs, libOK := resolveBindingLib(bindings[callerContractID], currentNamespace, methodName, funcByQName)
+	if !libOK {
 		return types.Edge{}, false
 	}
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
@@ -1705,20 +1668,9 @@ func resolveUsingForStructFieldCallRef(
 	if !ok || fieldType == "" {
 		return types.Edge{}, false
 	}
-	// Binding lookup on the field's type.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[fieldType]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// V2.2 multi-binding aware lookup on the field's type.
+	libIDs, libOK := resolveBindingLib(bindings[callerContractID], fieldType, methodName, funcByQName)
+	if !libOK {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
@@ -1798,21 +1750,9 @@ func resolveUsingForNestedStructFieldCallRef(
 	if !ok || field2Type == "" {
 		return types.Edge{}, false
 	}
-	// Step 5: binding lookup on field2Type.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[field2Type]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	// Step 6: library function.
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// Step 5-6: V2.2 multi-binding aware lookup on field2Type.
+	libIDs, libOK := resolveBindingLib(bindings[callerContractID], field2Type, methodName, funcByQName)
+	if !libOK {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
@@ -1901,20 +1841,9 @@ func resolveUsingForGenericMemberChainCallRef(
 		}
 		currentNamespace = fieldType
 	}
-	// Binding lookup on the final field type.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[currentNamespace]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// V2.2 multi-binding aware lookup on the final field type.
+	libIDs, libOK := resolveBindingLib(bindings[callerContractID], currentNamespace, methodName, funcByQName)
+	if !libOK {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
@@ -2007,20 +1936,9 @@ func resolveUsingForThisNestedChainCallRef(
 		}
 		currentNamespace = fieldType
 	}
-	// Binding lookup on the final field type.
-	bindMap := bindings[callerContractID]
-	if bindMap == nil {
-		return types.Edge{}, false
-	}
-	libName, hit := bindMap[currentNamespace]
-	if !hit {
-		libName, hit = bindMap["*"]
-		if !hit {
-			return types.Edge{}, false
-		}
-	}
-	libIDs := funcByQName[libName+"."+methodName]
-	if len(libIDs) == 0 {
+	// V2.2 multi-binding aware lookup on the final field type.
+	libIDs, libOK := resolveBindingLib(bindings[callerContractID], currentNamespace, methodName, funcByQName)
+	if !libOK {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]

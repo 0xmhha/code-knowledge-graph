@@ -44,23 +44,24 @@ func TestUsingForV210_InterfaceReceiver(t *testing.T) {
 	}
 }
 
-// TestUsingForV210_MultiBindingKnownLimitation — locks the V0 known
-// limitation that `using A for T; using B for T;` overwrites the
-// binding (second wins). Real Sol semantics: both apply.
+// TestUsingForV210_MultiBindingResolves — V2.2 multi-binding fix.
+// `using A for uint256; using B for uint256;` 둘 다 적용. uint256.tag()
+// 가 LibA.tag 로 resolve (LibA 가 tag method 보유, LibB 는 보유 안 함
+// — V2.2 resolveBindingLib 가 hit 까지 iterate).
 //
-// Expected V0 behavior:
-//   - 0 EdgeCalls from x.tag() (LibA.tag would be the correct target
-//     but uint256 binding got overwritten to LibB; LibB.tag doesn't exist)
-//
-// When V2.2+ implements multi-value bindings, update this test to
-// assert that EdgeCalls (Vault.run → LibA.tag) surfaces.
-func TestUsingForV210_MultiBindingKnownLimitation(t *testing.T) {
+// V2.1 originally locked this as known limitation (single-value
+// binding, second-wins overwrite). V2.2 promoted bindings to
+// `map[typeName][]libraryName` so all directives' libraries are
+// preserved and resolution tries each until method hit. V2.1 의
+// `_KnownLimitation` test name 도 함께 변경.
+func TestUsingForV210_MultiBindingResolves(t *testing.T) {
 	nodes, edges := parseResolveOneSol(t, "testdata/using_for_v210", "multi_binding_same_type.sol")
 	got := collectUsingForCalls(nodes, edges)
-	if len(got) != 0 {
-		t.Errorf("V0 multi-binding limitation regression: expected 0 EdgeCalls (LibA.tag should drop in V0), got=%v\n"+
-			"If V2.2+ implemented multi-value binding, update this test to expect Vault.run → LibA.tag",
-			got)
+	want := []callWant{
+		{caller: "Vault.run", target: "LibA.tag"},
+	}
+	if !equalCallWants(got, want) {
+		t.Errorf("EdgeCalls (V2.2 multi-binding resolves) mismatch:\n got=%v\nwant=%v", got, want)
 	}
 	// Defensive: both EdgeUsesFor edges (Vault → LibA, Vault → LibB)
 	// should land regardless of method-dispatch resolution.
@@ -76,7 +77,7 @@ func TestUsingForV210_MultiBindingKnownLimitation(t *testing.T) {
 	}
 	for _, lib := range []string{"LibA", "LibB"} {
 		if !seen[lib] {
-			t.Errorf("missing EdgeUsesFor Vault → %s (V2.1 multi-binding)", lib)
+			t.Errorf("missing EdgeUsesFor Vault → %s (V2.2 multi-binding)", lib)
 		}
 	}
 }
