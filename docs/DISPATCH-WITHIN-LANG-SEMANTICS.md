@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.8 9-tier dispatch — state-var / parameter / inherited / return chain / cross-contract / depth-2 / deep cross-contract / depth-3 / **generic walker arbitrary depth**; multi-return tuple + member-of-member receiver V1.9+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.9 10-tier dispatch — V1.0-V1.8 + **this-receiver V1.9**; struct-field receivers + multi-return tuple V1.10+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,19 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.9 (Sol `using For` `this.<state-var>.<method>` receiver)
+✅ landed 2026-05-12. Sol stylistic variant of V1.0's bare-name
+receiver. `matchThisReceiverMethodCall` predicate (inner member is
+`this.<state-var>`) + reuses V1.0's `dispatchKindUsingForCall` and
+resolver (encoding `<state-var>|<method>` identical after `this`
+prefix strip). No new resolver helper required. Caller dispatch
+state-var → V1.9 → V1.3-V1.8 (V1.9 catches `this.x.method()` before
+V1.4 wastes a stateVarTypes lookup on the literal "this"). 3 fixture
++ 3 test (basic, no-state-var drop, this-vs-bare coexistence).
+25/25 PASS, vet clean. V1.10+ carry-over: struct-field receivers
+(`info.amount.foo()`), multi-return tuple destructuring, general
+member-of-member.
 
 W-C W6 V1.8 (Sol `using For` generic iterative chain walker)
 ✅ landed 2026-05-12. V1.3/V1.5/V1.7 same-contract + V1.4/V1.6

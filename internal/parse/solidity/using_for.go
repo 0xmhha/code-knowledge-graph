@@ -205,6 +205,23 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// W6 V1.9: `this.<stateVar>.<method>(...)` — explicit-this
+			// equivalent of V1.0's bare-name shape. Reuses V1.0's
+			// dispatch kind + resolver (encoding is identical).
+			if stateVarName, methodName, ok := matchThisReceiverMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  stateVarName + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForCall,
+				})
+				continue
+			}
 			// V1.3: chained call shape `<fn>().<method>(...)`. Inner
 			// expression is a plain function call (function-position
 			// identifier); resolver looks up the inner function's
@@ -329,6 +346,73 @@ func (v *declVisitor) runUsingForCalls() {
 			}
 		}
 	}
+}
+
+// matchThisReceiverMethodCall — W-C W6 V1.9 (2026-05-12). Tests whether
+// a member_expression fits the `this.<stateVar>.<method>(...)` shape.
+// `this` is implicit current-contract reference; the resolver treats
+// `<stateVar>` as a state variable on the caller's container — same
+// dispatch as V1.0's bare-name shape `<stateVar>.<method>(...)`.
+//
+// Returns (stateVarName, methodName, true) on match.
+//
+// AST shape:
+//
+//	call_expression                         ← outer .method(...)
+//	  function: expression
+//	    member_expression                   ← outer
+//	      object: expression
+//	        member_expression               ← inner this.<stateVar>
+//	          object: identifier "this"
+//	          property: identifier (stateVarName)
+//	      property: identifier (method)
+//
+// Reuses V1.0's dispatch kind + resolver: PendingRef encoding
+// `<stateVarName>|<method>` is identical to V1.0's, so the resolver
+// path is single-source. V1.9 only adds a new predicate; no new
+// resolver helper required.
+//
+// Caller dispatch order ensures simpler V1.0 (bare `<x>.<method>`)
+// claims the call when shapes don't include `this`. V1.9 sits after
+// V1.7's hardcoded predicates and before V1.8's generic walker —
+// `this.x.method` would also match V1.4's cross-contract pattern
+// structurally (innerObj=identifier "this"), but V1.4 would look up
+// "this" in stateVarTypes / paramTypes and miss; V1.9 short-circuits
+// that wasted lookup by recognising the `this` keyword directly.
+func matchThisReceiverMethodCall(member *sitter.Node, src []byte) (string, string, bool) {
+	if member == nil {
+		return "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	innerMember := unwrapExpression(object)
+	if innerMember == nil || innerMember.Kind() != "member_expression" {
+		return "", "", false
+	}
+	innerObj := innerMember.ChildByFieldName("object")
+	innerObjIdent := unwrapExpression(innerObj)
+	if innerObjIdent == nil || innerObjIdent.Kind() != "identifier" {
+		return "", "", false
+	}
+	if innerObjIdent.Utf8Text(src) != "this" {
+		return "", "", false
+	}
+	innerProperty := innerMember.ChildByFieldName("property")
+	if innerProperty == nil || innerProperty.Kind() != "identifier" {
+		return "", "", false
+	}
+	// Outer must be invoked.
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", false
+	}
+	return innerProperty.Utf8Text(src), property.Utf8Text(src), true
 }
 
 // matchStateVarMethodCall tests whether a member_expression fits the
