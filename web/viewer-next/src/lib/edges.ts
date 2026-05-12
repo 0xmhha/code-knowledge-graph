@@ -65,6 +65,14 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   // override). Solid line because override IS a real call-resolution
   // target, not just an annotation.
   overrides:       { color: 0x3377cc, width: 2 },
+  // Schema 1.10 (W-C W6) — Solidity `using Lib for T` library extension.
+  // Amber dashed: warm hue groups it visually with has_modifier (cyan
+  // metadata) / has_decorator (violet metadata) — all three are
+  // "attached metadata" edges on a container, not flow. Distinct from
+  // the cool blue inheritance family so the binding semantics doesn't
+  // look like another inheritance hop. Dash signals "binding annotation"
+  // (uses_type idiom).
+  using_for:       { color: 0xddaa66, width: 1, dash: true },
 
   // field reads/writes
   reads_field:     { color: 0x99ff99, width: 1 },
@@ -177,7 +185,10 @@ export const DEFAULT_EDGE_TYPES: ReadonlyArray<string> = [
   // `overrides` (W-C W2, schema 1.10) on by default: Solidity inheritance
   // chains are a primary reading target whenever the dataset contains
   // .sol; sparse on non-Solidity datasets so no clutter risk.
-  'extends', 'implements', 'overrides', 'uses_type', 'instantiates',
+  // `using_for` (W-C W6, schema 1.10) on by default for the same reason —
+  // library binding visibility is the core value of Q9-1 (b) and the
+  // edge is sparse on non-Solidity datasets.
+  'extends', 'implements', 'overrides', 'using_for', 'uses_type', 'instantiates',
   // G3 Execution — `awaits` (W-B W2, schema 1.10) on by default: TS
   // async-heavy code is unreadable without suspension points; dashed
   // style keeps it visually subordinate to calls/invokes.
@@ -242,8 +253,9 @@ export const GRAPH_GROUPS: ReadonlyArray<GraphGroupSpec> = [
   },
   {
     id: 'G2', label: 'Semantic', color: 0x6699ff,
-    description: 'Type and field relations: references, implements, extends, overrides, field/mapping reads/writes, modifier/decorator',
+    description: 'Type and field relations: references, implements, extends, overrides, using_for binding, field/mapping reads/writes, modifier/decorator',
     edges: ['uses_type', 'instantiates', 'references', 'implements', 'extends', 'overrides',
+            'using_for',
             'reads_field', 'writes_field', 'reads_mapping', 'writes_mapping',
             'emits_event', 'has_modifier', 'has_decorator'],
   },
@@ -297,10 +309,10 @@ export function groupHasAnyEdge(group: GraphGroupSpec, whitelist: ReadonlySet<st
 // EDGE_STYLE entry AND assign it to a GRAPH_GROUPS bucket — otherwise
 // it silently disappears from the filter UI.
 //
-// Current state (schema 1.10 + W series):
-//   39 non-hidden edges in EDGE_STYLE (40 total - `contains` hidden)
-//   39 edges across GRAPH_GROUPS:
-//     G1=3, G2=13 (+overrides), G3=5 (+awaits), G4=6,
+// Current state (schema 1.10 + W series + W-C W6):
+//   40 non-hidden edges in EDGE_STYLE (41 total - `contains` hidden)
+//   40 edges across GRAPH_GROUPS:
+//     G1=3, G2=14 (+overrides, +using_for), G3=5 (+awaits), G4=6,
 //     G5=7 (+http_calls, +grpc_listens_on, +grpc_calls), G6=5
 //
 // To verify after editing this file, eyeball the output of:

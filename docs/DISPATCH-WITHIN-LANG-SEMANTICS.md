@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | spec §4.6 작성 완료 2026-05-12, Q9-1/2/3 결정 대기 |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 = binding declaration only; method-call resolution V1) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -155,6 +155,22 @@ predicate 의 음성 contract 명시. W1/W2/W4 회귀 0
 (testdata/inheritance: extends 8 / implements 5 / overrides 1 보존,
 testdata/overrides: extends 6 / overrides 6 보존). §7.0 Go regression
 `--lang=go` diff = 0. W-C W6 (using For) 진입 unblock.
+
+W-C W6 V0 (Sol `using For` library binding → EdgeUsesFor) ✅ landed
+2026-05-12. `internal/parse/solidity/using_for.go` (~100 LOC) +
+queries.go `queryUsingFor` (tree-sitter-solidity v1.2.13 `using_directive`
+→ `type_alias` → `identifier` 경로) + resolve.go `resolveUsingForRef`
+(same-file ConfExtracted / cross-file ConfInferred / 미해결 drop) +
+schema 1.10 EdgeUsesFor enum slot append (commit `19c99da`) + 5 fixture
++ 5 test (specific / wildcard / multi-library / contract-scoped /
+negative). Q9-1 (b) 결정 (2026-05-12 사용자 정당한 지적 채택 — Solidity
+trait-like binding semantics 가 first-class EdgeType, extends /
+implements / overrides / has_modifier 와 동급). V0 scope = binding
+declaration only; method-call dispatch resolution (`balance.add()` →
+SafeMath.add EdgeCalls) 은 V1 follow-up — receiver type 추론 인프라
+(state var / parameter declared-type 인덱스) 필요. §7.0 Go regression
+`--lang=go` diff = 0. Viewer edges.ts G2 카테고리에 amber dashed
+등록 + DEFAULT_EDGE_TYPES on by default.
 
 W-B W1 (TS heritage `extends`/`implements`) ✅ landed.
 `internal/parse/typescript/heritage.go` (284 LOC) + 6 fixture +

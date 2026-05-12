@@ -11,9 +11,12 @@
 > ✅ landed 2026-05-11 (commit `f7a8515`). Schema 1.10 slot for
 > `EdgeOverrides` reserved 2026-05-11 (appended to `pkg/types/enums.go`;
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
-> W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 (using For) — spec §4.6 본문 +
-> 결정 항목 (Q9-1/2/3) 작성 완료 2026-05-12; 사용자 입력 후 구현 진입
-> 예정.
+> W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
+> **LANDED 2026-05-12** — `internal/parse/solidity/using_for.go` +
+> queries.go `queryUsingFor` + resolve.go `resolveUsingForRef` + 5 fixture
+> + 5 test. EdgeUsesFor (Contract → Library) first-class emit per
+> Q9-1 (b) 결정. method-call dispatch resolution 은 V1 follow-up
+> (§4.6.6 V0 한계 carry-over).
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -272,9 +275,11 @@ WHERE e.type = 'implements' AND e.dst = (
 
 ### 3.5 noise control
 
-- Library call (`using SafeMath for uint; a.add(b)`): library 의 method 가
-  receiver type 의 method 처럼 dispatch. V0 에서는 단순 `calls` (resolve
-  실패 → drop) 으로 처리. 별도 spec.
+- Library call (`using SafeMath for uint; a.add(b)`): W6 V0 ✅ LANDED
+  2026-05-12 — `using SafeMath for uint;` directive 자체는 EdgeUsesFor
+  (Contract → Library) 로 가시화. `a.add(b)` 의 dispatch resolution
+  (→ SafeMath.add EdgeCalls) 은 V1 follow-up (receiver type 추론 인프라
+  필요, §4.6.6 V0 한계 carry-over).
 - Modifier dispatch (이미 `has_modifier` 로 capture 됨): 신규 작업 불필요.
 - Abstract contract 의 abstract method: function body 가 비어있음. function
   노드는 emit, `calls` edge 는 0 — 자연스럽게 처리됨.
@@ -646,6 +651,46 @@ internal/parse/solidity/using_for_test.go
 
 추정 사이즈: 100~150 LOC + 5 fixture + 5 test. resolve.go Pass 2 에
 한 분기 추가 (~30 LOC). receiver-type 추론 헬퍼는 V1 에서 추가.
+
+#### LANDED 2026-05-12 (W-C W6 V0)
+
+- 구현: `internal/parse/solidity/using_for.go` (~100 LOC) + queries.go
+  `queryUsingFor` (tree-sitter-solidity v1.2.13 `using_directive` →
+  `type_alias` → `identifier` 경로). contract / library / interface
+  body 모두 capture.
+- Wire: `declarations.go::visit()` 에 `runDispatch()` 직후 `v.runUsingFor()`
+  호출 추가.
+- Resolver: `resolve.go::resolveUsingForRef()` — byName[NodeContract]
+  lookup + `pickSameFileCandidate` helper (M2 review 와 동일 idiom).
+  same-file ConfExtracted / cross-file ConfInferred / 미해결 drop.
+- DispatchKind 태그: `"using_for"` — inheritance.go `"inherit"`, dispatch.go
+  `"interface_dispatch"`, overrides.go `"override"/"override_explicit"` 와
+  동일 idiom.
+- Fixtures: `testdata/using_for/{specific_binding, wildcard_binding,
+  multi_library, cross_contract, no_binding_negative}.sol` (5 files).
+- 테스트: `using_for_test.go` 5 함수:
+  - `TestUsingFor_SpecificBinding` — 1 EdgeUsesFor + ConfExtracted 검증
+  - `TestUsingFor_WildcardForm` — `for *` 형태 (typeName 미surface)
+  - `TestUsingFor_MultiLibrary` — 한 contract 의 2 library binding → 2
+    edges
+  - `TestUsingFor_ContractScoped` — 두 contract 같은 library binding →
+    2 distinct edges sharing Dst (contract-scoped 의미 검증)
+  - `TestUsingFor_NegativeNoBinding` — directive 없으면 0 edge (false-
+    positive 가드)
+- Schema: `pkg/types/enums.go` EdgeUsesFor 추가 (Commit A `19c99da`,
+  schema 1.10 index 40 append).
+- 회귀: 25/25 PASS, vet clean. §7.0 Go regression: TS/Go 영향 0.
+- Viewer: `web/viewer-next/src/lib/edges.ts` G2 카테고리에 amber dashed
+  등록 + DEFAULT_EDGE_TYPES on by default.
+
+V0 carry-over (V1 follow-up)
+- Method-call dispatch resolution (`balance.add(...)` → SafeMath.add
+  EdgeCalls) — receiver type 인덱스 필요.
+- Free-function form `using {f1, f2} for T` — 별도 AST shape (using_alias
+  child).
+- File-level using directive (0.8.13+ global binding) — contract scope
+  외 위치.
+- Inherited using directive 상속 처리.
 
 #### 4.6.5 §3.5 갱신 예정
 
