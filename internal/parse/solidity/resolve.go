@@ -7,20 +7,22 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W6 V1.0/V1.1 binding-map types (2026-05-12). The per-contract
-// using-for binding info reaches Pass 2 method-call resolution through
-// three intermediate maps; declaring them as package types lets helpers
-// keep narrow signatures. The fourth lookup (funcID → contractID)
+// W6 V1.0/V1.1/V1.3 binding-map types. The per-contract using-for
+// binding info reaches Pass 2 method-call resolution through four
+// intermediate maps; declaring them as package types lets helpers
+// keep narrow signatures. The fifth lookup (funcID → contractID)
 // reuses the existing containerIDByFuncID map from W-C W2 review M1+M3.
 //
-//   bindingMap:     contractID → (typeName | "*") → libraryName
-//   stateVarTypes:  contractID → varName → typeName (NodeField.Signature)
-//   paramTypeMap:   funcID    → paramName → typeName (V1.1 — added
-//                                so receivers may be function parameters
-//                                in addition to state variables).
+//   bindingMap:        contractID → (typeName | "*") → libraryName
+//   stateVarTypes:     contractID → varName → typeName (NodeField.Signature)
+//   paramTypeMap:      funcID → paramName → typeName (V1.1)
+//   funcReturnTypeMap: funcID → first-return typeName (V1.3 — chained
+//                                call dispatch needs the inner function's
+//                                return type as the receiver type).
 type bindingMap map[string]map[string]string
 type stateVarTypeMap map[string]map[string]string
 type paramTypeMap map[string]map[string]string
+type funcReturnTypeMap map[string]string
 
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
@@ -223,6 +225,10 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// parameter-receiver method calls can resolve their receiver's
 	// declared type the same way state-variable receivers do.
 	paramTypes := paramTypeMap{}
+	// W6 V1.3 (2026-05-12) — pre-build funcID → first-return typeName so
+	// `<fn>().<method>` chained dispatch can look up the inner
+	// function's return type as the receiver type.
+	funcReturnTypes := funcReturnTypeMap{}
 	for _, r := range results {
 		for _, pr := range r.Pending {
 			switch pr.DispatchKind {
@@ -251,6 +257,10 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 					paramTypes[pr.SrcID] = map[string]string{}
 				}
 				paramTypes[pr.SrcID][paramName] = typeName
+			case dispatchKindUsingForFnReturn:
+				// TargetQName encoding from emitFunctionReturnMetaPending:
+				// bare `typeName` (no `|`). First-return only (V0).
+				funcReturnTypes[pr.SrcID] = pr.TargetQName
 			}
 		}
 	}
@@ -345,12 +355,13 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
-			// W6 V1.0/V1.1 typebind/param-type — already consumed before
-			// this loop into the `bindings` / `paramTypes` maps. Skip
-			// silently here so the default switch doesn't try to emit
-			// a graph edge for them.
+			// W6 V1.0/V1.1/V1.3 typebind/param-type/fn-return — already
+			// consumed before this loop into the `bindings` / `paramTypes`
+			// / `funcReturnTypes` maps. Skip silently here so the default
+			// switch doesn't try to emit a graph edge for them.
 			if pr.DispatchKind == dispatchKindUsingForTypeBind ||
-				pr.DispatchKind == dispatchKindUsingForParamType {
+				pr.DispatchKind == dispatchKindUsingForParamType ||
+				pr.DispatchKind == dispatchKindUsingForFnReturn {
 				continue
 			}
 			// W6 V1.0/V1.1 using-for method-call branch — resolves
@@ -364,6 +375,19 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if pr.DispatchKind == dispatchKindUsingForCall {
 				if edge, ok := resolveUsingForCallRef(
 					pr, bindings, stateVarTypes, paramTypes,
+					containerIDByFuncID, funcByQName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
+			// W6 V1.3 chained-call branch — resolves
+			// `<innerFn>().<method>(...)` to an EdgeCalls into the
+			// library function bound for the inner function's return
+			// type. Same drop policy as V1.0/V1.1.
+			if pr.DispatchKind == dispatchKindUsingForChainCall {
+				if edge, ok := resolveUsingForChainCallRef(
+					pr, bindings, funcReturnTypes,
 					containerIDByFuncID, funcByQName, nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
@@ -634,6 +658,108 @@ func resolveUsingForCallRef(
 	libName, hit := bindMap[typeName]
 	if !hit {
 		// Wildcard fallback per Q9-3 (a).
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	ids := funcByQName[libName+"."+methodName]
+	if len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForChainCallRef — W6 V1.3 (2026-05-12). Resolves a chained
+// call PendingRef (`<innerFn>().<method>(...)`) to a single EdgeCalls
+// edge by looking up the inner function's return type as the receiver
+// type. Five-step chain — any failure drops the edge:
+//
+//  1. funcID (caller) → enclosing containerID via containerIDByFuncID.
+//  2. innerFnName → innerFuncID via funcByQName. Prefers the same-
+//     contract candidate (`<callerContract>.<innerFn>`) over arbitrary
+//     bare-name matches. V0 limitation: cross-contract resolution
+//     follows the first matching candidate (homonym disambiguation is
+//     V1.4+ alongside cross-contract chaining).
+//  3. innerFuncID → returnTypeName via funcReturnTypes.
+//  4. (callerContractID, returnTypeName) → libraryName via bindings;
+//     wildcard `*` fallback per Q9-3 (a).
+//  5. `<libraryName>.<methodName>` → libraryFunctionID via funcByQName.
+//
+// Confidence: ConfExtracted when caller and library are same-file;
+// ConfInferred otherwise. The inner function's file doesn't downgrade
+// confidence here because V1.3 V0 only fires for known callable
+// returns — uncertainty about the *resolution* is captured by drop,
+// not by AMBIGUOUS.
+func resolveUsingForChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	funcReturnTypes funcReturnTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from runUsingForCalls chained branch:
+	// `innerFnName|methodName`.
+	sep := strings.IndexByte(pr.TargetQName, '|')
+	if sep < 0 {
+		return types.Edge{}, false
+	}
+	innerFnName := pr.TargetQName[:sep]
+	methodName := pr.TargetQName[sep+1:]
+
+	contractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// Resolve the inner function. Prefer same-contract qualification —
+	// `Container.innerFn` keys the funcByQName index. Fall back to a
+	// global single-result scan when the inner function lives outside
+	// the caller's contract (e.g. file-level free function in 0.8.13+
+	// — V0 doesn't capture those but the global path also covers
+	// imported helpers that happen to share names).
+	containerName := ""
+	for qname, ids := range funcByQName {
+		for _, fid := range ids {
+			if fid == pr.SrcID {
+				if dot := strings.IndexByte(qname, '.'); dot >= 0 {
+					containerName = qname[:dot]
+				}
+				break
+			}
+		}
+		if containerName != "" {
+			break
+		}
+	}
+	var innerFuncID string
+	if containerName != "" {
+		if ids := funcByQName[containerName+"."+innerFnName]; len(ids) > 0 {
+			innerFuncID = pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+		}
+	}
+	if innerFuncID == "" {
+		return types.Edge{}, false
+	}
+	returnType, ok := funcReturnTypes[innerFuncID]
+	if !ok || returnType == "" {
+		return types.Edge{}, false
+	}
+	bindMap := bindings[contractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[returnType]
+	if !hit {
 		libName, hit = bindMap["*"]
 		if !hit {
 			return types.Edge{}, false

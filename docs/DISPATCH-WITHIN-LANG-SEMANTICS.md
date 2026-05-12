@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var + V1.1 parameter + V1.2 inherited; return chaining / free-fn form V1.3+; file-level blocked by grammar) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.3 dispatch chain — state-var / parameter / inherited / return chaining; cross-contract chaining V1.4+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,20 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.3 (Sol `using For` chained-call dispatch `<fn>().<method>`)
+✅ landed 2026-05-12. V1.3 첫 시도 = free-function form (`using {Lib.f1,
+Lib.f2} for T`) 였으나 V1.2 file-level 처럼 tree-sitter-solidity v1.2.13
+grammar 한계 (`{...}` brace shape 가 ERROR-node) 로 revert. V1.3 scope
+를 **return-value chaining** 으로 재설정. function 의 `return_type`
+field 에서 첫 슬롯의 typeName 을 funcReturnTypes 인덱스 ((funcID) →
+returnTypeName) 로 색인 + matchChainedMethodCall predicate (inner
+expression 이 plain function call 인 member_expression shape) + 신규
+resolveUsingForChainCallRef helper 의 5-step chain. multi-return tuple
+의 첫 슬롯만 V0 — 두번째+는 V1.4. 3 fixture + 3 test (basic chain,
+no-binding drop, unknown-fn drop). 25/25 PASS, vet clean. V1.4+
+carry-over: cross-contract chaining (`obj.foo().bar()`), multi-return
+tuple slot.
 
 W-C W6 V1.2 (Sol `using For` inherited binding propagation) ✅ landed
 2026-05-12. 처음 V1.2 = file-level using (0.8.13+) 로 시작했으나

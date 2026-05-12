@@ -189,21 +189,40 @@ func (v *declVisitor) runUsingForCalls() {
 				continue
 			}
 			memberNode := c.Node
-			receiverName, methodName, ok := matchStateVarMethodCall(&memberNode, v.src)
-			if !ok {
+			// W1.0/V1.1: state-variable / parameter receiver. Try first
+			// because it's the most common shape.
+			if receiverName, methodName, ok := matchStateVarMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  receiverName + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForCall,
+				})
 				continue
 			}
-			fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
-			if !fnOK {
+			// V1.3: chained call shape `<fn>().<method>(...)`. Inner
+			// expression is a plain function call (function-position
+			// identifier); resolver looks up the inner function's
+			// return type and treats it as the receiver type.
+			if innerFnName, methodName, ok := matchChainedMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  innerFnName + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForChainCall,
+				})
 				continue
 			}
-			v.pending = append(v.pending, parse.PendingRef{
-				SrcID:        parse.MakeID(fnQ, "sol", fnStart),
-				EdgeType:     types.EdgeCalls,
-				TargetQName:  receiverName + "|" + methodName,
-				Line:         int(memberNode.StartPosition().Row) + 1,
-				DispatchKind: dispatchKindUsingForCall,
-			})
 		}
 	}
 }
@@ -243,6 +262,68 @@ func matchStateVarMethodCall(member *sitter.Node, src []byte) (string, string, b
 	return innerObj.Utf8Text(src), property.Utf8Text(src), true
 }
 
+// matchChainedMethodCall — W-C W6 V1.3 (2026-05-12). Tests whether a
+// member_expression fits the chained-call shape `<fn>(...).<method>`
+// where the inner expression is a *plain function call* (bare
+// identifier in the function position), not a type cast.
+//
+// Returns (innerFnName, methodName, true) on match.
+//
+// Shape (verified via AST dump):
+//
+//	call_expression                       ← outer .method(...)
+//	  function: expression
+//	    member_expression
+//	      object: expression
+//	        call_expression               ← inner fn() call
+//	          function: expression
+//	            identifier (innerFnName)  ← what V1.3 captures
+//	      property: identifier (methodName)
+//
+// Rejects shapes already covered or out of scope for V1.3:
+//   - `IFoo(addr).bar()` (W3 interface dispatch — inner identifier is
+//     a TYPE name; V3's matchInterfaceDispatch handles this).
+//   - `obj.foo().bar()` (member-receiver chain — inner function-position
+//     is itself a member_expression, not a bare identifier). V1.4+.
+//   - `obj.field.bar()` (pure property access chain). V1.4+.
+//
+// V1.3 vs W3 disambiguation: the runUsingForCalls walker calls this
+// AFTER matchStateVarMethodCall has rejected. To avoid emitting both a
+// W3 EdgeInvokes and a V1.3 EdgeCalls for the same site, callers should
+// also verify the resolved inner identifier maps to a *function* (not
+// an interface) — that's Pass 2's job via funcByQName, so the parser
+// emits the chained PendingRef unconditionally and the resolver drops
+// when no funcID matches.
+func matchChainedMethodCall(member *sitter.Node, src []byte) (string, string, bool) {
+	if member == nil {
+		return "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	innerCall := unwrapExpression(object)
+	if innerCall == nil || innerCall.Kind() != "call_expression" {
+		return "", "", false
+	}
+	innerFn := innerCall.ChildByFieldName("function")
+	innerIdent := unwrapExpression(innerFn)
+	if innerIdent == nil || innerIdent.Kind() != "identifier" {
+		return "", "", false
+	}
+	// Outer must be a call_expression (the chained `.method()` is itself
+	// invoked, not just read as a property).
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", false
+	}
+	return innerIdent.Utf8Text(src), property.Utf8Text(src), true
+}
+
 // dispatchKindUsingFor tags PendingRefs originating from W6 V0 using-for
 // binding detection. String literal matches the existing idiom (W1
 // "inherit", W2 "override"/"override_explicit", W3 "interface_dispatch").
@@ -257,3 +338,10 @@ const dispatchKindUsingForTypeBind = "using_for_typebind"
 // EdgeCalls (caller function → library function) once the binding map
 // has been built. TargetQName encodes `<receiverName>|<methodName>`.
 const dispatchKindUsingForCall = "using_for_call"
+
+// dispatchKindUsingForChainCall (V1.3) tags PendingRefs for chained
+// call dispatch: `<fn>().<method>(...)`. TargetQName encodes
+// `<innerFnName>|<methodName>` — same shape as using_for_call but the
+// receiver lookup goes through funcReturnTypes instead of stateVarTypes
+// / paramTypes (Pass 2 splits the resolver paths by DispatchKind).
+const dispatchKindUsingForChainCall = "using_for_chain_call"

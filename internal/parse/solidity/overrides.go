@@ -125,6 +125,12 @@ func (v *declVisitor) runFunctionDecl() {
 		// `name` field (optional — anonymous parameters drop) and a
 		// `type` field (required, type_name).
 		emitParameterMetaPending(v, id, declNode)
+		// W-C W6 V1.3 (2026-05-12): emit function return-type PendingRef
+		// so Pass 2 can resolve `<localCall>().<method>(...)` chained
+		// dispatch by looking up the inner function's return type. V0
+		// captures only the first declared return type (multi-return
+		// tuples drop their tail — V1.4+).
+		emitFunctionReturnMetaPending(v, id, declNode)
 
 		if !override.present {
 			continue
@@ -210,6 +216,62 @@ func emitParameterMetaPending(v *declVisitor, funcID string, declNode *sitter.No
 // dispatch path. Resolver sweeps these into paramTypes index and emits
 // no graph edge for them — pure side-channel.
 const dispatchKindUsingForParamType = "using_for_param_type"
+
+// emitFunctionReturnMetaPending — W-C W6 V1.3 (2026-05-12). Pulls the
+// function's first declared return type out of the `return_type` field
+// and queues a side-channel PendingRef that Pass 2 sweeps into the
+// funcReturnTypes index. Empty when the function has no return clause,
+// when the return clause has no parameter children, or when the type
+// can't be normalised (extraction-failed shapes).
+//
+// V1.3 V0 scope: first return type only. Multi-return tuples
+// (`returns (uint256, address)`) drop the tail — `foo().add(x)` chain
+// dispatch typically targets the first return slot anyway. Multi-return
+// handling (named return params, tuple destructuring) is V1.4+.
+//
+// TargetQName encoding: bare `<typeName>` (no `|` delimiter — there's
+// only one piece of information to carry). SrcID = funcID so Pass 2
+// can join against containerIDByFuncID for chained-call resolution.
+func emitFunctionReturnMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
+	if declNode == nil {
+		return
+	}
+	returnDef := declNode.ChildByFieldName("return_type")
+	if returnDef == nil {
+		return
+	}
+	// return_type_definition's children are `parameter` nodes (the
+	// grammar reuses `parameter` for return slots — confirmed via
+	// node-types.json). Take the first named parameter and pull its
+	// type field, matching the receiver-type idiom used elsewhere.
+	for i := uint(0); i < uint(returnDef.NamedChildCount()); i++ {
+		child := returnDef.NamedChild(i)
+		if child == nil || child.Kind() != "parameter" {
+			continue
+		}
+		typeNode := child.ChildByFieldName("type")
+		if typeNode == nil {
+			continue
+		}
+		typeName := extractTypeNameText(typeNode, v.src)
+		if typeName == "" {
+			return
+		}
+		v.pending = append(v.pending, parse.PendingRef{
+			SrcID:        funcID,
+			EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+			TargetQName:  typeName,
+			Line:         int(returnDef.StartPosition().Row) + 1,
+			DispatchKind: dispatchKindUsingForFnReturn,
+		})
+		return // first return slot only (V0)
+	}
+}
+
+// dispatchKindUsingForFnReturn (W-C W6 V1.3) carries the function's
+// first declared return type for chained-call dispatch resolution.
+// Resolver sweeps these into the funcReturnTypes index — no graph edge.
+const dispatchKindUsingForFnReturn = "using_for_fn_return"
 
 // overrideInfo carries the parsed result of an override_specifier.
 //

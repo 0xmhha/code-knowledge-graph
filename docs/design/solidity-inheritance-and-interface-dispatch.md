@@ -13,14 +13,15 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
-> emit. W6 V1.0 (state-variable receiver dispatch) ✅ **LANDED 2026-05-12**.
-> W6 V1.1 (parameter receiver dispatch) ✅ **LANDED 2026-05-12**.
-> W6 V1.2 (inherited using directive) ✅ **LANDED 2026-05-12** — BFS
-> over the W1 inheritance graph propagates parent's binding map down
-> to descendants (child-scope binding shadows inherited per Solidity
-> scoping). 3 fixture + 3 test. file-level using (0.8.13+) 는 tree-
-> sitter-solidity v1.2.13 grammar 한계로 ERROR-node parse → V1.x 분리.
-> return-value chaining / free-function form 만 V1.3+ follow-up.
+> emit. W6 V1.0 (state-var dispatch) / V1.1 (parameter dispatch) /
+> V1.2 (inherited propagation) ✅ **LANDED 2026-05-12**.
+> W6 V1.3 (return-value chaining `<fn>().<method>`) ✅ **LANDED
+> 2026-05-12** — same-contract chained dispatch via funcReturnTypes
+> 인덱스 + matchChainedMethodCall predicate. 3 fixture + 3 test.
+> file-level using directive (0.8.13+) + free-function form
+> (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
+> 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
+> cross-contract chaining (`obj.foo().bar()`) 만 V1.4+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -845,9 +846,66 @@ V1.1 carry-over (V1.2+ follow-up)
 - 회귀: 25/25 PASS, vet clean. §7.0 Go regression: Sol-only.
 
 V1.2 carry-over (V1.3+ follow-up)
-- Return-value chaining (`foo().add(x)`).
-- Free-function form `using {f1, f2} for T`.
+- Return-value chaining (`foo().add(x)`). **V1.3 LANDED 2026-05-12**
+  (아래 블록).
+- Free-function form `using {f1, f2} for T`. **grammar 한계 — V1.x
+  업그레이드 후 진입 (V1.3 시도 시 `{Math.add, Math.sub}` brace shape
+  가 ERROR-node 로 parse 됨을 AST dump 로 확인).**
 - File-level using directive (0.8.13+) — grammar 업그레이드 후.
+
+#### LANDED 2026-05-12 (W-C W6 V1.3 — return-value chaining)
+
+V1.3 진행 중 발견 — V1.3 첫 후보였던 free-function form 도 file-level
+처럼 grammar 한계 (`using {Math.add, Math.sub} for T;` 의 brace shape
+가 ERROR-node 로 parse 됨, AST dump 검증). V1.3 scope 를 **return-value
+chaining** 으로 재설정.
+
+- 구현 추가:
+  - `internal/parse/solidity/overrides.go::runFunctionDecl`:
+    `emitFunctionReturnMetaPending` 호출 추가. function_definition 의
+    `return_type` field (`return_type_definition`) 의 첫 `parameter`
+    child 에서 type field 추출 → `dispatchKindUsingForFnReturn`
+    PendingRef emit. multi-return tuple 은 첫 슬롯만 (V0).
+  - `internal/parse/solidity/using_for.go`: `matchChainedMethodCall`
+    predicate 신규 — `<identifier>(...).<method>(...)` shape 매칭.
+    inner identifier 가 plain function name 인 경우만 (Type cast
+    `IFoo(addr).bar()` 는 W3 의 책임 — 그쪽이 먼저 매칭). 새
+    `dispatchKindUsingForChainCall` 상수 + runUsingForCalls 분기.
+  - `internal/parse/solidity/resolve.go`:
+    - 신규 `funcReturnTypeMap` 타입 (funcID → first-return typeName).
+    - Pass 2 사전 빌드 loop 의 switch 에 `using_for_fn_return` case
+      추가 — funcReturnTypes 채움.
+    - main loop 의 silent-skip 분기에 `using_for_fn_return` 추가.
+    - 신규 `resolveUsingForChainCallRef` (5-step chain): funcID →
+      containerID → innerFuncID (qname `<container>.<innerFn>` lookup)
+      → returnType (funcReturnTypes) → libraryName (bindings) →
+      libraryFunctionID (funcByQName).
+- 5-step resolution chain (V1.3 chained-call only):
+  1. funcID → containerID (containerIDByFuncID, 재사용)
+  2. innerFnName → innerFuncID (funcByQName, same-contract qname 우선)
+  3. innerFuncID → returnTypeName (funcReturnTypes — V1.3 신규)
+  4. (containerID, returnTypeName) → libraryName (bindings + `*` fallback)
+  5. `<libraryName>.<methodName>` → libraryFunctionID
+- Confidence: ConfExtracted (caller + library 같은 file) /
+  ConfInferred (cross-file). 내부 function 의 file 은 confidence 영향
+  안 줌 — drop 으로만 uncertainty 표현.
+- Fixtures: `testdata/using_for_v13/{return_chain_basic,
+  return_chain_no_binding, return_chain_unknown_fn}.sol`.
+- 테스트: `using_for_v13_test.go` 3 함수:
+  - `TestUsingForV13_ReturnChainBasic` — Vault.run → ChainLib.add
+    via factory()'s uint256 return.
+  - `TestUsingForV13_ReturnChainNoBinding` — return type 가 binding
+    엔트리 없으면 drop (false-positive 가드).
+  - `TestUsingForV13_ReturnChainUnknownFn` — inner identifier 가
+    declared function 가 아니면 drop.
+- 회귀: 25/25 PASS, vet clean. §7.0 Go regression: Sol-only.
+
+V1.3 carry-over (V1.4+ follow-up)
+- Cross-contract chaining (`obj.foo().bar()`): inner expression 이
+  member_expression 인 경우. receiver chain 추적 필요.
+- Multi-return tuple (`returns (uint256, address)` 의 두번째 슬롯
+  receiver 로 활용).
+- Free-function form / file-level using — grammar 업그레이드 대기.
 
 #### 4.6.5 §3.5 갱신 예정
 
