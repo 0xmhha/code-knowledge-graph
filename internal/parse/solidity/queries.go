@@ -24,6 +24,12 @@ const (
 	// + optional modifier_invocation. We synthesise "constructor" as the
 	// identifier and pin id-hashing to the declaration node's StartByte.
 	queryConstructor = `(constructor_definition) @decl`
+	// W-C W6 V1.24 (2026-05-12): fallback_receive_definition is a single
+	// node kind for both `fallback()` and `receive()` — tree-sitter does
+	// not disambiguate them via fields. The walker reads the leading
+	// source token at the declaration's StartByte to pick the synthetic
+	// identifier ("fallback" or "receive").
+	queryFallbackReceive = `(fallback_receive_definition) @decl`
 	queryEvent       = `(event_definition name: (identifier) @name) @decl`
 	queryStruct      = `(struct_declaration name: (identifier) @name) @decl`
 	queryEnum        = `(enum_declaration name: (identifier) @name) @decl`

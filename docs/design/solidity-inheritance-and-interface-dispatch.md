@@ -56,18 +56,20 @@
 > runModifierMeta walker 신규 + NodeModifier qname 에 Container 접두사
 > 추가 + Pass 1.5 containerIDByFuncID 에 NodeModifier 포함 +
 > nearestFunctionQnameAndStart 가 modifier_definition 도 인식.
-> V1.23 ✅ **constructor_definition graph node + meta walker** —
-> Sol 의 constructor_definition 은 `name` field 없음 → graph node
-> 자체 미존재했음 (queryConstructor 없었음). queryConstructor +
-> runConstructorDecl 신규 (NodeFunction with SubKind="constructor",
-> synthetic qname "Container.constructor", id hash on
-> declNode.StartByte). V1.22 idiom 동일 — emitParameterMetaPending +
-> emitLocalVarMetaPending + nearestFunctionQnameAndStart 가
-> constructor_definition 도 인식. 다른 V1.22 변경 (qname Container
-> prefix, Pass 1.5 containerIDByFuncID) 은 NodeFunction 기반이라 자동
-> 적용.
-> fallback_receive_definition / free function / block-scoped shadowing
-> 정확화 / module-import 만 V1.24+ follow-up.
+> V1.23 constructor_definition graph node + meta walker —
+> queryConstructor + runConstructorDecl 신규. NodeFunction with
+> SubKind="constructor", synthetic qname "Container.constructor".
+> V1.22 idiom 그대로.
+> V1.24 ✅ **fallback_receive_definition graph node + meta walker** —
+> tree-sitter v1.2.13 가 fallback() 과 receive() 를 동일 노드 kind
+> (fallback_receive_definition) 으로 lump. queryFallbackReceive +
+> runFallbackReceiveDecl 신규 — source text 첫 토큰 ("fallback" /
+> "receive") 으로 disambiguate, synthetic qname "Container.fallback" /
+> "Container.receive", SubKind 동일. V1.22 meta idiom + nearestFunction
+> QnameAndStart 확장.
+> Free function (Sol 0.7.4+ file-level function_definition;
+> runFunctionDecl 가 partial cover 가능 — fixture validation 필요) /
+> block-scoped shadowing 정확화 / module-import 만 V1.25+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

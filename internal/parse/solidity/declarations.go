@@ -74,6 +74,12 @@ func (v *declVisitor) visit() {
 	// but have no `name` field — runConstructorDecl uses a synthetic
 	// identifier and hashes the id off the declaration's StartByte.
 	v.runConstructorDecl()
+	// W-C W6 V1.24 (2026-05-12): emit NodeFunction (synthetic name
+	// "fallback" / "receive") + parameter / local-var meta for every
+	// fallback_receive_definition. Tree-sitter lumps both forms into
+	// a single kind; the walker disambiguates by reading the leading
+	// source token.
+	v.runFallbackReceiveDecl()
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)
 	v.runDecl(queryEnum, types.NodeEnum)
@@ -538,6 +544,97 @@ func (v *declVisitor) runConstructorDecl() {
 	}
 }
 
+// runFallbackReceiveDecl — W-C W6 V1.24 (2026-05-12). Emits one
+// NodeFunction per fallback_receive_definition with synthetic name
+// "fallback" or "receive", qname "<Container>.<name>", SubKind matches
+// the name. Then runs the V1.22 meta-emission pipeline against the
+// body.
+//
+// Tree-sitter quirk: the v1.2.13 grammar uses a single node kind for
+// both `fallback() { ... }` and `receive() external payable { ... }`,
+// with no field that disambiguates them. The leading keyword in the
+// source text is the only reliable signal — we read up to the first
+// whitespace / `(` after the node's StartByte to recover the name.
+//
+// Why NodeFunction (not new types)? Same rationale as V1.23: keep the
+// type-level contract intact for containerIDByFuncID, lookupReceiverType,
+// EdgeHasModifier consumers. SubKind carries the role distinction.
+func (v *declVisitor) runFallbackReceiveDecl() {
+	query, qErr := sitter.NewQuery(v.lang, queryFallbackReceive)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var declNode *sitter.Node
+		for _, c := range m.Captures {
+			if names[c.Index] == "decl" {
+				n := c.Node
+				declNode = &n
+			}
+		}
+		if declNode == nil {
+			continue
+		}
+		ident := fallbackOrReceiveKeyword(declNode, v.src)
+		if ident == "" {
+			continue // defensive — neither keyword found at node start
+		}
+		qname := ident
+		if cn := nearestContractName(declNode, v.src); cn != "" {
+			qname = cn + "." + ident
+		}
+		startByte := int(declNode.StartByte())
+		endByte := int(declNode.EndByte())
+		id := parse.MakeID(qname, "sol", startByte)
+		v.nodes = append(v.nodes, types.Node{
+			ID: id, Type: types.NodeFunction, Name: ident, QualifiedName: qname,
+			FilePath: v.rel, StartLine: int(declNode.StartPosition().Row) + 1,
+			EndLine:   int(declNode.EndPosition().Row) + 1,
+			StartByte: startByte, EndByte: endByte,
+			Language: "sol", Confidence: types.ConfExtracted,
+			SubKind: ident,
+		})
+		v.edges = append(v.edges, types.Edge{
+			Src: v.fileID, Dst: id, Type: types.EdgeDefines,
+			Count: 1, Confidence: types.ConfExtracted,
+		})
+		// V1.22 meta pipeline — fallback can carry parameters (Sol
+		// 0.6+, e.g. `fallback(bytes calldata input) external returns
+		// (bytes memory)`); receive cannot by language rule, but the
+		// walker is uniform — parameter children will be empty for
+		// receive and the helper is a no-op.
+		emitParameterMetaPending(v, id, declNode)
+		emitLocalVarMetaPending(v, id, declNode)
+	}
+}
+
+// fallbackOrReceiveKeyword reads the leading source keyword at the node
+// (either "fallback" or "receive") and returns it, or "" when neither
+// keyword matches (defensive — shouldn't happen for valid Sol code).
+func fallbackOrReceiveKeyword(n *sitter.Node, src []byte) string {
+	start := int(n.StartByte())
+	if start >= len(src) {
+		return ""
+	}
+	// Length 8 covers "fallback"; length 7 covers "receive".
+	if start+len("fallback") <= len(src) && string(src[start:start+len("fallback")]) == "fallback" {
+		return "fallback"
+	}
+	if start+len("receive") <= len(src) && string(src[start:start+len("receive")]) == "receive" {
+		return "receive"
+	}
+	return ""
+}
+
 // nearestContractName walks the parent chain looking for an enclosing
 // contract-like declaration and returns its name (empty if none).
 //
@@ -595,6 +692,21 @@ func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool
 			// canonical (qname, startByte) pair so SrcID hashing
 			// aligns with the emitted NodeFunction.
 			const ident = "constructor"
+			qname := ident
+			if cn != "" {
+				qname = cn + "." + ident
+			}
+			return qname, int(cur.StartByte()), true
+		}
+		if cur.Kind() == "fallback_receive_definition" {
+			// W-C W6 V1.24: synthetic identifier is read from the
+			// source token at the node's start ("fallback" or
+			// "receive"). Mirrors runFallbackReceiveDecl's
+			// (qname, startByte) pair.
+			ident := fallbackOrReceiveKeyword(cur, src)
+			if ident == "" {
+				return "", 0, false
+			}
 			qname := ident
 			if cn != "" {
 				qname = cn + "." + ident
