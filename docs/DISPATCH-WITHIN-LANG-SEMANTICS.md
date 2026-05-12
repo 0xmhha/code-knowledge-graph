@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 = binding declaration only; method-call resolution V1) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var dispatch; parameter receiver / chaining V1.1+) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -166,11 +166,29 @@ schema 1.10 EdgeUsesFor enum slot append (commit `19c99da`) + 5 fixture
 negative). Q9-1 (b) 결정 (2026-05-12 사용자 정당한 지적 채택 — Solidity
 trait-like binding semantics 가 first-class EdgeType, extends /
 implements / overrides / has_modifier 와 동급). V0 scope = binding
-declaration only; method-call dispatch resolution (`balance.add()` →
-SafeMath.add EdgeCalls) 은 V1 follow-up — receiver type 추론 인프라
-(state var / parameter declared-type 인덱스) 필요. §7.0 Go regression
-`--lang=go` diff = 0. Viewer edges.ts G2 카테고리에 amber dashed
-등록 + DEFAULT_EDGE_TYPES on by default.
+declaration only. §7.0 Go regression `--lang=go` diff = 0. Viewer
+edges.ts G2 카테고리에 amber dashed 등록 + DEFAULT_EDGE_TYPES on by
+default.
+
+W-C W6 V1.0 (Sol `using For` state-var dispatch → EdgeCalls) ✅ landed
+2026-05-12. `runUsingForCalls` + `matchStateVarMethodCall` predicate
+(member_expression 의 `<identifier>.<identifier>(...)` 인식) +
+`resolveUsingForCallRef` (4-step chain: funcID → containerID →
+typeName → libraryName → libraryFunctionID). State-variable type
+인덱스: NodeField QualifiedName 을 `<Container>.<varName>` 으로 qualify
+(runFunctionDecl 와 동일 idiom) + NodeField.Signature 에 declared
+typeName 저장 (extractTypeNameText). Per-contract binding map
+(contractID, typeName | "*") → libraryName 은 Pass 2 에서 신규
+`using_for_typebind` PendingRef 들을 sweep해서 채움 — graph edge 는
+아니고 binding 정보 carrier. 4 fixture + 4 test (state_var_dispatch,
+wildcard_dispatch, specific_over_wildcard for Q9-3 (a) 검증,
+no_binding_negative). golden snapshot 갱신 (NodeField qname +
+Signature 추가). Confidence: ConfExtracted (same-file) / ConfInferred
+(cross-file) — W3 처럼 AMBIGUOUS 으로 downgrade 안 함 (library
+dispatch 는 binding 만 알면 statically determinable). V1.0 carry-over:
+parameter receiver, return-value chaining, free-function form, file-
+level using, inherited using directive 모두 V1.1+. §7.0 Go regression
+`--lang=go` diff = 0.
 
 W-B W1 (TS heritage `extends`/`implements`) ✅ landed.
 `internal/parse/typescript/heritage.go` (284 LOC) + 6 fixture +

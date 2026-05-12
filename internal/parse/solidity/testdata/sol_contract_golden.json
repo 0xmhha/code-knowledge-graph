@@ -88,6 +88,24 @@
       "confidence": "EXTRACTED"
     },
     {
+      "id": "59be44b9700ea1f4",
+      "type": "Field",
+      "name": "name",
+      "qualified_name": "Token.name",
+      "file_path": "Token.sol",
+      "start_line": 3,
+      "end_line": 3,
+      "start_byte": 60,
+      "end_byte": 64,
+      "language": "sol",
+      "signature": "string",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
+    },
+    {
       "id": "acf8ee6269bbd426",
       "type": "Function",
       "name": "deposit",
@@ -150,23 +168,6 @@
       "end_line": 5,
       "start_byte": 102,
       "end_byte": 111,
-      "language": "sol",
-      "in_degree": 0,
-      "out_degree": 0,
-      "pagerank": 0,
-      "usage_score": 0,
-      "confidence": "EXTRACTED"
-    },
-    {
-      "id": "cbd79714163cb7f7",
-      "type": "Field",
-      "name": "name",
-      "qualified_name": "name",
-      "file_path": "Token.sol",
-      "start_line": 3,
-      "end_line": 3,
-      "start_byte": 60,
-      "end_byte": 64,
       "language": "sol",
       "in_degree": 0,
       "out_degree": 0,
@@ -251,7 +252,7 @@
     },
     {
       "src": "bc1b6e3c98545ce0",
-      "dst": "cbd79714163cb7f7",
+      "dst": "59be44b9700ea1f4",
       "type": "defines",
       "count": 1,
       "confidence": "EXTRACTED"

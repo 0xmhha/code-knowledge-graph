@@ -55,28 +55,37 @@ const (
 	//     - source field     (type_name OR any_source_type for `for *`)
 	//
 	// V0 captures only the legacy form's library identifier via type_alias.
+	// V1.0 (2026-05-12) adds an additional `@type` capture on the source
+	// field so the bound type can drive method-call dispatch resolution.
 	// The free-function form (using_alias child) is dropped per §4.6.6 V0
-	// limit. The source field (typeName / *) is parsed but not surfaced —
-	// one EdgeUsesFor per directive regardless of bound type.
+	// limit.
 	//
 	// contract_body is the `body:` field of contract_declaration /
 	// library_declaration / interface_declaration; using_directive nests
 	// inside it.
+	//
+	// The `@stmt` capture is required because the matched node — the
+	// using_directive itself — needs to be addressable for binding-map
+	// PendingRef emission; without a separate capture, the runUsingFor
+	// loop can only see the leaf identifiers.
 	queryUsingFor = `[
 		(contract_declaration
 			name: (identifier) @container
 			body: (contract_body
 				(using_directive
-					(type_alias (identifier) @lib))))
+					(type_alias (identifier) @lib)
+					source: (_) @type) @stmt))
 		(library_declaration
 			name: (identifier) @container
 			body: (contract_body
 				(using_directive
-					(type_alias (identifier) @lib))))
+					(type_alias (identifier) @lib)
+					source: (_) @type) @stmt))
 		(interface_declaration
 			name: (identifier) @container
 			body: (contract_body
 				(using_directive
-					(type_alias (identifier) @lib))))
+					(type_alias (identifier) @lib)
+					source: (_) @type) @stmt))
 	]`
 )

@@ -7,6 +7,17 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W6 V1.0 binding-map types (2026-05-12). The per-contract using-for
+// binding info reaches Pass 2 method-call resolution through two
+// intermediate maps; declaring them as package types lets helpers
+// keep narrow signatures. The third lookup (funcID → contractID) reuses
+// the existing containerIDByFuncID map from W-C W2 review M1+M3.
+//
+//   bindingMap:    contractID → (typeName | "*") → libraryName
+//   stateVarTypes: contractID → varName → typeName (NodeField.Signature)
+type bindingMap map[string]map[string]string
+type stateVarTypeMap map[string]map[string]string
+
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
 // against any node whose Name (or QualifiedName for mappings) equals the
@@ -126,14 +137,28 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 
-	// Pass 1.5 — build containerIDByFuncID. Requires both Function and
-	// Container nodes already indexed (above), so it runs as a separate
-	// loop. Functions without a "Container.func" qname (file-level Sol
-	// functions outside any contract — legal but rare) are skipped:
-	// override semantics don't apply to them anyway.
+	// Pass 1.5 — build containerIDByFuncID and the W6 V1.0 state-variable
+	// type index. Both require Function / Container / Field nodes already
+	// indexed (above), so they run as a separate loop.
+	//
+	//   containerIDByFuncID: funcID → enclosing containerID (W2 reverse
+	//                        index, reused by W6 V1.0 for call→contract
+	//                        recovery).
+	//   stateVarTypes:       contractID → varName → declared typeName
+	//                        (NodeField.Signature, set by runStateVarDecl
+	//                        via extractTypeNameText). Drives method-call
+	//                        receiver type lookup in Pass 2c.
+	//
+	// Both indexes derive the enclosing container from the node's
+	// QualifiedName prefix (`<Container>.<member>`) — emitted by
+	// runFunctionDecl and (since W6 V1.0) by runStateVarDecl. file-level
+	// helpers without a container prefix are skipped (Sol allows free
+	// functions but not free state vars; either way override / using-for
+	// semantics don't apply).
+	stateVarTypes := stateVarTypeMap{}
 	for _, r := range results {
 		for _, n := range r.Nodes {
-			if n.Type != types.NodeFunction {
+			if n.Type != types.NodeFunction && n.Type != types.NodeField {
 				continue
 			}
 			dot := strings.IndexByte(n.QualifiedName, '.')
@@ -141,9 +166,22 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				continue
 			}
 			containerName := n.QualifiedName[:dot]
-			if cid, ok := containerByNameFile[containerName+"|"+n.FilePath]; ok {
-				containerIDByFuncID[n.ID] = cid
+			cid, ok := containerByNameFile[containerName+"|"+n.FilePath]
+			if !ok {
+				continue
 			}
+			if n.Type == types.NodeFunction {
+				containerIDByFuncID[n.ID] = cid
+				continue
+			}
+			// NodeField: stash typeName under the same container ID.
+			if n.Signature == "" {
+				continue // extraction-failed shapes
+			}
+			if stateVarTypes[cid] == nil {
+				stateVarTypes[cid] = map[string]string{}
+			}
+			stateVarTypes[cid][n.Name] = n.Signature
 		}
 	}
 
@@ -171,6 +209,30 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// parent in source order), so `override` against a multi-parent class
 	// hits parents in the declared order.
 	parents := buildInheritanceIndex(out.Edges)
+
+	// W6 V1.0 (2026-05-12) — pre-build the (contractID, typeName) →
+	// libraryName binding map by sweeping all dispatchKindUsingForTypeBind
+	// PendingRefs across results. Done before Pass 2b so the using-for-call
+	// branch can consume it without ordering surprises.
+	bindings := bindingMap{}
+	for _, r := range results {
+		for _, pr := range r.Pending {
+			if pr.DispatchKind != dispatchKindUsingForTypeBind {
+				continue
+			}
+			// TargetQName encoding from runUsingFor: `libraryName|typeName`.
+			sep := strings.IndexByte(pr.TargetQName, '|')
+			if sep < 0 {
+				continue
+			}
+			libName := pr.TargetQName[:sep]
+			typeName := pr.TargetQName[sep+1:]
+			if bindings[pr.SrcID] == nil {
+				bindings[pr.SrcID] = map[string]string{}
+			}
+			bindings[pr.SrcID][typeName] = libName
+		}
+	}
 
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
@@ -213,6 +275,27 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if pr.DispatchKind == dispatchKindUsingFor {
 				if edge, ok := resolveUsingForRef(
 					pr, byName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
+			// W6 V1.0 typebind — already consumed before this loop into
+			// the `bindings` map. Skip silently here so the default
+			// switch doesn't try to emit a graph edge for it.
+			if pr.DispatchKind == dispatchKindUsingForTypeBind {
+				continue
+			}
+			// W6 V1.0 using-for method-call branch — resolves
+			// `<stateVar>.<method>(...)` to an EdgeCalls into the
+			// library function bound for stateVar's type. Drops when
+			// any link in the chain fails (no state var of that name,
+			// no binding for that type, no library function with that
+			// method) — strict-purge same as the other Sol resolvers.
+			if pr.DispatchKind == dispatchKindUsingForCall {
+				if edge, ok := resolveUsingForCallRef(
+					pr, bindings, stateVarTypes,
+					containerIDByFuncID, funcByQName, nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
 				}
@@ -412,6 +495,79 @@ func resolveUsingForRef(
 	}
 	return types.Edge{
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeUsesFor,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForCallRef resolves one W6 V1.0 method-call PendingRef
+// (`<stateVar>.<method>(...)`) to a single EdgeCalls edge. Four-step
+// chain — any step's failure drops the edge (V0 strict-purge):
+//
+//  1. funcID → enclosing containerID via containerIDByFuncID.
+//  2. (containerID, receiverName) → typeName via stateVarTypes.
+//  3. (containerID, typeName) → libraryName via bindings — falls back to
+//     wildcard "*" binding when no specific binding exists (Q9-3 (a)
+//     specific-first decision).
+//  4. `<libraryName>.<methodName>` → libraryFunctionID via funcByQName.
+//
+// Confidence: ConfExtracted when both endpoints are in the same file
+// AND came through the same-file binding; ConfInferred when the chain
+// crosses files (library declared in another file). Sol's library
+// dispatch is statically determinable once the binding is known, so we
+// don't downgrade to AMBIGUOUS the way W3 (interface dispatch) does —
+// the call resolution is concrete.
+func resolveUsingForCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from runUsingForCalls: `receiverName|methodName`.
+	sep := strings.IndexByte(pr.TargetQName, '|')
+	if sep < 0 {
+		return types.Edge{}, false
+	}
+	receiverName := pr.TargetQName[:sep]
+	methodName := pr.TargetQName[sep+1:]
+
+	contractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	varMap := stateVarTypes[contractID]
+	if varMap == nil {
+		return types.Edge{}, false
+	}
+	typeName, ok := varMap[receiverName]
+	if !ok {
+		return types.Edge{}, false
+	}
+	bindMap := bindings[contractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[typeName]
+	if !hit {
+		// Wildcard fallback per Q9-3 (a).
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	ids := funcByQName[libName+"."+methodName]
+	if len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
 		Line: pr.Line, Count: 1, Confidence: conf,
 	}, true
 }

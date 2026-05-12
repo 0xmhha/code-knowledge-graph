@@ -76,9 +76,17 @@ func (v *declVisitor) visit() {
 	v.runDispatch()
 	// W6 (using For): emits EdgeUsesFor PendingRefs from `using LibName for
 	// TypeName;` directives nested inside a contract / library / interface
-	// body. Q9-1 (b) decision (2026-05-12). V0 scope: binding declaration
-	// only; method-call dispatch resolution is V1 follow-up (§4.6 spec).
+	// body. Q9-1 (b) decision (2026-05-12). V0 scope: binding declaration.
+	// V1.0 (same call) additionally emits typebind PendingRefs (for the
+	// per-contract binding map) and method-call PendingRefs (via the
+	// separate runUsingForCalls below).
 	v.runUsingFor()
+	// W6 V1.0 (2026-05-12): method-call dispatch detector. Walks every
+	// member_expression that fits `<identifier>.<identifier>(...)` and
+	// queues a PendingRef that Pass 2 resolves through the binding map.
+	// State-variable receivers only (Q9-2 (a) V0 limit); parameter
+	// receivers + chaining are V1.1 follow-up.
+	v.runUsingForCalls()
 	v.collectABI()
 }
 
@@ -170,14 +178,38 @@ func (v *declVisitor) runStateVarDecl() {
 				qname = name + ":mapping"
 			} else {
 				nt = types.NodeField
+				// W-C W6 V1.0 (2026-05-12): qualify NodeField qnames with
+				// the enclosing container's name so Pass 2 can recover
+				// the state-var → container relationship cheaply (same
+				// idiom as runFunctionDecl's `Container.func` qname).
+				// File-level state-var declarations are out of scope in
+				// Solidity; nearestContractName returns "" for them and
+				// the qname falls back to the bare name (extant V0
+				// shape preserved for that edge case).
 				qname = name
+				if cn := nearestContractName(nameNode, v.src); cn != "" {
+					qname = cn + "." + name
+				}
 			}
 			id := parse.MakeID(qname, "sol", startByte)
+			// W-C W6 V1.0 (2026-05-12): stash the declared type name on the
+			// Field/Mapping node's Signature so Pass 2 can resolve
+			// `<stateVar>.<method>(...)` callsites by looking up the
+			// state-variable's type and matching it against the using-for
+			// binding map. We use Signature (not SubKind) because the value
+			// here is the raw user-written type expression — V0 graph
+			// consumers already treat Signature as opaque metadata. Empty
+			// typeNode (rare — degenerate parses) → Signature stays empty.
+			signature := ""
+			if typeNode != nil {
+				signature = extractTypeNameText(typeNode, v.src)
+			}
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: name, QualifiedName: qname,
 				FilePath: v.rel, StartLine: line, EndLine: line,
 				StartByte: startByte, EndByte: endByte,
 				Language: "sol", Confidence: types.ConfExtracted,
+				Signature: signature,
 			})
 			v.edges = append(v.edges, types.Edge{
 				Src: v.fileID, Dst: id, Type: types.EdgeDefines,
@@ -403,6 +435,66 @@ func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool
 		}
 	}
 	return "", 0, false
+}
+
+// extractTypeNameText returns the user-written type expression for a
+// state_variable_declaration's type_name child. Used by W-C W6 V1.0 to
+// stamp NodeField.Signature with the declared type so Pass 2 can resolve
+// `<stateVar>.<method>(...)` against the using-for binding map.
+//
+// Three shapes covered:
+//   - primitive_type / user_defined_type → identifier text (`uint256`,
+//     `MyContract`).
+//   - mapping → returns "" (mapping receivers don't participate in
+//     using-for dispatch; the resolver naturally drops them).
+//   - other compound types (array_type, function_type) → raw subtree text
+//     normalised by stripping outer whitespace. This is a permissive
+//     fallback so future receiver shapes don't crash the parse; the V0
+//     binding map lookup will simply miss when the typeName doesn't match
+//     any directive's bound type.
+func extractTypeNameText(typeNode *sitter.Node, src []byte) string {
+	if typeNode == nil {
+		return ""
+	}
+	if typeNameIsMapping(typeNode, src) {
+		return ""
+	}
+	// First, look for a direct named child (primitive_type /
+	// user_defined_type). The grammar wraps these in type_name; the inner
+	// named child is the one carrying the identifier we care about.
+	for i := uint(0); i < uint(typeNode.NamedChildCount()); i++ {
+		c := typeNode.NamedChild(i)
+		switch c.Kind() {
+		case "primitive_type":
+			return strings.TrimSpace(string(src[c.StartByte():c.EndByte()]))
+		case "user_defined_type":
+			// user_defined_type may be `Foo` or `Ns.Foo` — V0 takes the
+			// trailing identifier (same idiom as TS heritage resolution).
+			if id := lastIdentifier(c); id != nil {
+				return id.Utf8Text(src)
+			}
+			return strings.TrimSpace(string(src[c.StartByte():c.EndByte()]))
+		}
+	}
+	// Permissive fallback — raw subtree text. Whitespace-trimmed so
+	// downstream string compares stay clean.
+	return strings.TrimSpace(string(src[typeNode.StartByte():typeNode.EndByte()]))
+}
+
+// lastIdentifier returns the rightmost identifier-like named child under n,
+// flattening `Ns.Foo`-style user_defined_type references to their final
+// segment.
+func lastIdentifier(n *sitter.Node) *sitter.Node {
+	if n == nil {
+		return nil
+	}
+	for i := int(n.NamedChildCount()) - 1; i >= 0; i-- {
+		c := n.NamedChild(uint(i))
+		if c.Kind() == "identifier" {
+			return c
+		}
+	}
+	return nil
 }
 
 // typeNameIsMapping reports whether a type_name node represents a mapping

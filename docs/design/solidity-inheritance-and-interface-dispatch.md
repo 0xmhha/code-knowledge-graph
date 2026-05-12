@@ -12,11 +12,15 @@
 > `EdgeOverrides` reserved 2026-05-11 (appended to `pkg/types/enums.go`;
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
-> **LANDED 2026-05-12** — `internal/parse/solidity/using_for.go` +
-> queries.go `queryUsingFor` + resolve.go `resolveUsingForRef` + 5 fixture
-> + 5 test. EdgeUsesFor (Contract → Library) first-class emit per
-> Q9-1 (b) 결정. method-call dispatch resolution 은 V1 follow-up
-> (§4.6.6 V0 한계 carry-over).
+> **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
+> emit. W6 V1.0 (state-variable receiver dispatch resolution) ✅
+> **LANDED 2026-05-12** — `runUsingForCalls` + `resolveUsingForCallRef`
+> + state-variable type index (NodeField.Signature + qname qualification)
+> + (contractID, typeName) → libraryName binding map + 4 fixture +
+> 4 test. `balance.add(amount)` 같은 state-var method call 이 SafeMath.add
+> 등 library 함수로 EdgeCalls 연결. Q9-3 (a) specific-first wildcard
+> fallback 검증. parameter receiver / return chaining / free-function
+> form / file-level using directive 은 V1.1+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -685,12 +689,64 @@ internal/parse/solidity/using_for_test.go
 
 V0 carry-over (V1 follow-up)
 - Method-call dispatch resolution (`balance.add(...)` → SafeMath.add
-  EdgeCalls) — receiver type 인덱스 필요.
+  EdgeCalls) — receiver type 인덱스 필요. **V1.0 LANDED 2026-05-12**
+  (state-variable receiver 한정, 아래 LANDED 블록 참조).
 - Free-function form `using {f1, f2} for T` — 별도 AST shape (using_alias
-  child).
+  child). V1.1+
 - File-level using directive (0.8.13+ global binding) — contract scope
-  외 위치.
-- Inherited using directive 상속 처리.
+  외 위치. V1.1+
+- Inherited using directive 상속 처리. V1.1+
+
+#### LANDED 2026-05-12 (W-C W6 V1.0 — state-variable receiver dispatch)
+
+- 구현 추가:
+  - `internal/parse/solidity/using_for.go`: `runUsingForCalls` detector
+    (member_expression 의 `<identifier>.<identifier>(...)` shape 인식)
+    + `matchStateVarMethodCall` predicate + 두 신규 dispatch kind
+    (`using_for_typebind`, `using_for_call`).
+  - `internal/parse/solidity/queries.go`: queryUsingFor 에 `@type`
+    capture 추가 (specific binding 의 type_name + wildcard 의
+    any_source_type 양쪽 처리).
+  - `internal/parse/solidity/declarations.go::runStateVarDecl`:
+    NodeField QualifiedName 을 `<Container>.<varName>` 으로 qualify
+    (runFunctionDecl 와 동일 idiom). NodeField.Signature 에 typeName
+    저장 (extractTypeNameText helper 추가). golden snapshot 갱신.
+  - `internal/parse/solidity/resolve.go`: Pass 1.5 에 stateVarTypes
+    인덱스 구축 (qname prefix 기반). Pass 2 에 typebind 분기 (binding
+    map 채움, edge emit 안 함) + using_for_call 분기 (`resolveUsingForCallRef`
+    helper 호출).
+- Architecture (4-step resolution chain in `resolveUsingForCallRef`):
+  1. funcID → enclosing containerID (containerIDByFuncID, W-C W2 M1+M3
+     review 의 reverse index 재사용)
+  2. (containerID, receiverName) → typeName (stateVarTypes)
+  3. (containerID, typeName) → libraryName (bindings); wildcard `*`
+     fallback per Q9-3 (a)
+  4. `<libraryName>.<methodName>` → libraryFunctionID (funcByQName)
+- Confidence: ConfExtracted when both endpoints same-file; ConfInferred
+  cross-file. W3 처럼 ConfAmbiguous 로 downgrade 하지 않음 — library
+  dispatch 는 binding 만 알면 statically determinable.
+- Fixtures: `testdata/using_for_v1/{state_var_dispatch, wildcard_dispatch,
+  specific_over_wildcard, no_binding_negative}.sol`.
+- 테스트: `using_for_v1_test.go` 4 함수:
+  - `TestUsingForV1_StateVarDispatch` — 2 EdgeCalls (Vault.deposit→
+    SafeMath.add, Vault.withdraw→SafeMath.sub) 검증
+  - `TestUsingForV1_WildcardDispatch` — `for *` 만 있을 때 wildcard
+    바인딩 활성화
+  - `TestUsingForV1_SpecificOverWildcard` — Q9-3 (a) specific-first
+    검증 (specific + wildcard 둘 다 있을 때 specific 우선)
+  - `TestUsingForV1_NoBindingNegative` — using 없으면 0 EdgeCalls
+- 회귀: 25/25 PASS, vet clean. §7.0 Go regression: Sol-only 변경.
+- 가시화: 기존 EdgeCalls 가족 — viewer 추가 작업 없음 (W6 V0 의
+  EdgeUsesFor 가 별도 가시화).
+
+V1.0 carry-over (V1.1+ follow-up)
+- Parameter receiver: 함수 인자로 받은 type 에 대한 method dispatch.
+  function parameter 의 declared type 인덱스 추가 필요.
+- Return-value chaining: `foo().add(x)` 같은 expression. 미세 정적
+  추론, V0 한계 §4.6.6 의 receiver type 항목.
+- Free-function form `using {f1, f2} for T`: 별도 AST (using_alias).
+- File-level using directive (0.8.13+).
+- Inherited using directive (base contract 의 using 가 child 에 상속).
 
 #### 4.6.5 §3.5 갱신 예정
 
