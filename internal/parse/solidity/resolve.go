@@ -1,6 +1,7 @@
 package solidity
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
@@ -30,7 +31,23 @@ type stateVarTypeMap map[string]map[string]string
 type paramTypeMap map[string]map[string]string
 type funcReturnTypeMap map[string]string
 type structFieldTypeMap map[string]map[string]string
-type localVarTypeMap map[string]map[string]string
+
+// localDecl carries one local-variable declaration's (declLine,
+// scopeEndLine, typeName) tuple. W-C W6 V2.0 (2026-05-12): scope
+// ranges drive narrowest-scope-wins lookup at the use site so
+// inner-block shadows resolve correctly while outer-scope uses
+// still see the outer declaration.
+type localDecl struct {
+	declLine     int
+	scopeEndLine int
+	typeName     string
+}
+
+// localVarTypeMap (V2.0): funcID → varName → []localDecl. Each
+// emitted variable_declaration appends an entry; the same name can
+// have multiple entries when shadowed in nested blocks. Resolution
+// at the use site uses line containment + max declLine selection.
+type localVarTypeMap map[string]map[string][]localDecl
 
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
@@ -295,31 +312,25 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				structFieldTypes[structName][fieldName] = fieldType
 			case dispatchKindUsingForLocalVar:
-				// TargetQName encoding from emitLocalVarMetaPending:
-				// `varName|typeName` (two parts).
-				sep := strings.IndexByte(pr.TargetQName, '|')
-				if sep < 0 {
+				// W-C W6 V2.0 (2026-05-12): TargetQName encoding from
+				// emitLocalVarBinding / emitTryReturnsBinding:
+				// `varName|typeName|scopeEndLine` (three parts).
+				parts := strings.SplitN(pr.TargetQName, "|", 3)
+				if len(parts) != 3 {
 					continue
 				}
-				varName := pr.TargetQName[:sep]
-				typeName := pr.TargetQName[sep+1:]
+				varName, typeName := parts[0], parts[1]
+				scopeEnd, convErr := strconv.Atoi(parts[2])
+				if convErr != nil || varName == "" || typeName == "" {
+					continue
+				}
 				if localVarTypes[pr.SrcID] == nil {
-					localVarTypes[pr.SrcID] = map[string]string{}
+					localVarTypes[pr.SrcID] = map[string][]localDecl{}
 				}
-				// W-C W6 V1.30 (2026-05-12): first-decl wins for shadow
-				// resolution. Tree-sitter source-order traversal in
-				// collectLocalVarMetaPending emits the outermost
-				// declaration first; later same-name decls in nested
-				// blocks (shadowing) are inner shadows that should not
-				// bleed out into outer use sites. Pre-V1.30 map
-				// overwrite let the inner type win, dropping outer
-				// dispatch sites whose type had no binding. Full
-				// byte-range-aware scope lookup is V2+ — V0 trades
-				// inner-block dispatch correctness for outer correctness
-				// because outer use sites are the more common pattern.
-				if _, present := localVarTypes[pr.SrcID][varName]; !present {
-					localVarTypes[pr.SrcID][varName] = typeName
-				}
+				localVarTypes[pr.SrcID][varName] = append(
+					localVarTypes[pr.SrcID][varName],
+					localDecl{declLine: pr.Line, scopeEndLine: scopeEnd, typeName: typeName},
+				)
 			}
 		}
 	}
@@ -801,15 +812,26 @@ func resolveUsingForRef(
 // bypasses this helper — `this` is an explicit contract reference that
 // bypasses the function scope, so the named member must be a state
 // variable, never a param or local.
+//
+// W-C W6 V2.0 (2026-05-12): useSiteLine drives scope-aware local-var
+// lookup. localVarTypes carries multiple decls per (funcID, varName)
+// when shadowing happens; this helper selects the narrowest scope that
+// still contains useSiteLine (max declLine where declLine <= useSiteLine
+// AND useSiteLine <= scopeEndLine). useSiteLine = 0 falls back to the
+// first-decl-wins behavior of V1.30 V0 (used by callers that don't
+// have a use-site line — e.g. binding declaration walks).
 func lookupReceiverType(
 	name, contractID, funcID string,
+	useSiteLine int,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
 	localVarTypes localVarTypeMap,
 ) string {
 	if localMap := localVarTypes[funcID]; localMap != nil {
-		if t := localMap[name]; t != "" {
-			return t
+		if decls := localMap[name]; len(decls) > 0 {
+			if t := selectLocalDecl(decls, useSiteLine); t != "" {
+				return t
+			}
 		}
 	}
 	if paramMap := paramTypes[funcID]; paramMap != nil {
@@ -823,6 +845,39 @@ func lookupReceiverType(
 		}
 	}
 	return ""
+}
+
+// selectLocalDecl picks the narrowest local declaration whose scope
+// range contains useSiteLine. When useSiteLine is 0 (caller has no
+// use-site context — e.g. emit walks), falls back to the first decl
+// in source order, matching V1.30 V0's first-decl-wins behavior.
+//
+// Selection rule: filter decls where declLine <= useSiteLine AND
+// useSiteLine <= scopeEndLine, then choose the one with the highest
+// declLine — that's the narrowest enclosing scope (deepest nested
+// block that's still in scope at the use site). When no decl is in
+// scope (e.g. use site after all decls expired), returns "".
+func selectLocalDecl(decls []localDecl, useSiteLine int) string {
+	if useSiteLine == 0 {
+		// Defensive fallback — first-decl-wins (V1.30 V0 semantics).
+		return decls[0].typeName
+	}
+	bestIdx := -1
+	for i, d := range decls {
+		if d.declLine > useSiteLine {
+			continue
+		}
+		if d.scopeEndLine != 0 && d.scopeEndLine < useSiteLine {
+			continue
+		}
+		if bestIdx < 0 || decls[i].declLine > decls[bestIdx].declLine {
+			bestIdx = i
+		}
+	}
+	if bestIdx < 0 {
+		return ""
+	}
+	return decls[bestIdx].typeName
 }
 
 // resolveUsingForCallRef resolves one W6 V1.0/V1.1/V1.9/V1.15
@@ -874,8 +929,10 @@ func resolveUsingForCallRef(
 	// local-var (V1.15). Solidity scoping rules mean these three name-
 	// spaces don't legally overlap within a single function, so the
 	// order shapes precedence but cannot mis-resolve in valid code.
+	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
+	// shadowed locals.
 	typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
-		stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, stateVarTypes, paramTypes, localVarTypes)
 	if typeName == "" {
 		return types.Edge{}, false
 	}
@@ -1631,8 +1688,10 @@ func resolveUsingForStructFieldCallRef(
 		return types.Edge{}, false
 	}
 	// V1.15: state-var → param → local-var three-tier fallback.
+	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
+	// shadowed locals.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1714,8 +1773,10 @@ func resolveUsingForNestedStructFieldCallRef(
 		return types.Edge{}, false
 	}
 	// V1.15: state-var → param → local-var three-tier fallback.
+	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
+	// shadowed locals.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1820,8 +1881,10 @@ func resolveUsingForGenericMemberChainCallRef(
 		return types.Edge{}, false
 	}
 	// V1.15: state-var → param → local-var three-tier fallback.
+	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
+	// shadowed locals.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}

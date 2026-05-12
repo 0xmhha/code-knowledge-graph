@@ -1,11 +1,29 @@
 package solidity
 
 import (
+	"strconv"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
+
+// nearestEnclosingBlockEndLine walks up from n to the nearest
+// enclosing `block_statement` or `function_body` and returns its
+// end-line (1-based). Used by emitLocalVarBinding (V2.0) to record
+// each local's scope range. Returns 0 when no enclosing block is
+// found (defensive — every valid variable_declaration in a function
+// body sits inside one).
+func nearestEnclosingBlockEndLine(n *sitter.Node) int {
+	for cur := n.Parent(); cur != nil; cur = cur.Parent() {
+		switch cur.Kind() {
+		case "function_body", "block_statement":
+			return int(cur.EndPosition().Row) + 1
+		}
+	}
+	return 0
+}
 
 // Sol W2 — virtual / override modifier detection and EdgeOverrides emit.
 //
@@ -430,15 +448,20 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// returns clause named-parameter slots are exposed as direct
 		// `parameter` children of try_statement (distinct from
 		// function_definition's `return_type` field — different AST
-		// shape). Each slot is a function-scope identifier bound for
-		// the duration of the success block; we approximate as
-		// function-scoped (V1.15 idiom).
+		// shape). Each slot is bound for the duration of the success
+		// block (try_statement's `body` field). V2.0: scopeEndLine =
+		// success-block end so use sites outside the block don't
+		// pick up these names.
+		scopeEnd := 0
+		if body := n.ChildByFieldName("body"); body != nil {
+			scopeEnd = int(body.EndPosition().Row) + 1
+		}
 		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 			child := n.NamedChild(i)
 			if child == nil || child.Kind() != "parameter" {
 				continue
 			}
-			emitTryReturnsBinding(v, funcID, child)
+			emitTryReturnsBinding(v, funcID, child, scopeEnd)
 		}
 		// Fall through to recurse — try_statement's body
 		// (block_statement) and catch_clause bodies still contain
@@ -448,14 +471,18 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// W6 V1.21: `catch Type(Ta a, Tb b) { ... }` — the catch's
 		// named parameter slots are exposed as direct `parameter`
 		// children of catch_clause (alongside an optional identifier
-		// for the catch type name like "Error" / "Panic"). Same
-		// emit idiom as V1.20 try-returns — function-scope approx.
+		// for the catch type name like "Error" / "Panic"). V2.0:
+		// scopeEndLine = catch body end.
+		scopeEnd := 0
+		if body := n.ChildByFieldName("body"); body != nil {
+			scopeEnd = int(body.EndPosition().Row) + 1
+		}
 		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 			child := n.NamedChild(i)
 			if child == nil || child.Kind() != "parameter" {
 				continue
 			}
-			emitTryReturnsBinding(v, funcID, child)
+			emitTryReturnsBinding(v, funcID, child, scopeEnd)
 		}
 		// Fall through to recurse — catch_clause body still contains
 		// statements that need visiting.
@@ -470,7 +497,12 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 // as emitLocalVarBinding so lookupReceiverType picks it up via
 // localVarTypes. Anonymous slot (no name field) skips silently —
 // nothing addressable.
-func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node) {
+//
+// W-C W6 V2.0 (2026-05-12): scopeEndLine is encoded into TargetQName
+// as the third part so Pass 2 can build a per-decl line range for
+// scope-aware lookup. Callers must pass the end line of the binding's
+// effective scope (try_statement.body or catch_clause.body end).
+func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node, scopeEndLine int) {
 	if p == nil {
 		return
 	}
@@ -490,7 +522,7 @@ func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node) {
 	v.pending = append(v.pending, parse.PendingRef{
 		SrcID:        funcID,
 		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
-		TargetQName:  varName + "|" + typeName,
+		TargetQName:  varName + "|" + typeName + "|" + strconv.Itoa(scopeEndLine),
 		Line:         int(nameNode.StartPosition().Row) + 1,
 		DispatchKind: dispatchKindUsingForLocalVar,
 	})
@@ -500,6 +532,12 @@ func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node) {
 // `variable_declaration` node (used by both V1.15 single-var and V1.16
 // tuple-slot paths). Drops silently when name / type fields are missing
 // or extraction returns empty — Pass 2 won't see the slot.
+//
+// W-C W6 V2.0 (2026-05-12): scope-end line is determined by walking
+// from `decl` up the parent chain to the nearest enclosing
+// block_statement / function_body and recorded in TargetQName's third
+// slot (encoded as decimal). Pass 2 uses (declLine, scopeEndLine) +
+// use-site line to do narrowest-scope-wins lookup.
 func emitLocalVarBinding(v *declVisitor, funcID string, decl *sitter.Node) {
 	if decl == nil {
 		return
@@ -514,10 +552,11 @@ func emitLocalVarBinding(v *declVisitor, funcID string, decl *sitter.Node) {
 	if varName == "" || typeName == "" {
 		return
 	}
+	scopeEndLine := nearestEnclosingBlockEndLine(decl)
 	v.pending = append(v.pending, parse.PendingRef{
 		SrcID:        funcID,
 		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
-		TargetQName:  varName + "|" + typeName,
+		TargetQName:  varName + "|" + typeName + "|" + strconv.Itoa(scopeEndLine),
 		Line:         int(nameNode.StartPosition().Row) + 1,
 		DispatchKind: dispatchKindUsingForLocalVar,
 	})

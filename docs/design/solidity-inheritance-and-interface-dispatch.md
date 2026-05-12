@@ -80,12 +80,16 @@
 > map + runImportAliases walker + runUsingFor 에서 alias substitute.
 > V1.29 whole-file alias qualified using — namespaceAliases set +
 > leading namespace identifier skip + collision false-positive 차단.
-> V1.30 ✅ **block-scoped shadowing (V0 first-decl-wins)** —
-> Pass 2 의 localVarTypes sweep 이 map overwrite 였음 (last emit wins)
-> → shadow 시 inner type 이 outer use site 까지 침범 (false-negative).
-> "first-decl wins" 으로 변경 (only-set-if-not-present). tree-sitter
-> source-order 가 outermost 를 먼저 emit 하므로 outer 가 보존됨.
-> 완전한 byte-range scope-aware lookup 은 V2.0+ refactor.
+> V1.30 block-scoped shadowing (V0 first-decl-wins) — outer-decl 보존.
+> V2.0 ✅ **line-range scope-aware localVar lookup** — V1.30 V0 의
+> trade-off (inner-block use site 가 outer 로 resolve) 해소.
+> localVarTypeMap 이 funcID→varName→[]localDecl{declLine, scopeEndLine,
+> typeName} 으로 확장, lookupReceiverType 에 useSiteLine 인자 추가,
+> selectLocalDecl 가 narrowest-scope-wins 로 선택. nearestEnclosing
+> BlockEndLine helper + emitLocalVarBinding / emitTryReturnsBinding 의
+> scopeEndLine 인코딩 (`varName|typeName|scopeEndLine`).
+> V2.0 carry-over (V2.1+): byte 정밀도 (line 보다 더 정확, >1 stmt
+> per line edge cases) / module-import 추가 패턴 / Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
