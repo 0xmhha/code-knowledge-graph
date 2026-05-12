@@ -260,6 +260,26 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// V1.6: deep cross-contract chained shape
+			// `<obj>.<innerFn1>().<innerFn2>().<method>(...)`. Combines
+			// V1.4 (receiver-typed inner method) with V1.5 (depth-2
+			// chain). Resolver walks: receiverObj → receiverType →
+			// innerFn1 in receiverType → returnType1 → innerFn2 in
+			// returnType1 → returnType2 → library binding.
+			if recvObj, innerFn1, innerFn2, methodName, ok := matchDeepCrossContractChain(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  recvObj + "|" + innerFn1 + "|" + innerFn2 + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForDeepCrossChainCall,
+				})
+				continue
+			}
 		}
 	}
 }
@@ -375,6 +395,98 @@ func matchDeepChainedMethodCall(member *sitter.Node, src []byte) (string, string
 		return "", "", "", false
 	}
 	return innerIdent.Utf8Text(src), middleProperty.Utf8Text(src), property.Utf8Text(src), true
+}
+
+// matchDeepCrossContractChain — W-C W6 V1.6 (2026-05-12). Tests
+// whether a member_expression fits the deep cross-contract chained
+// shape `<obj>.<innerFn1>().<innerFn2>().<method>(...)`. Two-link chain
+// originating from a state-var / parameter receiver.
+//
+// Returns (receiverObj, innerFn1, innerFn2, method, true) on match.
+//
+// AST shape:
+//
+//	call_expression                                  ← outer .method(...)
+//	  function: expression
+//	    member_expression                            ← outer
+//	      object: expression
+//	        call_expression                          ← middle .innerFn2(...)
+//	          function: expression
+//	            member_expression                    ← middle
+//	              object: expression
+//	                call_expression                  ← inner .innerFn1(...)
+//	                  function: expression
+//	                    member_expression            ← inner
+//	                      object: expression
+//	                        identifier (obj)         ← V1.6 captures
+//	                      property: identifier (innerFn1)
+//	              property: identifier (innerFn2)
+//	      property: identifier (method)
+//
+// Disambiguation:
+//   - V1.4 (`obj.foo().bar()`): outer's chain stops one link shorter —
+//     middle.object is identifier, not call_expression.
+//   - V1.5 (`foo().bar().baz()`): innermost function-position is
+//     identifier, not member_expression on an identifier.
+//   - V1.7+ (`obj.foo().bar().baz().qux()`): even one link deeper —
+//     outer's object is yet another call_expression wrapping the V1.6
+//     pattern.
+//
+// Caller dispatch order (state-var → V1.3 → V1.4 → V1.5 → V1.6) ensures
+// V1.6 only fires on shapes the simpler predicates rejected.
+func matchDeepCrossContractChain(member *sitter.Node, src []byte) (string, string, string, string, bool) {
+	if member == nil {
+		return "", "", "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	middleCall := unwrapExpression(object)
+	if middleCall == nil || middleCall.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	middleFn := middleCall.ChildByFieldName("function")
+	middleMember := unwrapExpression(middleFn)
+	if middleMember == nil || middleMember.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	middleProperty := middleMember.ChildByFieldName("property")
+	if middleProperty == nil || middleProperty.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	middleObject := middleMember.ChildByFieldName("object")
+	innerCall := unwrapExpression(middleObject)
+	if innerCall == nil || innerCall.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	innerFn := innerCall.ChildByFieldName("function")
+	innerMember := unwrapExpression(innerFn)
+	if innerMember == nil || innerMember.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	innerObj := innerMember.ChildByFieldName("object")
+	innerObjIdent := unwrapExpression(innerObj)
+	if innerObjIdent == nil || innerObjIdent.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	innerProperty := innerMember.ChildByFieldName("property")
+	if innerProperty == nil || innerProperty.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	return innerObjIdent.Utf8Text(src),
+		innerProperty.Utf8Text(src),
+		middleProperty.Utf8Text(src),
+		property.Utf8Text(src),
+		true
 }
 
 // matchCrossContractChain — W-C W6 V1.4 (2026-05-12). Tests whether a
@@ -552,3 +664,11 @@ const dispatchKindUsingForCrossChainCall = "using_for_cross_chain_call"
 // → resolve innerFn2 in returnType1's namespace → returnType2 → binding
 // lookup on returnType2) before reaching the library function.
 const dispatchKindUsingForDeepChainCall = "using_for_deep_chain_call"
+
+// dispatchKindUsingForDeepCrossChainCall (V1.6) tags PendingRefs for
+// the deep cross-contract chained dispatch
+// `<obj>.<innerFn1>().<innerFn2>().<method>(...)`. TargetQName encodes
+// `<obj>|<innerFn1>|<innerFn2>|<method>` (four parts). Resolver
+// combines V1.4 (receiver type lookup) with V1.5 (depth-2 return
+// chain) — 8-step total chain.
+const dispatchKindUsingForDeepCrossChainCall = "using_for_deep_cross_chain_call"
