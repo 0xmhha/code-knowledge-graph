@@ -203,6 +203,21 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 using-for branch — resolves `using LibName for ...` to
+			// EdgeUsesFor (Container → Library). Library is emitted by W4
+			// as NodeContract + SubKind="library", so we use the same
+			// byName[NodeContract] index as inheritance resolution but
+			// further filter to library-subkind nodes via the existing
+			// containerNameByID map. Same-file → ConfExtracted, cross-file
+			// → ConfInferred, unresolved → drop (V0 strict-purge).
+			if pr.DispatchKind == dispatchKindUsingFor {
+				if edge, ok := resolveUsingForRef(
+					pr, byName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -359,6 +374,46 @@ func resolveOverridesRef(
 		return out
 	}
 	return nil
+}
+
+// resolveUsingForRef resolves one W6 PendingRef (`using LibName for ...`)
+// to a single EdgeUsesFor edge. The library reference uses bare name
+// matching against the NodeContract index (libraries are emitted by W4 as
+// NodeContract + SubKind="library").
+//
+// Confidence policy mirrors W1 / W2: same-file → ConfExtracted, cross-file
+// → ConfInferred, unresolved → ok=false (caller drops the edge).
+//
+// We don't filter byName[NodeContract] hits to library-subkind only —
+// rationale: Sol's `using` is grammar-permissive (the compiler enforces
+// "for libraries only", but the AST has no such restriction). When a
+// fixture genuinely binds against a non-library contract, the resolved
+// EdgeUsesFor still lands; the graph consumer can filter by Library
+// subkind downstream. Strict pre-filter would introduce a silent drop
+// path that's hard to diagnose if the library declaration gets missed by
+// W4 (real bug surface).
+//
+// Multiple homonymous libraries across files: prefer same-file via
+// pickSameFileCandidate (same idiom as W1 / W2 explicit-override path).
+func resolveUsingForRef(
+	pr parse.PendingRef,
+	byName map[types.NodeType]map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	ids := byName[types.NodeContract][pr.TargetQName]
+	if len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeUsesFor,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
 }
 
 // pickSameFileCandidate returns the candidate ID whose file matches srcFile

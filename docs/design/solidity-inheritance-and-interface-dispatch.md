@@ -516,9 +516,11 @@ W4 가 이미 library 자체를 `NodeContract + SubKind="library"` 로 emit
 하므로 W6 는 *binding + dispatch* 만 추가하면 됨 (library declaration
 emit 은 재발명 안 함).
 
-#### 4.6.1 목표 동작
+#### 4.6.1 목표 동작 (V0 scope)
 
-세 가지 using directive 형태를 모두 처리:
+**V0 = binding declaration emit only**. Q9-1 (b) 채택의 핵심 가치인
+"이 contract 가 어떤 library 를 binding 했나" 를 first-class EdgeType 으로
+가시화. 세 가지 using directive 형태 인식:
 
 ```solidity
 using SafeMath for uint256;        // 특정 타입 binding (가장 흔함)
@@ -526,7 +528,7 @@ using SafeMath for *;              // 모든 타입 (전역 binding)
 using {SafeMath.add, SafeMath.sub} for uint256;  // Solidity 0.8.13+ free function form
 ```
 
-기대 동작:
+기대 동작 (V0):
 
 ```solidity
 library SafeMath {
@@ -535,44 +537,48 @@ library SafeMath {
 
 contract Vault {
   using SafeMath for uint256;
+  // graph: Vault  --using_for-->  SafeMath   (EXTRACTED 또는 INFERRED)
 
   function deposit(uint256 amount) external {
-    uint256 total = balance.add(amount);  // ← 본 spec W6 의 핵심 target
-    // graph: Vault.deposit  --calls-->  SafeMath.add  (EXTRACTED)
-    //        (receiver 'balance' 타입이 uint256 → SafeMath.add binding)
+    uint256 total = balance.add(amount);
+    // V0: NodeCallSite emit but no EdgeCalls to SafeMath.add (receiver type
+    //     추론 인프라 미구현). V1 에서 처리.
   }
 }
 ```
 
-비교 — 기존 (W6 land 전):
+**V0 scope 결정 (2026-05-12)**: method call resolution
+(`balance.add()` → SafeMath.add EdgeCalls) 는 V1 follow-up. 이유:
+- receiver type 추론을 위해 state variable / parameter declared type
+  인덱스가 parser-side 에 필요 (NodeField 의 Signature 필드 또는 별도
+  side-channel). 본 V0 에서 도입하지 않으면 false negative 다수 발생.
+- Q9-1 (b) 의 핵심 가치 (binding 가시화) 는 EdgeUsesFor emit 만으로
+  달성. dispatch resolution 은 직교 dimension.
+- W6 V0 land 후 사용자 실세계 데이터로 type 인덱스 우선순위 판단 가능.
 
-```
-Vault.deposit  --[no edge]-->  ???  (.add 미해결, drop)
-```
+#### 4.6.2 검출 알고리즘 (V0)
 
-#### 4.6.2 검출 알고리즘
-
-3-stage:
+2-stage:
 
 1. **Using directive parsing** — tree-sitter `using_directive` 노드를
-   queries.go 의 새 query 로 캡처. 세 변형 모두 `library_name` +
-   `type_name` (또는 `*`) 페어로 정규화.
+   queries.go 의 새 query 로 캡처. 세 변형 (specific / wildcard /
+   free-function) 모두 `library_name` + `type_name` (또는 `*`) 페어로
+   정규화 후 PendingRef emit (DispatchKind="using_for", SrcID=contractID,
+   TargetQName=libraryName).
 
-2. **Per-contract binding map** — Resolve 초기에 (contractID,
-   typeName) → libraryID 매핑 구축. `for *` 는 type 자리에 sentinel
-   `*` 토큰 저장 후 lookup 시 fallback.
+2. **Library resolution** — Resolve Pass 2 에서 PendingRef 의
+   TargetQName 을 byName[NodeContract] 인덱스로 lookup (library 는
+   W4 에서 NodeContract + SubKind="library" 로 emit 됨). 매칭 시
+   EdgeUsesFor (Contract → Library) emit:
+   - same-file → ConfExtracted
+   - cross-file → ConfInferred
+   - 미해결 → drop (다른 PendingRef 들과 동일 strict-purge 정책)
 
-3. **Method call resolution** — body walk 에서 method call
-   `<receiver>.<method>(...)` 발견 시:
-   - receiver 의 타입 추론 (V0 한계 §4.6.6 참조 — 단순 식별자만)
-   - (현재 contractID, receiverType) 으로 binding map lookup
-   - hit → `library.method` 가 funcByQName 에 있는지 확인 → EdgeCalls
-     emit (Src=enclosing function, Dst=library function, EXTRACTED)
-   - miss → 기존 V0 동작 그대로 (drop)
-
-알고리즘 의도: library extension binding 은 *contract-scoped*. 같은
-type 이 다른 contract 에서 다른 library 에 bind 될 수 있음. binding map
-은 contractID 별로 분리.
+알고리즘 의도: V0 에서는 contract-scoped binding 의 *존재* 만 가시화.
+typeName 정보는 PendingRef 의 `Line` 필드 + edge 자체의 src/dst 로
+충분 — 같은 contract 에서 여러 type binding 이면 같은 contract→library
+쌍에 대해 여러 EdgeUsesFor 가 emit (typeName 별로 dedup 안 함). V1 에서
+method call resolution 추가 시 typeName 인덱스가 의미를 가짐.
 
 #### 4.6.3 결정 결과 — Q9 후속 (2026-05-12)
 
@@ -604,24 +610,23 @@ type). Return value chaining (`foo().bar.add(1)`) 은 별도 spec 으로 분리.
 **Q9-3 = (a)** Wildcard binding fallback — specific-first (특정 타입
 binding 우선, 없으면 `*` fallback).
 
-#### 4.6.4 구현 sketch (권장안 (c) 가정)
+#### 4.6.4 구현 sketch (V0)
 
 ```
 internal/parse/solidity/
-  using_for.go         (신규 ~150 LOC)
+  using_for.go         (신규 ~100 LOC)
     - runUsingFor()                      ← visit() 에서 호출
     - parse using_directive subtree
-    - emit PendingRef (DispatchKind="using_for_bind", SrcID=contractID,
-      TargetQName="library|type")        ← Pass 2 가 binding map 구축
+      (세 형태: specific / wildcard / free-function)
+    - emit PendingRef (DispatchKind="using_for", SrcID=contractID,
+      TargetQName=libraryName)
   queries.go
     - queryUsingFor 추가
 
   resolve.go
-    - Pass 2 분기: dispatchKindUsingForBind → bindingMap 채움
-    - bindingMap: map[string]map[string]string  // contractID → type → libraryName
-    - statements.go 또는 body walk 에서 method call 처리 시 bindingMap
-      참조 → 기존 calls PendingRef 의 TargetQName 을 "Library.method"
-      로 재작성 후 resolve
+    - Pass 2 분기: dispatchKindUsingFor → byName[NodeContract] (Library
+      는 NodeContract + SubKind="library") lookup → EdgeUsesFor emit
+    - same-file ConfExtracted / cross-file ConfInferred / 미해결 drop
 
 internal/parse/solidity/testdata/using_for/
   specific_binding.sol      (1 type binding)
@@ -632,34 +637,40 @@ internal/parse/solidity/testdata/using_for/
 
 internal/parse/solidity/using_for_test.go
   - TestUsingFor_SpecificBinding
-  - TestUsingFor_WildcardFallback
+  - TestUsingFor_WildcardForm
   - TestUsingFor_MultiLibrary
-  - TestUsingFor_ContractScoped       ← 같은 type 이 다른 contract 에서
-                                        다른 library binding 임을 검증
+  - TestUsingFor_ContractScoped       ← 같은 library 가 두 contract 에
+                                        binding → 두 개의 EdgeUsesFor
   - TestUsingFor_NegativeNoBinding    ← drop 검증 (false positive 가드)
 ```
 
-추정 사이즈: 200~250 LOC + 5 fixture + 5 test. resolve.go Pass 2 에
-한 분기 추가 + body walk receiver-type 추론 헬퍼.
+추정 사이즈: 100~150 LOC + 5 fixture + 5 test. resolve.go Pass 2 에
+한 분기 추가 (~30 LOC). receiver-type 추론 헬퍼는 V1 에서 추가.
 
 #### 4.6.5 §3.5 갱신 예정
 
 본 W6 land 시 §3.5 noise control 의 "Library call ... V0 에서는 단순
-calls (resolve 실패 → drop) ... 별도 spec" 항목 → "W6 로 처리됨" 으로
-갱신.
+calls (resolve 실패 → drop) ... 별도 spec" 항목 → "W6 로 binding 자체는
+가시화 (EdgeUsesFor). method call dispatch resolution 은 V1 follow-up"
+으로 갱신.
 
 #### 4.6.6 V0 한계
 
-- **Receiver type 추론**: state variable 의 declared type, function
-  parameter type 만 V0 지원. return value chaining (`a.b().c.add(1)`)
-  은 type info 없이 정적 추론 불가 → drop. solc 가 type 검사하므로
-  실제 빌드 시 명확하지만 tree-sitter 만으로는 어려움.
+- **Method call dispatch resolution 미구현**: V0 에서는 binding
+  declaration 만 emit. `balance.add(...)` 같은 호출은 NodeCallSite 는
+  emit 되지만 EdgeCalls 는 SafeMath.add 로 연결 안 됨. V1 에서 추가
+  예정. 우회: 사용자가 contract 의 EdgeUsesFor 들을 본 뒤 해당 library
+  의 함수를 직접 확인 (graphify-style multi-hop query).
+- **Receiver type 추론 인프라 (V1)**: state variable 의 declared type +
+  function parameter type 인덱스. NodeField 의 Signature 필드 또는
+  parser-side side-channel (W-A 의 FuncFieldTouches 패턴) 도입 필요.
 - **Free function using (`using {f1, f2} for T`)**: Solidity 0.8.13+
-  문법. V0 에서는 단순 `using Lib for T` 만 처리, free function 형식은
-  drop 또는 follow-up.
-- **`using for *` 와 stdlib types (uint, address)**: 매우 광범위
-  binding. 같은 method name 이 여러 library 에 있으면 ambiguous → drop
-  (V0 strict, AMBIGUOUS 도입 안 함).
+  문법. V0 에서는 library name 단위로 binding emit — 개별 함수 list
+  까지 분해 안 함 (한 EdgeUsesFor per library / per directive).
+- **`using for *` 와 stdlib types (uint, address)**: V0 에서는 `*`
+  자체를 type 정보로 graph 표기 안 함. 같은 (contract, library) 쌍에
+  대해 specific binding 과 wildcard binding 이 모두 있으면 두 개의
+  EdgeUsesFor 가 emit (dedup 안 함).
 - **Inherited using directive**: Solidity 0.8.13+ `internal using` 은
   base contract 에서 child 로 상속됨. V0 에서는 contract 자체의
   binding 만 집계, 상속 binding 무시 → drop. follow-up.

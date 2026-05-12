@@ -74,6 +74,11 @@ func (v *declVisitor) visit() {
 	// resolved in Pass 2 (resolveInterfaceDispatch). Confidence is always
 	// ConfAmbiguous per §5.0 Q5 — see dispatch.go preamble.
 	v.runDispatch()
+	// W6 (using For): emits EdgeUsesFor PendingRefs from `using LibName for
+	// TypeName;` directives nested inside a contract / library / interface
+	// body. Q9-1 (b) decision (2026-05-12). V0 scope: binding declaration
+	// only; method-call dispatch resolution is V1 follow-up (§4.6 spec).
+	v.runUsingFor()
 	v.collectABI()
 }
 
