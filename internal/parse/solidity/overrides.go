@@ -279,19 +279,22 @@ func emitFunctionReturnMetaPending(v *declVisitor, funcID string, declNode *sitt
 // Resolver sweeps these into the funcReturnTypes index — no graph edge.
 const dispatchKindUsingForFnReturn = "using_for_fn_return"
 
-// emitLocalVarMetaPending — W-C W6 V1.15 (2026-05-12). Walks every
+// emitLocalVarMetaPending — W-C W6 V1.15/V1.16 (2026-05-12). Walks every
 // `variable_declaration_statement` reachable from a function's body and
-// queues one PendingRef per single-var declaration carrying
+// queues one PendingRef per LHS-typed declaration carrying
 // (varName, typeName). Pass 2 indexes these into (funcID, varName) →
 // typeName for local-var receiver dispatch resolution.
 //
-// Scope (V1.15 V0):
-//   - Single-var form only: `Type x = expr;`. The variable_declaration
-//     child of variable_declaration_statement must be of kind
-//     `variable_declaration` (not `variable_declaration_tuple`). Tuple
-//     destructuring (`(Ta a, Tb b) = foo();`) is V1.16+.
+// Scope:
+//   - V1.15: Single-var form `Type x = expr;`. variable_declaration_statement
+//     wraps one `variable_declaration` child.
+//   - V1.16: Tuple-destructuring form `(Ta a, Tb b) = foo();`.
+//     variable_declaration_statement wraps one `variable_declaration_tuple`
+//     child whose own children are mixed `variable_declaration` (typed
+//     slot) and `identifier` (pre-declared slot — V1.17+ scope, dropped
+//     here since the type isn't on the LHS).
 //   - All blocks descended: variable_declaration_statement inside
-//     if / for / while bodies are captured too. V1.15 V0 treats locals
+//     if / for / while bodies are captured too. V0 scope treats locals
 //     as function-scoped (no block-scope shadowing — first-declaration
 //     wins by map-overwrite order, which matches typical Solidity style
 //     where shadowing in nested blocks is rare).
@@ -305,11 +308,14 @@ const dispatchKindUsingForFnReturn = "using_for_fn_return"
 //	variable_declaration_statement
 //	  value: expression (optional, RHS)
 //	  children:
-//	    variable_declaration                ← single-var (V1.15 scope)
+//	    variable_declaration                ← single-var (V1.15)
 //	      location: 'calldata' | 'memory' | 'storage' (optional)
 //	      name: identifier
 //	      type: type_name
-//	    | variable_declaration_tuple        ← V1.16+ (drop here)
+//	    | variable_declaration_tuple        ← tuple form (V1.16)
+//	        children:
+//	          identifier                    ← pre-declared slot (V1.17+, drop)
+//	          | variable_declaration        ← typed slot (V1.16 scope)
 func emitLocalVarMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
 	if declNode == nil {
 		return
@@ -321,10 +327,11 @@ func emitLocalVarMetaPending(v *declVisitor, funcID string, declNode *sitter.Nod
 	collectLocalVarMetaPending(v, funcID, body)
 }
 
-// collectLocalVarMetaPending recursively descends every named child of n,
-// emitting a meta PendingRef for each `variable_declaration_statement`
-// containing a single-var `variable_declaration` child. Tuple-form
-// statements are skipped (V1.16+).
+// collectLocalVarMetaPending recursively descends every named child of n.
+// On `variable_declaration_statement`: handles both single-var (V1.15)
+// and tuple-destructuring (V1.16) forms by routing each typed slot
+// through emitLocalVarBinding. Other nodes recurse normally so nested
+// blocks (if / for / while bodies) reach their statements.
 func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 	if n == nil {
 		return
@@ -332,38 +339,61 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 	if n.Kind() == "variable_declaration_statement" {
 		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 			child := n.NamedChild(i)
-			if child == nil || child.Kind() != "variable_declaration" {
+			if child == nil {
 				continue
 			}
-			nameNode := child.ChildByFieldName("name")
-			typeNode := child.ChildByFieldName("type")
-			if nameNode == nil || typeNode == nil {
-				continue
+			switch child.Kind() {
+			case "variable_declaration":
+				// V1.15 single-var form: `Type x = expr;`.
+				emitLocalVarBinding(v, funcID, child)
+			case "variable_declaration_tuple":
+				// V1.16 tuple form: `(Ta a, Tb b) = foo();`. Iterate the
+				// tuple's children — typed slots emit, pre-declared
+				// identifier slots drop (no LHS type info — V1.17+ would
+				// need funcReturnTypes multi-slot inference).
+				for j := uint(0); j < uint(child.NamedChildCount()); j++ {
+					slot := child.NamedChild(j)
+					if slot == nil || slot.Kind() != "variable_declaration" {
+						continue
+					}
+					emitLocalVarBinding(v, funcID, slot)
+				}
 			}
-			varName := nameNode.Utf8Text(v.src)
-			typeName := extractTypeNameText(typeNode, v.src)
-			if varName == "" || typeName == "" {
-				continue
-			}
-			v.pending = append(v.pending, parse.PendingRef{
-				SrcID:        funcID,
-				EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
-				TargetQName:  varName + "|" + typeName,
-				Line:         int(nameNode.StartPosition().Row) + 1,
-				DispatchKind: dispatchKindUsingForLocalVar,
-			})
-			// Only one variable_declaration per statement in single-var form;
-			// further named children are the `value` expression which we
-			// don't care about here.
-			break
 		}
-		// Don't recurse into the variable_declaration_statement — no nested
-		// declaration statements inside it.
+		// Don't recurse — no nested declaration statements inside the
+		// statement node itself.
 		return
 	}
 	for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 		collectLocalVarMetaPending(v, funcID, n.NamedChild(i))
 	}
+}
+
+// emitLocalVarBinding emits one localVar PendingRef for a single
+// `variable_declaration` node (used by both V1.15 single-var and V1.16
+// tuple-slot paths). Drops silently when name / type fields are missing
+// or extraction returns empty — Pass 2 won't see the slot.
+func emitLocalVarBinding(v *declVisitor, funcID string, decl *sitter.Node) {
+	if decl == nil {
+		return
+	}
+	nameNode := decl.ChildByFieldName("name")
+	typeNode := decl.ChildByFieldName("type")
+	if nameNode == nil || typeNode == nil {
+		return
+	}
+	varName := nameNode.Utf8Text(v.src)
+	typeName := extractTypeNameText(typeNode, v.src)
+	if varName == "" || typeName == "" {
+		return
+	}
+	v.pending = append(v.pending, parse.PendingRef{
+		SrcID:        funcID,
+		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+		TargetQName:  varName + "|" + typeName,
+		Line:         int(nameNode.StartPosition().Row) + 1,
+		DispatchKind: dispatchKindUsingForLocalVar,
+	})
 }
 
 // dispatchKindUsingForLocalVar (W-C W6 V1.15) tags PendingRefs carrying

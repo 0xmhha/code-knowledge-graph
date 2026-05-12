@@ -21,14 +21,18 @@
 > (V1.11) / generic member-chain walker arbitrary depth (V1.12) /
 > this-prefixed nested member chain (V1.13). V1.14 ✅ cross-file
 > struct validation — V1.10/V1.13 fixtures across file boundary,
-> ConfInferred 검증. V1.15 ✅ **single-return local-var receiver** —
+> ConfInferred 검증. V1.15 single-return local-var receiver —
 > `Type x = expr; x.method(...)` 패턴, localVarTypes 인덱스 신규,
 > V1.0/V1.10/V1.11/V1.12 receiver lookup 에 state-var → param →
-> local-var 3-tier fallback (lookupReceiverType helper).
+> local-var 3-tier fallback (lookupReceiverType helper). V1.16 ✅
+> **multi-return tuple destructuring (LHS explicit types)** —
+> `(Ta a, Tb b) = foo(); a.method(...)` 패턴, variable_declaration_tuple
+> 의 typed slot 각각이 V1.15 localVarTypes 에 emit (V1.15 인프라 재사용).
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> Multi-return tuple destructuring 만 V1.16+ follow-up.
+> Pre-declared identifier-slot 형식 (`(a, b) = foo()` with pre-declared
+> a, b) 만 V1.17+ follow-up (multi-slot funcReturnTypes 필요).
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
