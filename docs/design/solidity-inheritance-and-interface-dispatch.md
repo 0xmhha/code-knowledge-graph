@@ -19,11 +19,13 @@
 > deep cross-contract (V1.6) / depth-3 (V1.7) / generic walker (V1.8)
 > / this-receiver (V1.9) / struct-field (V1.10) / nested struct field
 > (V1.11) / generic member-chain walker arbitrary depth (V1.12) /
-> **this-prefixed nested member chain (V1.13)**.
+> this-prefixed nested member chain (V1.13). V1.14 ✅ **cross-file
+> struct validation** — V1.10/V1.13 fixtures across file boundary,
+> ConfInferred 검증.
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> Multi-return tuple destructuring 만 V1.14+ follow-up.
+> Multi-return tuple destructuring 만 V1.15+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
