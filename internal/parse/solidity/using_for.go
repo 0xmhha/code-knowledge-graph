@@ -280,6 +280,24 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// V1.7: depth-3 same-contract chained shape
+			// `<innerFn1>().<innerFn2>().<innerFn3>().<method>(...)`.
+			// Three levels of funcReturnTypes walks. V1.8+ promotes this
+			// to a generic depth-N walker.
+			if innerFn1, innerFn2, innerFn3, methodName, ok := matchTripleChainedMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  innerFn1 + "|" + innerFn2 + "|" + innerFn3 + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForTripleChainCall,
+				})
+				continue
+			}
 		}
 	}
 }
@@ -395,6 +413,104 @@ func matchDeepChainedMethodCall(member *sitter.Node, src []byte) (string, string
 		return "", "", "", false
 	}
 	return innerIdent.Utf8Text(src), middleProperty.Utf8Text(src), property.Utf8Text(src), true
+}
+
+// matchTripleChainedMethodCall — W-C W6 V1.7 (2026-05-12). Tests
+// whether a member_expression fits the depth-3 chained shape
+// `<innerFn1>().<innerFn2>().<innerFn3>().<method>(...)`. Same-contract
+// chain only (cross-contract variant + generic depth-N walker are
+// V1.8+).
+//
+// Returns (innerFn1, innerFn2, innerFn3, method, true) on match.
+//
+// AST shape (4 levels of call_expression / member_expression nesting):
+//
+//	call_expression                           ← outer .method(...)
+//	  function: expression
+//	    member_expression                     ← outer
+//	      object: expression
+//	        call_expression                   ← L3 .innerFn3(...)
+//	          function: expression
+//	            member_expression             ← L3
+//	              object: expression
+//	                call_expression           ← L2 .innerFn2(...)
+//	                  function: expression
+//	                    member_expression     ← L2
+//	                      object: expression
+//	                        call_expression   ← L1 .innerFn1(...)
+//	                          function: expression
+//	                            identifier (innerFn1)
+//	                      property: identifier (innerFn2)
+//	              property: identifier (innerFn3)
+//	      property: identifier (method)
+//
+// Disambiguation:
+//   - V1.5 (`a().b().c()`): one less call_expression nesting layer.
+//   - V1.6 (`obj.a().b().c()`): same nesting depth but innermost
+//     function-position is member_expression with identifier receiver,
+//     not bare identifier.
+//   - V1.8+: even deeper chains, generic walker.
+//
+// Caller dispatch order (state-var → V1.3 → V1.4 → V1.5 → V1.6 → V1.7)
+// ensures simpler predicates reject before V1.7 fires.
+func matchTripleChainedMethodCall(member *sitter.Node, src []byte) (string, string, string, string, bool) {
+	if member == nil {
+		return "", "", "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	l3Call := unwrapExpression(object)
+	if l3Call == nil || l3Call.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	l3Fn := l3Call.ChildByFieldName("function")
+	l3Member := unwrapExpression(l3Fn)
+	if l3Member == nil || l3Member.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	l3Property := l3Member.ChildByFieldName("property")
+	if l3Property == nil || l3Property.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	l3Object := l3Member.ChildByFieldName("object")
+	l2Call := unwrapExpression(l3Object)
+	if l2Call == nil || l2Call.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	l2Fn := l2Call.ChildByFieldName("function")
+	l2Member := unwrapExpression(l2Fn)
+	if l2Member == nil || l2Member.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	l2Property := l2Member.ChildByFieldName("property")
+	if l2Property == nil || l2Property.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	l2Object := l2Member.ChildByFieldName("object")
+	l1Call := unwrapExpression(l2Object)
+	if l1Call == nil || l1Call.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	l1Fn := l1Call.ChildByFieldName("function")
+	l1Ident := unwrapExpression(l1Fn)
+	if l1Ident == nil || l1Ident.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	return l1Ident.Utf8Text(src),
+		l2Property.Utf8Text(src),
+		l3Property.Utf8Text(src),
+		property.Utf8Text(src),
+		true
 }
 
 // matchDeepCrossContractChain — W-C W6 V1.6 (2026-05-12). Tests
@@ -672,3 +788,11 @@ const dispatchKindUsingForDeepChainCall = "using_for_deep_chain_call"
 // combines V1.4 (receiver type lookup) with V1.5 (depth-2 return
 // chain) — 8-step total chain.
 const dispatchKindUsingForDeepCrossChainCall = "using_for_deep_cross_chain_call"
+
+// dispatchKindUsingForTripleChainCall (V1.7) tags PendingRefs for
+// depth-3 same-contract chained dispatch:
+// `<innerFn1>().<innerFn2>().<innerFn3>().<method>(...)`. TargetQName
+// encodes `<innerFn1>|<innerFn2>|<innerFn3>|<method>` (four parts).
+// Resolver walks three levels of funcReturnTypes — V1.5's pattern
+// with one more link.
+const dispatchKindUsingForTripleChainCall = "using_for_triple_chain_call"

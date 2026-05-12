@@ -438,6 +438,18 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.7 depth-3 same-contract chained branch — resolves
+			// `<fn1>().<fn2>().<fn3>().<method>(...)`. Walks three
+			// levels of funcReturnTypes.
+			if pr.DispatchKind == dispatchKindUsingForTripleChainCall {
+				if edge, ok := resolveUsingForTripleChainCallRef(
+					pr, bindings, funcReturnTypes,
+					containerIDByFuncID, funcByQName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -1125,6 +1137,128 @@ func resolveUsingForDeepCrossChainCallRef(
 		}
 	}
 	// Step 8: library function.
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForTripleChainCallRef — W6 V1.7 (2026-05-12). Resolves a
+// depth-3 same-contract chained PendingRef
+// (`<fn1>().<fn2>().<fn3>().<method>(...)`) to a single EdgeCalls edge.
+// 9-step chain — any failure drops:
+//
+//  1. funcID (caller) → callerContainerID
+//  2. fn1 → fn1FuncID (`<callerContainer>.<fn1>` via funcByQName)
+//  3. fn1FuncID → returnType1 (funcReturnTypes)
+//  4. `<returnType1>.<fn2>` → fn2FuncID
+//  5. fn2FuncID → returnType2
+//  6. `<returnType2>.<fn3>` → fn3FuncID
+//  7. fn3FuncID → returnType3
+//  8. (callerContainerID, returnType3) → libraryName (bindings + `*`)
+//  9. `<libraryName>.<methodName>` → libraryFunctionID
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file). Intermediate functions' files don't
+// downgrade.
+//
+// V1.8+ note: this hardcoded depth-3 resolver should be subsumed by a
+// generic iterative walker once V1.8 lands. Until then it's a
+// straightforward extension of resolveUsingForDeepChainCallRef (V1.5)
+// with one more return-type hop.
+func resolveUsingForTripleChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	funcReturnTypes funcReturnTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from runUsingForCalls triple-chain branch:
+	// `fn1|fn2|fn3|method`.
+	parts := strings.SplitN(pr.TargetQName, "|", 4)
+	if len(parts) != 4 {
+		return types.Edge{}, false
+	}
+	fn1, fn2, fn3, methodName := parts[0], parts[1], parts[2], parts[3]
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	// Step 2: locate fn1 in the caller's contract namespace.
+	callerContainerName := ""
+	for qname, ids := range funcByQName {
+		for _, fid := range ids {
+			if fid == pr.SrcID {
+				if dot := strings.IndexByte(qname, '.'); dot >= 0 {
+					callerContainerName = qname[:dot]
+				}
+				break
+			}
+		}
+		if callerContainerName != "" {
+			break
+		}
+	}
+	if callerContainerName == "" {
+		return types.Edge{}, false
+	}
+	fn1IDs := funcByQName[callerContainerName+"."+fn1]
+	if len(fn1IDs) == 0 {
+		return types.Edge{}, false
+	}
+	fn1FuncID := pickSameFileCandidate(fn1IDs, srcFile, nodeFile)
+	// Step 3: returnType1.
+	returnType1, ok := funcReturnTypes[fn1FuncID]
+	if !ok || returnType1 == "" {
+		return types.Edge{}, false
+	}
+	// Step 4: fn2 in returnType1's namespace.
+	fn2IDs := funcByQName[returnType1+"."+fn2]
+	if len(fn2IDs) == 0 {
+		return types.Edge{}, false
+	}
+	fn2FuncID := pickSameFileCandidate(fn2IDs, srcFile, nodeFile)
+	// Step 5: returnType2.
+	returnType2, ok := funcReturnTypes[fn2FuncID]
+	if !ok || returnType2 == "" {
+		return types.Edge{}, false
+	}
+	// Step 6: fn3 in returnType2's namespace.
+	fn3IDs := funcByQName[returnType2+"."+fn3]
+	if len(fn3IDs) == 0 {
+		return types.Edge{}, false
+	}
+	fn3FuncID := pickSameFileCandidate(fn3IDs, srcFile, nodeFile)
+	// Step 7: returnType3.
+	returnType3, ok := funcReturnTypes[fn3FuncID]
+	if !ok || returnType3 == "" {
+		return types.Edge{}, false
+	}
+	// Step 8: binding lookup on returnType3.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[returnType3]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	// Step 9: library function.
 	libIDs := funcByQName[libName+"."+methodName]
 	if len(libIDs) == 0 {
 		return types.Edge{}, false

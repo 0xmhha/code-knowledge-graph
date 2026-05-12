@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.6 7-tier dispatch — state-var / parameter / inherited / return chain / cross-contract chain / deep chain depth-2 / deep cross-contract; depth ≥ 3 / multi-return tuple V1.7+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.7 8-tier dispatch — state-var / parameter / inherited / return chain / cross-contract chain / depth-2 / deep cross-contract / depth-3 same-contract; depth ≥ 4 + cross-contract depth-3 + generic walker + multi-return tuple V1.8+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,21 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.7 (Sol `using For` depth-3 same-contract chained dispatch
+`<fn>().<fn>().<fn>().<method>`) ✅ landed 2026-05-12. V1.5 (depth-2)
+의 한 링크 더. `matchTripleChainedMethodCall` predicate (4-level
+nested AST recurse) + 신규 `dispatchKindUsingForTripleChainCall` +
+`resolveUsingForTripleChainCallRef` 9-step chain (funcID →
+containerID → fn1FuncID → returnType1 → fn2FuncID in returnType1 →
+returnType2 → fn3FuncID in returnType2 → returnType3 → libraryName →
+libraryFunctionID). V1.5 와 disambiguate: V1.5 의 innerCall 위치가
+V1.7 의 L2, V1.7 의 innerCall 은 L1. caller dispatch state-var →
+V1.3 → V1.4 → V1.5 → V1.6 → V1.7. 3 fixture + 3 test (basic,
+middle_unknown drop, no_binding drop). 25/25 PASS, vet clean.
+V1.8+ carry-over: cross-contract depth-3, depth ≥ 4, generic walker
+refactor 가능 (V1.3/V1.5/V1.7 의 hardcoded pattern 통합), multi-return
+tuple slot.
 
 W-C W6 V1.6 (Sol `using For` deep cross-contract chained dispatch
 `<obj>.<fn>().<fn>().<method>`) ✅ landed 2026-05-12. V1.4 (cross-
