@@ -259,6 +259,28 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// W6 V1.12: generic member-chain walker — fallback for
+			// arbitrary-depth (≥ 3) pure member access chains.
+			// V1.10/V1.11 catch depth 1/2 hardcoded.
+			if objName, fields, methodName, ok := matchGenericMemberChain(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				encoded := objName
+				for _, f := range fields {
+					encoded += "|" + f
+				}
+				encoded += "|" + methodName
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  encoded,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForGenericMemberChainCall,
+				})
+				continue
+			}
 			// V1.3: chained call shape `<fn>().<method>(...)`. Inner
 			// expression is a plain function call (function-position
 			// identifier); resolver looks up the inner function's
@@ -383,6 +405,67 @@ func (v *declVisitor) runUsingForCalls() {
 			}
 		}
 	}
+}
+
+// matchGenericMemberChain — W-C W6 V1.12 (2026-05-12). Generic
+// iterative walker for arbitrary-depth pure member access chain
+// `<obj>.<field1>.<field2>....<fieldN>.<method>(...)`. No call
+// expressions in between — pure struct field traversal.
+//
+// Used as fallback after V1.10/V1.11 hardcoded predicates have
+// rejected (depth ≥ 3 member chain).
+//
+// Returns (objName, fields, methodName, true) on match. fields[0] is
+// the innermost field (closest to obj), fields[N-1] is the outermost.
+//
+// Disambiguation: V1.10 catches depth-1, V1.11 catches depth-2.
+// V1.12 only fires when depth ≥ 3. this-prefixed nested chain drops
+// (consistent with V1.10/V1.11 — "this" handled by V1.9 cousin).
+func matchGenericMemberChain(member *sitter.Node, src []byte) (string, []string, string, bool) {
+	if member == nil {
+		return "", nil, "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", nil, "", false
+	}
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", nil, "", false
+	}
+	methodName := property.Utf8Text(src)
+	var revFields []string
+	cur := unwrapExpression(member.ChildByFieldName("object"))
+	for cur != nil && cur.Kind() == "member_expression" {
+		curProp := cur.ChildByFieldName("property")
+		if curProp == nil || curProp.Kind() != "identifier" {
+			return "", nil, "", false
+		}
+		revFields = append(revFields, curProp.Utf8Text(src))
+		innerObj := unwrapExpression(cur.ChildByFieldName("object"))
+		if innerObj == nil {
+			return "", nil, "", false
+		}
+		if innerObj.Kind() == "identifier" {
+			objText := innerObj.Utf8Text(src)
+			if objText == "this" {
+				return "", nil, "", false
+			}
+			if len(revFields) < 3 {
+				return "", nil, "", false
+			}
+			return objText, reverseStrSlice(revFields), methodName, true
+		}
+		if innerObj.Kind() == "member_expression" {
+			cur = innerObj
+			continue
+		}
+		return "", nil, "", false
+	}
+	return "", nil, "", false
 }
 
 // matchNestedStructFieldReceiverMethodCall — W-C W6 V1.11 (2026-05-12).
@@ -1213,6 +1296,12 @@ const dispatchKindUsingForStructFieldCall = "using_for_struct_field_call"
 // structFieldTypes twice — obj's struct field1 → its struct's field2 →
 // binding lookup on field2's type.
 const dispatchKindUsingForNestedStructFieldCall = "using_for_nested_struct_field_call"
+
+// dispatchKindUsingForGenericMemberChainCall (V1.12) — generic
+// iterative member-chain dispatch (depth ≥ 3). TargetQName encodes
+// `<obj>|<f1>|<f2>|...|<fN>|<method>` (variable parts). Resolver walks
+// structFieldTypes N times.
+const dispatchKindUsingForGenericMemberChainCall = "using_for_generic_member_chain_call"
 
 // dispatchKindUsingForGenericChainCall (V1.8) tags PendingRefs from
 // the generic iterative chain walker. Covers arbitrary-depth chains

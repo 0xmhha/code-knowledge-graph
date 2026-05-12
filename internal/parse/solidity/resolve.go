@@ -513,6 +513,19 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.12 generic member-chain walker — arbitrary-depth
+			// (≥ 3) pure member access chains. Iterative walker
+			// through structFieldTypes.
+			if pr.DispatchKind == dispatchKindUsingForGenericMemberChainCall {
+				if edge, ok := resolveUsingForGenericMemberChainCallRef(
+					pr, bindings, stateVarTypes, paramTypes,
+					structFieldTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -1653,6 +1666,112 @@ func resolveUsingForNestedStructFieldCallRef(
 		}
 	}
 	// Step 6: library function.
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForGenericMemberChainCallRef — W6 V1.12 (2026-05-12).
+// Generic iterative resolver for arbitrary-depth pure member access
+// chains. Subsumes V1.10/V1.11 hardcoded depth-1/2 patterns for chains
+// the earlier predicates didn't already claim (depth ≥ 3).
+//
+// TargetQName encoding (split by `|`):
+//
+//	"<obj>|<f1>|<f2>|...|<fN>|<method>"  (N ≥ 3)
+//
+// Resolution algorithm:
+//
+//  1. funcID → callerContainerID.
+//  2. obj → objType (stateVarTypes → paramTypes fallback).
+//  3. Starting namespace = objType.
+//  4. For each f_i in fields (left to right):
+//     - structFieldTypes[currentNamespace][f_i] → fieldType.
+//     - currentNamespace = fieldType for next iteration.
+//  5. After consuming all fields: currentNamespace = final field type.
+//     (callerContainerID, currentNamespace) → libraryName (bindings +
+//     `*` fallback).
+//  6. `<libraryName>.<methodName>` → libraryFunctionID.
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file).
+func resolveUsingForGenericMemberChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	structFieldTypes structFieldTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from matchGenericMemberChain:
+	// `obj|f1|f2|...|fN|method`. Need at least obj + 3 fields + method
+	// = 5 parts (depth-3 floor).
+	parts := strings.Split(pr.TargetQName, "|")
+	if len(parts) < 5 {
+		return types.Edge{}, false
+	}
+	objName := parts[0]
+	fields := parts[1 : len(parts)-1]
+	methodName := parts[len(parts)-1]
+	if objName == "" || len(fields) == 0 || methodName == "" {
+		return types.Edge{}, false
+	}
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// Resolve obj's declared type.
+	var objType string
+	if varMap := stateVarTypes[callerContractID]; varMap != nil {
+		objType = varMap[objName]
+	}
+	if objType == "" {
+		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+			objType = paramMap[objName]
+		}
+	}
+	if objType == "" {
+		return types.Edge{}, false
+	}
+	// Walk each field, threading structFieldTypes.
+	currentNamespace := objType
+	for _, f := range fields {
+		fieldMap := structFieldTypes[currentNamespace]
+		if fieldMap == nil {
+			return types.Edge{}, false
+		}
+		fieldType, ok := fieldMap[f]
+		if !ok || fieldType == "" {
+			return types.Edge{}, false
+		}
+		currentNamespace = fieldType
+	}
+	// Binding lookup on the final field type.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[currentNamespace]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
 	libIDs := funcByQName[libName+"."+methodName]
 	if len(libIDs) == 0 {
 		return types.Edge{}, false
