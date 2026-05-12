@@ -444,6 +444,22 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// (block_statement) and catch_clause bodies still contain
 		// statements that must be visited.
 	}
+	if n.Kind() == "catch_clause" {
+		// W6 V1.21: `catch Type(Ta a, Tb b) { ... }` — the catch's
+		// named parameter slots are exposed as direct `parameter`
+		// children of catch_clause (alongside an optional identifier
+		// for the catch type name like "Error" / "Panic"). Same
+		// emit idiom as V1.20 try-returns — function-scope approx.
+		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
+			child := n.NamedChild(i)
+			if child == nil || child.Kind() != "parameter" {
+				continue
+			}
+			emitTryReturnsBinding(v, funcID, child)
+		}
+		// Fall through to recurse — catch_clause body still contains
+		// statements that need visiting.
+	}
 	for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 		collectLocalVarMetaPending(v, funcID, n.NamedChild(i))
 	}

@@ -42,15 +42,16 @@
 > `function f() returns (uint256 result)` 같은 패턴의 named return
 > slot 이 미캡처되어 receiver `result.method()` dispatch drop 됐던
 > false-negative 수정.
-> V1.20 ✅ **additional scope captures** — (a) for-loop init variable
-> (`for (uint256 i = 0; ...) { i.method() }`) 가 V1.15 recursive descent
-> 로 정상 동작함을 회귀 가드로 잠금. (b) try/catch returns clause
-> (`try foo() returns (uint256 r) { r.method() }`) 가 V1.19 의
-> function_definition.return_type walker 밖이라 미캡처 → false-negative
-> 수정. collectLocalVarMetaPending 에 try_statement 분기 추가 +
-> emitTryReturnsBinding helper 신규 (dispatchKindUsingForLocalVar 채널).
-> Block-scoped shadowing 정확화 / module-import 처리 / catch_clause
-> parameter 만 V1.21+ follow-up.
+> V1.20 additional scope captures — (a) for-loop init variable
+> regression guard. (b) try/catch returns clause named-param false-
+> negative 수정 (collectLocalVarMetaPending 에 try_statement 분기 추가
+> + emitTryReturnsBinding helper).
+> V1.21 ✅ **catch_clause named parameter** — `catch Type(Ta a) { ... }`
+> 의 catch parameter 가 V1.20 try_statement 분기 밖이라 미캡처 →
+> false-negative 수정. collectLocalVarMetaPending 에 catch_clause
+> 분기 추가, V1.20 의 emitTryReturnsBinding helper 재사용.
+> Block-scoped shadowing 정확화 / module-import 처리 만 V1.22+
+> follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
