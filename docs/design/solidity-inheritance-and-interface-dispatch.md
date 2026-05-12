@@ -31,8 +31,14 @@
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> Pre-declared identifier-slot 형식 (`(a, b) = foo()` with pre-declared
-> a, b) 만 V1.17+ follow-up (multi-slot funcReturnTypes 필요).
+> V1.17 ✅ **Solidity shadowing precedence fix** — `lookupReceiverType`
+> 순서가 state-var → param → local-var 였으나 Solidity 의미상 inner
+> scope 가 outer 를 shadow 함 → local-var → param → state-var 로
+> 수정. local 이 state-var 를 shadow 하는 false-negative 사례 제거.
+> Cross-file tuple validation (V1.14 idiom for V1.16) / block-scoped
+> shadowing 정확화 만 V1.18+ follow-up. Pre-declared identifier-slot
+> tuple 은 modern Sol 에서 `var` keyword deprecated (0.5.0+) 로 실용
+> 사례 거의 없음 — V1.17 reassessment 결과 scope 에서 제외.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).

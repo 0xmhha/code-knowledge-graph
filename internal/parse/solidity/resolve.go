@@ -764,26 +764,34 @@ func resolveUsingForRef(
 	}, true
 }
 
-// lookupReceiverType resolves a receiver identifier to its declared type
-// using the V1.0 / V1.1 / V1.15 three-tier fallback: stateVarTypes
-// (V1.0 state-variable) → paramTypes (V1.1 function parameter) →
-// localVarTypes (V1.15 function-local declaration). Returns "" when no
-// tier has a binding.
+// lookupReceiverType resolves a receiver identifier to its declared type.
+// Per Solidity scoping rules (W-C W6 V1.17 fix, 2026-05-12),
+// function-scope shadows contract-scope on identifier conflict — so the
+// lookup order is:
+//
+//  1. localVarTypes  (V1.15 function-local declaration — innermost)
+//  2. paramTypes     (V1.1 function parameter)
+//  3. stateVarTypes  (V1.0 state variable — outermost)
+//
+// Pre-V1.17 walked state-var → param → local-var (reverse of Solidity
+// semantics). The bug manifested as a false negative when a local
+// shadowed a state-var with the same name: the resolver picked the
+// state-var type and dropped if its type had no binding.
 //
 // Shared across every using-for resolver that needs to look up an
-// identifier-named receiver (V1.0/V1.1/V1.9, V1.4/V1.6/V1.8 cross-mode,
-// V1.10/V1.11/V1.12 struct-walker obj). V1.13's `this.<state-var>...`
-// shape intentionally bypasses this helper — `this` references the
-// caller contract, so the named member must be a state variable, never
-// a param or local.
+// identifier-named receiver (V1.0/V1.1/V1.9/V1.15, V1.10/V1.11/V1.12
+// struct-walker obj). V1.13's `this.<state-var>...` shape intentionally
+// bypasses this helper — `this` is an explicit contract reference that
+// bypasses the function scope, so the named member must be a state
+// variable, never a param or local.
 func lookupReceiverType(
 	name, contractID, funcID string,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
 	localVarTypes localVarTypeMap,
 ) string {
-	if varMap := stateVarTypes[contractID]; varMap != nil {
-		if t := varMap[name]; t != "" {
+	if localMap := localVarTypes[funcID]; localMap != nil {
+		if t := localMap[name]; t != "" {
 			return t
 		}
 	}
@@ -792,8 +800,8 @@ func lookupReceiverType(
 			return t
 		}
 	}
-	if localMap := localVarTypes[funcID]; localMap != nil {
-		if t := localMap[name]; t != "" {
+	if varMap := stateVarTypes[contractID]; varMap != nil {
+		if t := varMap[name]; t != "" {
 			return t
 		}
 	}
