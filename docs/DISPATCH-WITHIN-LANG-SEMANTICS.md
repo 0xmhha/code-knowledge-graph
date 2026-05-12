@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.13 14-tier dispatch + V1.14-V1.18 family validations / fixes + V1.19-V1.21 named-scope captures + V1.22-V1.24 callable kinds + V1.25-V1.26 free function / abstract guards + **V1.27 inherited modifier `using` regression guard** (V1.0 + V1.2 + V1.22 교집합); block-scoped shadowing / module-import V1.28+; free-fn alias / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.13 14-tier dispatch + V1.14-V1.18 family validations / fixes + V1.19-V1.21 named-scope captures + V1.22-V1.24 callable kinds + V1.25-V1.27 lightweight guards + **V1.28 aliased import resolution** (`import {Lib as Alias} from "..."` → per-file alias map + runImportAliases + runUsingFor alias-aware lookup); whole-file alias / block-scoped shadowing V1.29+; free-fn alias body / file-level using directive grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set

@@ -102,6 +102,14 @@ func (v *declVisitor) runUsingFor() {
 		containerStart := int(containerNode.StartByte())
 		srcID := parse.MakeID(containerName, "sol", containerStart)
 		libName := libNode.Utf8Text(v.src)
+		// W-C W6 V1.28 (2026-05-12): apply per-file alias map populated
+		// by runImportAliases. `import {SafeMath as SM} from "..."` +
+		// `using SM for ...` → SM is resolved to SafeMath here so the
+		// downstream binding pipeline keys match the actual library
+		// node name.
+		if orig, hit := v.importAliases[libName]; hit {
+			libName = orig
+		}
 		line := int(libNode.StartPosition().Row) + 1
 		v.pending = append(v.pending, parse.PendingRef{
 			SrcID:        srcID,

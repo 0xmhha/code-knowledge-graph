@@ -72,11 +72,16 @@
 > V1.26 abstract contract body scope regression guard — abstract 가
 > contract_declaration AST kind 와 동일. V1.x using-for indexing 이
 > abstract 도 자동 cover 함을 fixture 로 잠금.
-> V1.27 ✅ **inherited modifier `using` regression guard** — V1.0
-> binding + V1.2 inheritance propagation + V1.22 modifier scope 의
-> 교집합. Parent 의 modifier body 가 Parent 의 using-for binding 으로
-> 정상 dispatch, child inheritance 가 perturb 하지 않음을 확정.
-> Block-scoped shadowing 정확화 / module-import 만 V1.28+ follow-up.
+> V1.27 inherited modifier `using` regression guard — V1.0 + V1.2 +
+> V1.22 3-way intersection guard.
+> V1.28 ✅ **aliased import resolution** —
+> `import {SafeMath as SM} from "./util.sol"; using SM for uint256;`
+> 패턴이 SM 을 library identifier 로 lookup 해 miss → false-negative.
+> declVisitor 에 per-file importAliases map 추가 + runImportAliases
+> walker (import_directive 의 import_name/alias 페어를 positional
+> 매칭) + runUsingFor 에서 libName resolution 직전 alias map consult.
+> Whole-file alias (`import "./util.sol" as L; L.SafeMath.add`
+> qualified access) 와 block-scoped shadowing 정확화는 V1.29+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

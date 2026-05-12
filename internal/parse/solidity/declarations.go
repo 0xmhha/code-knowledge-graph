@@ -21,6 +21,12 @@ type declVisitor struct {
 	edges   []types.Edge
 	pending []parse.PendingRef
 	abi     map[string][]ABISig
+	// W-C W6 V1.28 (2026-05-12): per-file alias → original-name map
+	// from `import {Original as Alias} from "..."` directives. Used
+	// during runUsingFor to resolve the library identifier through the
+	// alias before pushing onto the binding pipeline. Populated by
+	// runImportAliases prior to runUsingFor.
+	importAliases map[string]string
 }
 
 // newDeclVisitor allocates a per-file visitor with a local abi map. The
@@ -28,7 +34,14 @@ type declVisitor struct {
 // after visit() returns — this keeps collectABI race-free under the
 // concurrent ParseFile dispatch buildpipe now uses.
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
-	v := &declVisitor{rel: rel, src: src, lang: lang, root: root, abi: map[string][]ABISig{}}
+	v := &declVisitor{
+		rel:           rel,
+		src:           src,
+		lang:          lang,
+		root:          root,
+		abi:           map[string][]ABISig{},
+		importAliases: map[string]string{},
+	}
 	fileQ := "file:" + rel
 	v.fileID = parse.MakeID(fileQ, "sol", 0)
 	v.nodes = append(v.nodes, types.Node{
@@ -98,6 +111,10 @@ func (v *declVisitor) visit() {
 	// resolved in Pass 2 (resolveInterfaceDispatch). Confidence is always
 	// ConfAmbiguous per §5.0 Q5 — see dispatch.go preamble.
 	v.runDispatch()
+	// W-C W6 V1.28 (2026-05-12): walk import_directive nodes and fill
+	// v.importAliases per-file. Must run before runUsingFor so the
+	// using-for walker can resolve aliased library names.
+	v.runImportAliases()
 	// W6 (using For): emits EdgeUsesFor PendingRefs from `using LibName for
 	// TypeName;` directives nested inside a contract / library / interface
 	// body. Q9-1 (b) decision (2026-05-12). V0 scope: binding declaration.
@@ -466,6 +483,68 @@ func (v *declVisitor) runModifierMeta() {
 		id := parse.MakeID(qname, "sol", int(nameNode.StartByte()))
 		emitParameterMetaPending(v, id, declNode)
 		emitLocalVarMetaPending(v, id, declNode)
+	}
+}
+
+// runImportAliases — W-C W6 V1.28 (2026-05-12). Walks every
+// import_directive in the file and records (alias → originalName)
+// pairs into v.importAliases. Tree-sitter-solidity v1.2.13 exposes
+// the directive's `import_name` and `alias` as multiple-cardinality
+// identifier fields; we pair them positionally (alias[i] aliases
+// import_name[i]).
+//
+// Shapes covered (V1.28 V0):
+//   - `import {SafeMath as SM} from "./util.sol"` — named import with
+//     alias. alias map: SM → SafeMath.
+//   - `import {SafeMath, Address as A} from "./util.sol"` — mixed
+//     named (no alias) and aliased. Only aliased entries register;
+//     bare named imports already resolve via the global byName index.
+//
+// Not yet covered (V1.29+):
+//   - `import "./util.sol" as L` — whole-file alias. Would require
+//     extending dispatch to qualified-identifier lookups (L.SafeMath).
+//   - `import "./util.sol"` (bare) — same as ambient name access,
+//     already works through the global namespace approach.
+func (v *declVisitor) runImportAliases() {
+	if v.root == nil {
+		return
+	}
+	for i := uint(0); i < uint(v.root.NamedChildCount()); i++ {
+		child := v.root.NamedChild(i)
+		if child == nil || child.Kind() != "import_directive" {
+			continue
+		}
+		// `import_name` and `alias` are both multiple-cardinality
+		// identifier fields. tree-sitter exposes positional pairing
+		// via FieldNameForChild(childIndex) so we walk every child
+		// (including anonymous tokens) and bucket identifiers by their
+		// field role.
+		var importNames []*sitter.Node
+		var aliases []*sitter.Node
+		for j := uint(0); j < uint(child.ChildCount()); j++ {
+			c := child.Child(j)
+			if c == nil || c.Kind() != "identifier" {
+				continue
+			}
+			switch child.FieldNameForChild(uint32(j)) {
+			case "import_name":
+				importNames = append(importNames, c)
+			case "alias":
+				aliases = append(aliases, c)
+			}
+		}
+		// Pair alias[i] ↔ import_name[i] up to the shorter length.
+		// Solidity grammar always emits matched pairs for aliased
+		// imports; the cap is a defensive guard.
+		n := min(len(aliases), len(importNames))
+		for k := 0; k < n; k++ {
+			alias := aliases[k].Utf8Text(v.src)
+			orig := importNames[k].Utf8Text(v.src)
+			if alias == "" || orig == "" {
+				continue
+			}
+			v.importAliases[alias] = orig
+		}
 	}
 }
 
