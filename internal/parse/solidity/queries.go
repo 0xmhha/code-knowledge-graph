@@ -19,6 +19,11 @@ const (
 	queryInterface   = `(interface_declaration name: (identifier) @name) @decl`
 	queryFunction    = `(function_definition name: (identifier) @name) @decl`
 	queryModifier    = `(modifier_definition name: (identifier) @name) @decl`
+	// W-C W6 V1.23 (2026-05-12): constructor_definition has no `name`
+	// field — only `body` (function_body) + direct `parameter` children
+	// + optional modifier_invocation. We synthesise "constructor" as the
+	// identifier and pin id-hashing to the declaration node's StartByte.
+	queryConstructor = `(constructor_definition) @decl`
 	queryEvent       = `(event_definition name: (identifier) @name) @decl`
 	queryStruct      = `(struct_declaration name: (identifier) @name) @decl`
 	queryEnum        = `(enum_declaration name: (identifier) @name) @decl`

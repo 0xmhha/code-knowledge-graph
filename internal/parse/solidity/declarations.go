@@ -68,6 +68,12 @@ func (v *declVisitor) visit() {
 	// path as function bodies. runDecl(queryModifier, ...) creates the
 	// NodeModifier; this pass adds the side-channel meta PendingRefs.
 	v.runModifierMeta()
+	// W-C W6 V1.23 (2026-05-12): emit NodeFunction (synthetic name
+	// "constructor") + parameter / local-var meta for every
+	// constructor_definition. Constructors share function_body shape
+	// but have no `name` field — runConstructorDecl uses a synthetic
+	// identifier and hashes the id off the declaration's StartByte.
+	v.runConstructorDecl()
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)
 	v.runDecl(queryEnum, types.NodeEnum)
@@ -457,6 +463,81 @@ func (v *declVisitor) runModifierMeta() {
 	}
 }
 
+// runConstructorDecl — W-C W6 V1.23 (2026-05-12). Emits one
+// NodeFunction per constructor_definition with synthetic name
+// "constructor" and qname "<Container>.constructor", then drives the
+// V1.22 meta-emission pipeline against the constructor body.
+//
+// Why a synthetic name? Solidity's grammar (verified via
+// node-types.json v1.2.13) defines constructor_definition without a
+// `name` field — only `body` (function_body) + direct `parameter`
+// children + optional modifier_invocation. The Sol language reserves
+// the keyword `constructor` for this role; we use that literal as the
+// canonical identifier. ID hashing follows the existing
+// MakeID(qname, "sol", startByte) idiom; startByte is the declaration
+// node's StartByte (start of the `constructor` keyword), which is
+// stable across builds.
+//
+// Why NodeFunction (not a new NodeConstructor)? Constructors share
+// runtime semantics with regular functions (callable, parameters,
+// body locals, modifier invocations) and existing consumers
+// (containerIDByFuncID, lookupReceiverType, EdgeHasModifier
+// resolution) already key off NodeFunction. Adding a sibling type
+// would force every downstream consumer to special-case it. The
+// SubKind field (W2) gets "constructor" to keep the role visible in
+// the graph without breaking the type-level contract.
+func (v *declVisitor) runConstructorDecl() {
+	query, qErr := sitter.NewQuery(v.lang, queryConstructor)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var declNode *sitter.Node
+		for _, c := range m.Captures {
+			if names[c.Index] == "decl" {
+				n := c.Node
+				declNode = &n
+			}
+		}
+		if declNode == nil {
+			continue
+		}
+		const ident = "constructor"
+		qname := ident
+		if cn := nearestContractName(declNode, v.src); cn != "" {
+			qname = cn + "." + ident
+		}
+		startByte := int(declNode.StartByte())
+		endByte := int(declNode.EndByte())
+		id := parse.MakeID(qname, "sol", startByte)
+		v.nodes = append(v.nodes, types.Node{
+			ID: id, Type: types.NodeFunction, Name: ident, QualifiedName: qname,
+			FilePath: v.rel, StartLine: int(declNode.StartPosition().Row) + 1,
+			EndLine:   int(declNode.EndPosition().Row) + 1,
+			StartByte: startByte, EndByte: endByte,
+			Language: "sol", Confidence: types.ConfExtracted,
+			SubKind: "constructor",
+		})
+		v.edges = append(v.edges, types.Edge{
+			Src: v.fileID, Dst: id, Type: types.EdgeDefines,
+			Count: 1, Confidence: types.ConfExtracted,
+		})
+		// V1.22 meta pipeline — constructor has no return_type, so
+		// V1.3 / V1.19 emits don't apply.
+		emitParameterMetaPending(v, id, declNode)
+		emitLocalVarMetaPending(v, id, declNode)
+	}
+}
+
 // nearestContractName walks the parent chain looking for an enclosing
 // contract-like declaration and returns its name (empty if none).
 //
@@ -491,11 +572,11 @@ func nearestContractName(n *sitter.Node, src []byte) string {
 func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool) {
 	cn := nearestContractName(n, src)
 	for cur := n; cur != nil; cur = cur.Parent() {
-		// W-C W6 V1.22 (2026-05-12): modifier_definition joins
-		// function_definition as a possible enclosing-callable scope.
-		// Both share Contract.<name> qname (V1.22 runDecl change) and
-		// are indexed in containerIDByFuncID (V1.22 Pass 1.5 change),
-		// so using-for PendingRefs emitted from inside a modifier body
+		// W-C W6 V1.22 / V1.23 (2026-05-12): function_definition,
+		// modifier_definition, and constructor_definition all qualify
+		// as enclosing-callable scopes. All three share Contract.<name>
+		// qname and live in containerIDByFuncID (Pass 1.5), so using-
+		// for PendingRefs emitted from inside any of these bodies
 		// resolve through the same path as function-body emits.
 		if cur.Kind() == "function_definition" || cur.Kind() == "modifier_definition" {
 			id := cur.ChildByFieldName("name")
@@ -508,6 +589,17 @@ func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool
 				qname = cn + "." + ident
 			}
 			return qname, int(id.StartByte()), true
+		}
+		if cur.Kind() == "constructor_definition" {
+			// Synthetic identifier — mirrors runConstructorDecl's
+			// canonical (qname, startByte) pair so SrcID hashing
+			// aligns with the emitted NodeFunction.
+			const ident = "constructor"
+			qname := ident
+			if cn != "" {
+				qname = cn + "." + ident
+			}
+			return qname, int(cur.StartByte()), true
 		}
 	}
 	return "", 0, false
