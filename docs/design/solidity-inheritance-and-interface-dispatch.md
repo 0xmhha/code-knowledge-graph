@@ -35,10 +35,13 @@
 > 순서가 state-var → param → local-var 였으나 Solidity 의미상 inner
 > scope 가 outer 를 shadow 함 → local-var → param → state-var 로
 > 수정. local 이 state-var 를 shadow 하는 false-negative 사례 제거.
-> Cross-file tuple validation (V1.14 idiom for V1.16) / block-scoped
-> shadowing 정확화 만 V1.18+ follow-up. Pre-declared identifier-slot
-> tuple 은 modern Sol 에서 `var` keyword deprecated (0.5.0+) 로 실용
-> 사례 거의 없음 — V1.17 reassessment 결과 scope 에서 제외.
+> V1.18 ✅ **cross-file tuple validation** — V1.14 idiom 의 V1.16
+> 적용. multi-file fixture (struct + library / V1.16 tuple caller)
+> 로 ConfInferred 정상 동작 확인. fixture-only validation cycle.
+> Block-scoped shadowing 정확화만 V1.19+ follow-up. Pre-declared
+> identifier-slot tuple 은 modern Sol 에서 `var` keyword deprecated
+> (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과 scope
+> 에서 제외.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
