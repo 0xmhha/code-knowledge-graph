@@ -410,6 +410,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.5 depth-2 chained branch — resolves
+			// `<innerFn1>().<innerFn2>().<method>(...)`. Walks two
+			// levels of funcReturnTypes (innerFn1's return then
+			// innerFn2's return) before reaching the using-for
+			// binding map. Same strict-drop policy.
+			if pr.DispatchKind == dispatchKindUsingForDeepChainCall {
+				if edge, ok := resolveUsingForDeepChainCallRef(
+					pr, bindings, funcReturnTypes,
+					containerIDByFuncID, funcByQName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -882,6 +896,115 @@ func resolveUsingForCrossChainCallRef(
 			return types.Edge{}, false
 		}
 	}
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForDeepChainCallRef — W6 V1.5 (2026-05-12). Resolves a
+// depth-2 chained call PendingRef
+// (`<innerFn1>().<innerFn2>().<method>(...)`) to a single EdgeCalls
+// edge. 7-step chain — any failure drops the edge:
+//
+//  1. funcID (caller) → callerContainerID via containerIDByFuncID.
+//  2. innerFn1 → innerFn1FuncID via funcByQName
+//     (`<callerContainer>.<innerFn1>`, V1.3 idiom).
+//  3. innerFn1FuncID → returnType1 via funcReturnTypes.
+//  4. `<returnType1>.<innerFn2>` → innerFn2FuncID via funcByQName.
+//     returnType1 must be a known Container (Contract / Interface)
+//     so its namespace can host innerFn2 — primitive types drop here.
+//  5. innerFn2FuncID → returnType2 via funcReturnTypes.
+//  6. (callerContainerID, returnType2) → libraryName via bindings,
+//     wildcard `*` fallback.
+//  7. `<libraryName>.<methodName>` → libraryFunctionID via funcByQName.
+//
+// Confidence: ConfExtracted when caller and library are same-file;
+// ConfInferred otherwise. Intermediate functions' files don't downgrade.
+func resolveUsingForDeepChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	funcReturnTypes funcReturnTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from runUsingForCalls deep-chain branch:
+	// `innerFn1|innerFn2|method`.
+	parts := strings.SplitN(pr.TargetQName, "|", 3)
+	if len(parts) != 3 {
+		return types.Edge{}, false
+	}
+	innerFn1 := parts[0]
+	innerFn2 := parts[1]
+	methodName := parts[2]
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	// Step 2: locate innerFn1 in the caller's contract namespace.
+	callerContainerName := ""
+	for qname, ids := range funcByQName {
+		for _, fid := range ids {
+			if fid == pr.SrcID {
+				if dot := strings.IndexByte(qname, '.'); dot >= 0 {
+					callerContainerName = qname[:dot]
+				}
+				break
+			}
+		}
+		if callerContainerName != "" {
+			break
+		}
+	}
+	if callerContainerName == "" {
+		return types.Edge{}, false
+	}
+	innerFn1IDs := funcByQName[callerContainerName+"."+innerFn1]
+	if len(innerFn1IDs) == 0 {
+		return types.Edge{}, false
+	}
+	innerFn1FuncID := pickSameFileCandidate(innerFn1IDs, srcFile, nodeFile)
+	// Step 3: returnType1.
+	returnType1, ok := funcReturnTypes[innerFn1FuncID]
+	if !ok || returnType1 == "" {
+		return types.Edge{}, false
+	}
+	// Step 4: innerFn2 in returnType1's namespace.
+	innerFn2IDs := funcByQName[returnType1+"."+innerFn2]
+	if len(innerFn2IDs) == 0 {
+		return types.Edge{}, false
+	}
+	innerFn2FuncID := pickSameFileCandidate(innerFn2IDs, srcFile, nodeFile)
+	// Step 5: returnType2.
+	returnType2, ok := funcReturnTypes[innerFn2FuncID]
+	if !ok || returnType2 == "" {
+		return types.Edge{}, false
+	}
+	// Step 6: binding lookup on returnType2.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[returnType2]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	// Step 7: library function lookup.
 	libIDs := funcByQName[libName+"."+methodName]
 	if len(libIDs) == 0 {
 		return types.Edge{}, false

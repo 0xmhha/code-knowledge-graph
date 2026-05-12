@@ -13,15 +13,16 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
-> emit. W6 V1.0~V1.4 (5-tier dispatch resolution) ✅ **LANDED
+> emit. W6 V1.0~V1.5 (6-tier dispatch resolution) ✅ **LANDED
 > 2026-05-12** — state-var (V1.0) / parameter (V1.1) / inherited
 > propagation (V1.2) / return-value chaining `<fn>().<method>` (V1.3)
-> / cross-contract chaining `<obj>.<fn>().<method>` (V1.4).
+> / cross-contract chaining `<obj>.<fn>().<method>` (V1.4) / depth-2
+> chaining `<fn>().<fn>().<method>` (V1.5).
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> deeper chains (`obj.foo().bar().baz()`) + multi-return tuple slot 만
-> V1.5+ follow-up.
+> deeper cross-contract chains (`obj.foo().bar().baz()`) + multi-return
+> tuple slot 만 V1.6+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
