@@ -13,17 +13,17 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
-> emit. W6 V1.0~V1.12 (13-tier dispatch resolution) ✅ **LANDED
+> emit. W6 V1.0~V1.13 (14-tier dispatch resolution) ✅ **LANDED
 > 2026-05-12** — state-var (V1.0) / parameter (V1.1) / inherited (V1.2)
 > / return chain (V1.3) / cross-contract (V1.4) / depth-2 (V1.5) /
 > deep cross-contract (V1.6) / depth-3 (V1.7) / generic walker (V1.8)
 > / this-receiver (V1.9) / struct-field (V1.10) / nested struct field
-> (V1.11) / **generic member-chain walker arbitrary depth (V1.12)**.
+> (V1.11) / generic member-chain walker arbitrary depth (V1.12) /
+> **this-prefixed nested member chain (V1.13)**.
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> Multi-return tuple destructuring + this-prefixed nested 만 V1.13+
-> follow-up.
+> Multi-return tuple destructuring 만 V1.14+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).

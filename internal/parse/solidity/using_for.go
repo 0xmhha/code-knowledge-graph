@@ -222,6 +222,31 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// W6 V1.13: `this.<stateVar>.<f1>.<f2>...<fN>.<method>(...)` —
+			// this-prefixed nested member chain. N ≥ 1 struct-field hops
+			// after `this.<stateVar>`. depth-0 (`this.<stateVar>.<method>`)
+			// is V1.9. Resolver uses callerContainerID as implicit `this`
+			// target — looks up stateVar in stateVarTypes only (no
+			// paramTypes), then walks structFieldTypes for each hop.
+			if stateVar, fields, methodName, ok := matchThisPrefixedNestedChain(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				encoded := stateVar
+				for _, f := range fields {
+					encoded += "|" + f
+				}
+				encoded += "|" + methodName
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  encoded,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForThisNestedChainCall,
+				})
+				continue
+			}
 			// W6 V1.10: `<obj>.<field>.<method>(...)` — struct-field
 			// receiver. obj is a state-var/parameter whose type is a
 			// struct; field is one of the struct's members. Resolver
@@ -405,6 +430,94 @@ func (v *declVisitor) runUsingForCalls() {
 			}
 		}
 	}
+}
+
+// matchThisPrefixedNestedChain — W-C W6 V1.13 (2026-05-12). Tests
+// whether a member_expression fits the this-prefixed nested chain
+// shape `this.<stateVar>.<f1>.<f2>....<fN>.<method>(...)` for N ≥ 1
+// struct-field hops after `this.<stateVar>`.
+//
+// V1.9 already catches depth-0 (`this.<stateVar>.<method>`); V1.13
+// only fires for N ≥ 1.
+//
+// Returns (stateVar, fields, methodName, true) on match. fields[0] is
+// the innermost hop (immediately after stateVar); fields[N-1] is the
+// outermost hop (immediately before method).
+//
+// AST shape (N = 2, `this.x.f1.f2.method`):
+//
+//	call_expression                            ← outer .method(...)
+//	  function: expression
+//	    member_expression                      ← outer
+//	      object: expression
+//	        member_expression                  ← this.x.f1.f2
+//	          object: expression
+//	            member_expression              ← this.x.f1
+//	              object: expression
+//	                member_expression          ← this.x
+//	                  object: identifier "this"
+//	                  property: identifier (stateVar)
+//	              property: identifier (f1)
+//	          property: identifier (f2)
+//	      property: identifier (methodName)
+//
+// Disambiguation:
+//   - V1.9 catches depth-0 (matchThisReceiverMethodCall fires first).
+//   - V1.10/V1.11/V1.12 explicitly reject `this` as innermost object —
+//     V1.13 is the dedicated cousin for the this-prefixed shape.
+//
+// Caller dispatch order: state-var → V1.9 → V1.13 → V1.10 → V1.11 →
+// V1.12 → V1.3-V1.8.
+func matchThisPrefixedNestedChain(member *sitter.Node, src []byte) (string, []string, string, bool) {
+	if member == nil {
+		return "", nil, "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", nil, "", false
+	}
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", nil, "", false
+	}
+	methodName := property.Utf8Text(src)
+	// Walk back through the member-expression chain, collecting properties
+	// outer-first. Bail when we hit a non-member, non-`this` innermost.
+	var revFields []string
+	cur := unwrapExpression(member.ChildByFieldName("object"))
+	for cur != nil && cur.Kind() == "member_expression" {
+		curProp := cur.ChildByFieldName("property")
+		if curProp == nil || curProp.Kind() != "identifier" {
+			return "", nil, "", false
+		}
+		revFields = append(revFields, curProp.Utf8Text(src))
+		innerObj := unwrapExpression(cur.ChildByFieldName("object"))
+		if innerObj == nil {
+			return "", nil, "", false
+		}
+		if innerObj.Kind() == "identifier" {
+			if innerObj.Utf8Text(src) != "this" {
+				return "", nil, "", false
+			}
+			// revFields collected outer→inner. V1.13 floor is N ≥ 1
+			// struct hop: revFields length ≥ 2 (1 stateVar + ≥ 1 field).
+			// length == 1 → V1.9 territory; reject.
+			if len(revFields) < 2 {
+				return "", nil, "", false
+			}
+			rev := reverseStrSlice(revFields)
+			return rev[0], rev[1:], methodName, true
+		}
+		if innerObj.Kind() == "member_expression" {
+			cur = innerObj
+			continue
+		}
+		return "", nil, "", false
+	}
+	return "", nil, "", false
 }
 
 // matchGenericMemberChain — W-C W6 V1.12 (2026-05-12). Generic
@@ -1296,6 +1409,13 @@ const dispatchKindUsingForStructFieldCall = "using_for_struct_field_call"
 // structFieldTypes twice — obj's struct field1 → its struct's field2 →
 // binding lookup on field2's type.
 const dispatchKindUsingForNestedStructFieldCall = "using_for_nested_struct_field_call"
+
+// dispatchKindUsingForThisNestedChainCall (V1.13) — this-prefixed
+// nested member chain. PendingRef target encoding:
+// `<stateVar>|<f1>|...|<fN>|<method>` (N ≥ 1). Resolver uses
+// callerContainerID as implicit `this` target, looks up stateVar in
+// stateVarTypes only (no paramTypes), then walks structFieldTypes.
+const dispatchKindUsingForThisNestedChainCall = "using_for_this_nested_chain_call"
 
 // dispatchKindUsingForGenericMemberChainCall (V1.12) — generic
 // iterative member-chain dispatch (depth ≥ 3). TargetQName encodes

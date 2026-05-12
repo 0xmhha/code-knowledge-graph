@@ -486,6 +486,23 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.13 this-prefixed nested chain — resolves
+			// `this.<stateVar>.<f1>...<fN>.<method>(...)` (N ≥ 1) by
+			// walking stateVar's struct type through structFieldTypes
+			// for each hop, then binding lookup on the final namespace.
+			// stateVar must be a state-variable on the caller's
+			// container (paramTypes intentionally excluded — `this`
+			// names current contract).
+			if pr.DispatchKind == dispatchKindUsingForThisNestedChainCall {
+				if edge, ok := resolveUsingForThisNestedChainCallRef(
+					pr, bindings, stateVarTypes,
+					structFieldTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			// W6 V1.10 struct-field receiver — resolves
 			// `<obj>.<field>.<method>(...)` by walking obj's struct
 			// type to the field's declared type, then binding lookup.
@@ -1744,6 +1761,112 @@ func resolveUsingForGenericMemberChainCallRef(
 			objType = paramMap[objName]
 		}
 	}
+	if objType == "" {
+		return types.Edge{}, false
+	}
+	// Walk each field, threading structFieldTypes.
+	currentNamespace := objType
+	for _, f := range fields {
+		fieldMap := structFieldTypes[currentNamespace]
+		if fieldMap == nil {
+			return types.Edge{}, false
+		}
+		fieldType, ok := fieldMap[f]
+		if !ok || fieldType == "" {
+			return types.Edge{}, false
+		}
+		currentNamespace = fieldType
+	}
+	// Binding lookup on the final field type.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[currentNamespace]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForThisNestedChainCallRef — W6 V1.13 (2026-05-12).
+// Resolves a this-prefixed nested member-chain PendingRef
+// (`this.<stateVar>.<f1>.<f2>....<fN>.<method>(...)`, N ≥ 1) to a
+// single EdgeCalls edge.
+//
+// TargetQName encoding (split by `|`):
+//
+//	"<stateVar>|<f1>|...|<fN>|<method>"  (N ≥ 1 → ≥ 3 parts)
+//
+// Resolution chain — any failure drops:
+//
+//  1. funcID → callerContainerID (containerIDByFuncID).
+//  2. stateVar → objType (stateVarTypes[callerContainerID] ONLY — `this`
+//     names a contract reference, never a parameter; the implicit
+//     receiver is the caller's container).
+//  3. Starting namespace = objType.
+//  4. For each f_i (left to right): structFieldTypes[currentNamespace][f_i]
+//     → fieldType; currentNamespace = fieldType.
+//  5. (callerContainerID, currentNamespace) → libraryName
+//     (bindings + `*` fallback).
+//  6. `<libraryName>.<methodName>` → libraryFunctionID.
+//
+// V1.9 cousin: same dispatch idiom (`this.<x>...`), but V1.9 stops at
+// stateVarType directly (no field walk). V1.13 = V1.9 + V1.10/V1.11/V1.12
+// struct-walking, with the bare-`this` constraint forcing stateVarTypes-
+// only lookup (paramTypes excluded by Solidity semantics).
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file).
+func resolveUsingForThisNestedChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	structFieldTypes structFieldTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// `<stateVar>|<f1>|...|<fN>|<method>` — N ≥ 1 → at least 3 parts.
+	parts := strings.Split(pr.TargetQName, "|")
+	if len(parts) < 3 {
+		return types.Edge{}, false
+	}
+	stateVar := parts[0]
+	fields := parts[1 : len(parts)-1]
+	methodName := parts[len(parts)-1]
+	if stateVar == "" || len(fields) == 0 || methodName == "" {
+		return types.Edge{}, false
+	}
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// `this.<stateVar>` — stateVarTypes lookup only. paramTypes excluded:
+	// `this` is the implicit current-contract reference, so the named
+	// member must be a state variable, never a parameter.
+	varMap := stateVarTypes[callerContractID]
+	if varMap == nil {
+		return types.Edge{}, false
+	}
+	objType := varMap[stateVar]
 	if objType == "" {
 		return types.Edge{}, false
 	}
