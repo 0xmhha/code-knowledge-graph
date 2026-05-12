@@ -81,15 +81,17 @@
 > V1.29 whole-file alias qualified using — namespaceAliases set +
 > leading namespace identifier skip + collision false-positive 차단.
 > V1.30 block-scoped shadowing (V0 first-decl-wins) — outer-decl 보존.
-> V2.0 ✅ **line-range scope-aware localVar lookup** — V1.30 V0 의
-> trade-off (inner-block use site 가 outer 로 resolve) 해소.
-> localVarTypeMap 이 funcID→varName→[]localDecl{declLine, scopeEndLine,
-> typeName} 으로 확장, lookupReceiverType 에 useSiteLine 인자 추가,
-> selectLocalDecl 가 narrowest-scope-wins 로 선택. nearestEnclosing
-> BlockEndLine helper + emitLocalVarBinding / emitTryReturnsBinding 의
-> scopeEndLine 인코딩 (`varName|typeName|scopeEndLine`).
-> V2.0 carry-over (V2.1+): byte 정밀도 (line 보다 더 정확, >1 stmt
-> per line edge cases) / module-import 추가 패턴 / Grammar-blocked.
+> V2.0 line-range scope-aware localVar lookup — V1.30 V0 trade-off
+> 해소, narrowest-scope-wins.
+> V2.1 ✅ **interface receiver via using-for guard** + multi-binding
+> known limitation lock. (a) `using Helper for IToken; IToken token;
+> token.method()` 가 V0/V1.0 의 typeName-based binding map 으로 정상
+> 동작함을 fixture 로 잠금 — real-world DeFi (Uniswap, OpenZeppelin)
+> 패턴. (b) `using A for uint256; using B for uint256;` 의 V0 single-
+> value binding overwrite 가 second-wins 동작함을 명시적으로 lock —
+> V2.2+ 에서 multi-value binding 으로 fix 시 이 test 업데이트 필요.
+> V2.1 carry-over (V2.2+): multi-binding fix / byte 정밀도 / module-
+> import 추가 / Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
