@@ -7,16 +7,20 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W6 V1.0 binding-map types (2026-05-12). The per-contract using-for
-// binding info reaches Pass 2 method-call resolution through two
-// intermediate maps; declaring them as package types lets helpers
-// keep narrow signatures. The third lookup (funcID → contractID) reuses
-// the existing containerIDByFuncID map from W-C W2 review M1+M3.
+// W6 V1.0/V1.1 binding-map types (2026-05-12). The per-contract
+// using-for binding info reaches Pass 2 method-call resolution through
+// three intermediate maps; declaring them as package types lets helpers
+// keep narrow signatures. The fourth lookup (funcID → contractID)
+// reuses the existing containerIDByFuncID map from W-C W2 review M1+M3.
 //
-//   bindingMap:    contractID → (typeName | "*") → libraryName
-//   stateVarTypes: contractID → varName → typeName (NodeField.Signature)
+//   bindingMap:     contractID → (typeName | "*") → libraryName
+//   stateVarTypes:  contractID → varName → typeName (NodeField.Signature)
+//   paramTypeMap:   funcID    → paramName → typeName (V1.1 — added
+//                                so receivers may be function parameters
+//                                in addition to state variables).
 type bindingMap map[string]map[string]string
 type stateVarTypeMap map[string]map[string]string
+type paramTypeMap map[string]map[string]string
 
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
@@ -215,22 +219,39 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// PendingRefs across results. Done before Pass 2b so the using-for-call
 	// branch can consume it without ordering surprises.
 	bindings := bindingMap{}
+	// W6 V1.1 (2026-05-12) — pre-build (funcID, paramName) → typeName so
+	// parameter-receiver method calls can resolve their receiver's
+	// declared type the same way state-variable receivers do.
+	paramTypes := paramTypeMap{}
 	for _, r := range results {
 		for _, pr := range r.Pending {
-			if pr.DispatchKind != dispatchKindUsingForTypeBind {
-				continue
+			switch pr.DispatchKind {
+			case dispatchKindUsingForTypeBind:
+				// TargetQName encoding from runUsingFor: `libraryName|typeName`.
+				sep := strings.IndexByte(pr.TargetQName, '|')
+				if sep < 0 {
+					continue
+				}
+				libName := pr.TargetQName[:sep]
+				typeName := pr.TargetQName[sep+1:]
+				if bindings[pr.SrcID] == nil {
+					bindings[pr.SrcID] = map[string]string{}
+				}
+				bindings[pr.SrcID][typeName] = libName
+			case dispatchKindUsingForParamType:
+				// TargetQName encoding from emitParameterMetaPending:
+				// `paramName|typeName`.
+				sep := strings.IndexByte(pr.TargetQName, '|')
+				if sep < 0 {
+					continue
+				}
+				paramName := pr.TargetQName[:sep]
+				typeName := pr.TargetQName[sep+1:]
+				if paramTypes[pr.SrcID] == nil {
+					paramTypes[pr.SrcID] = map[string]string{}
+				}
+				paramTypes[pr.SrcID][paramName] = typeName
 			}
-			// TargetQName encoding from runUsingFor: `libraryName|typeName`.
-			sep := strings.IndexByte(pr.TargetQName, '|')
-			if sep < 0 {
-				continue
-			}
-			libName := pr.TargetQName[:sep]
-			typeName := pr.TargetQName[sep+1:]
-			if bindings[pr.SrcID] == nil {
-				bindings[pr.SrcID] = map[string]string{}
-			}
-			bindings[pr.SrcID][typeName] = libName
 		}
 	}
 
@@ -280,21 +301,25 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
-			// W6 V1.0 typebind — already consumed before this loop into
-			// the `bindings` map. Skip silently here so the default
-			// switch doesn't try to emit a graph edge for it.
-			if pr.DispatchKind == dispatchKindUsingForTypeBind {
+			// W6 V1.0/V1.1 typebind/param-type — already consumed before
+			// this loop into the `bindings` / `paramTypes` maps. Skip
+			// silently here so the default switch doesn't try to emit
+			// a graph edge for them.
+			if pr.DispatchKind == dispatchKindUsingForTypeBind ||
+				pr.DispatchKind == dispatchKindUsingForParamType {
 				continue
 			}
-			// W6 V1.0 using-for method-call branch — resolves
-			// `<stateVar>.<method>(...)` to an EdgeCalls into the
-			// library function bound for stateVar's type. Drops when
-			// any link in the chain fails (no state var of that name,
-			// no binding for that type, no library function with that
-			// method) — strict-purge same as the other Sol resolvers.
+			// W6 V1.0/V1.1 using-for method-call branch — resolves
+			// `<receiver>.<method>(...)` to an EdgeCalls into the
+			// library function bound for the receiver's type. Receiver
+			// may be a state variable (V1.0) or a function parameter
+			// (V1.1). Drops when any link in the chain fails (no
+			// receiver of that name, no binding for that type, no
+			// library function with that method) — strict-purge same
+			// as the other Sol resolvers.
 			if pr.DispatchKind == dispatchKindUsingForCall {
 				if edge, ok := resolveUsingForCallRef(
-					pr, bindings, stateVarTypes,
+					pr, bindings, stateVarTypes, paramTypes,
 					containerIDByFuncID, funcByQName, nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
@@ -499,27 +524,32 @@ func resolveUsingForRef(
 	}, true
 }
 
-// resolveUsingForCallRef resolves one W6 V1.0 method-call PendingRef
-// (`<stateVar>.<method>(...)`) to a single EdgeCalls edge. Four-step
+// resolveUsingForCallRef resolves one W6 V1.0/V1.1 method-call PendingRef
+// (`<receiver>.<method>(...)`) to a single EdgeCalls edge. Four-step
 // chain — any step's failure drops the edge (V0 strict-purge):
 //
 //  1. funcID → enclosing containerID via containerIDByFuncID.
-//  2. (containerID, receiverName) → typeName via stateVarTypes.
+//  2. (containerID, receiverName) → typeName via stateVarTypes
+//     (state-variable receiver, V1.0).
+//     Fall back to (funcID, receiverName) → typeName via paramTypes
+//     (function-parameter receiver, V1.1) when no state var matches.
+//     state-var first because state declarations shadow parameters in
+//     Solidity scoping.
 //  3. (containerID, typeName) → libraryName via bindings — falls back to
 //     wildcard "*" binding when no specific binding exists (Q9-3 (a)
 //     specific-first decision).
 //  4. `<libraryName>.<methodName>` → libraryFunctionID via funcByQName.
 //
-// Confidence: ConfExtracted when both endpoints are in the same file
-// AND came through the same-file binding; ConfInferred when the chain
-// crosses files (library declared in another file). Sol's library
-// dispatch is statically determinable once the binding is known, so we
-// don't downgrade to AMBIGUOUS the way W3 (interface dispatch) does —
-// the call resolution is concrete.
+// Confidence: ConfExtracted when both endpoints are in the same file;
+// ConfInferred when the chain crosses files (library declared in another
+// file). Sol's library dispatch is statically determinable once the
+// binding is known, so we don't downgrade to AMBIGUOUS the way W3
+// (interface dispatch) does — the call resolution is concrete.
 func resolveUsingForCallRef(
 	pr parse.PendingRef,
 	bindings bindingMap,
 	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
 	containerIDByFuncID map[string]string,
 	funcByQName map[string][]string,
 	nodeFile map[string]string,
@@ -536,12 +566,21 @@ func resolveUsingForCallRef(
 	if !ok {
 		return types.Edge{}, false
 	}
-	varMap := stateVarTypes[contractID]
-	if varMap == nil {
-		return types.Edge{}, false
+	// Receiver type lookup: state-variable first (V1.0), then parameter
+	// (V1.1). Solidity scoping rules mean a function parameter cannot
+	// shadow a state variable in the receiver position — solc errors out
+	// — so the order doesn't change correctness, but state-var first
+	// keeps the common case on the hot path.
+	var typeName string
+	if varMap := stateVarTypes[contractID]; varMap != nil {
+		typeName = varMap[receiverName]
 	}
-	typeName, ok := varMap[receiverName]
-	if !ok {
+	if typeName == "" {
+		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+			typeName = paramMap[receiverName]
+		}
+	}
+	if typeName == "" {
 		return types.Edge{}, false
 	}
 	bindMap := bindings[contractID]

@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var dispatch; parameter receiver / chaining V1.1+) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0 state-var + V1.1 parameter; return chaining / free-fn form / file-level / inherited V1.2+) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -189,6 +189,19 @@ dispatch 는 binding 만 알면 statically determinable). V1.0 carry-over:
 parameter receiver, return-value chaining, free-function form, file-
 level using, inherited using directive 모두 V1.1+. §7.0 Go regression
 `--lang=go` diff = 0.
+
+W-C W6 V1.1 (Sol `using For` parameter-receiver dispatch → EdgeCalls)
+✅ landed 2026-05-12. function parameter 의 declared type 을
+paramTypes 인덱스 ((funcID, paramName) → typeName) 로 색인 +
+resolveUsingForCallRef 의 receiver type lookup 에 state-var → parameter
+fallback 추가. parameter 정보는 `emitParameterMetaPending` 가
+function_definition 의 named children (tree-sitter shape: parameter
+직계 child) 를 순회하며 `dispatchKindUsingForParamType` PendingRef 로
+emit. Anonymous parameter (name field 부재) 는 skip — 매칭될 receiver
+identifier 가 없음. 3 fixture + 3 test (param_receiver,
+state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
+V1.2+ carry-over: return-value chaining, free-function form, file-level
+using directive, inherited using.
 
 W-B W1 (TS heritage `extends`/`implements`) ✅ landed.
 `internal/parse/typescript/heritage.go` (284 LOC) + 6 fixture +

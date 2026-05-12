@@ -116,6 +116,16 @@ func (v *declVisitor) runFunctionDecl() {
 			Count: 1, Confidence: types.ConfExtracted,
 		})
 
+		// W-C W6 V1.1 (2026-05-12): emit parameter name→type PendingRefs
+		// so Pass 2 can index (funcID, paramName) → typeName for
+		// parameter-receiver using-for dispatch resolution. function_definition
+		// holds `parameter` nodes as direct named children (verified via
+		// node-types.json — they sit alongside override_specifier /
+		// modifier_invocation / state_mutability). Each parameter carries a
+		// `name` field (optional — anonymous parameters drop) and a
+		// `type` field (required, type_name).
+		emitParameterMetaPending(v, id, declNode)
+
 		if !override.present {
 			continue
 		}
@@ -151,6 +161,55 @@ func (v *declVisitor) runFunctionDecl() {
 		}
 	}
 }
+
+// emitParameterMetaPending walks the named children of a function_definition
+// and queues one PendingRef per `parameter` node carrying the (paramName,
+// typeName) binding. Pass 2 indexes these into (funcID, paramName) →
+// typeName for parameter-receiver using-for dispatch resolution (W-C W6
+// V1.1). Anonymous parameters (no name field) are skipped — their type is
+// still in the AST but no caller can address them by identifier, so the
+// using-for receiver lookup never has a key for them.
+//
+// TargetQName encoding mirrors the state-var path: `paramName|typeName`.
+// SrcID = function's node ID so Pass 2 can resolve the meta refs against
+// the same funcID space used by containerIDByFuncID.
+func emitParameterMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
+	if declNode == nil {
+		return
+	}
+	for i := uint(0); i < uint(declNode.NamedChildCount()); i++ {
+		child := declNode.NamedChild(i)
+		if child == nil || child.Kind() != "parameter" {
+			continue
+		}
+		nameNode := child.ChildByFieldName("name")
+		if nameNode == nil {
+			continue // anonymous parameter — no addressable receiver
+		}
+		typeNode := child.ChildByFieldName("type")
+		if typeNode == nil {
+			continue // shouldn't happen — type is required per grammar
+		}
+		paramName := nameNode.Utf8Text(v.src)
+		typeName := extractTypeNameText(typeNode, v.src)
+		if paramName == "" || typeName == "" {
+			continue
+		}
+		v.pending = append(v.pending, parse.PendingRef{
+			SrcID:        funcID,
+			EdgeType:     types.EdgeUsesFor, // routed by DispatchKind; not emitted
+			TargetQName:  paramName + "|" + typeName,
+			Line:         int(nameNode.StartPosition().Row) + 1,
+			DispatchKind: dispatchKindUsingForParamType,
+		})
+	}
+}
+
+// dispatchKindUsingForParamType (W-C W6 V1.1) tags PendingRefs carrying
+// function parameter (name, type) bindings for the parameter-receiver
+// dispatch path. Resolver sweeps these into paramTypes index and emits
+// no graph edge for them — pure side-channel.
+const dispatchKindUsingForParamType = "using_for_param_type"
 
 // overrideInfo carries the parsed result of an override_specifier.
 //

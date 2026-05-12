@@ -13,14 +13,12 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
-> emit. W6 V1.0 (state-variable receiver dispatch resolution) ✅
-> **LANDED 2026-05-12** — `runUsingForCalls` + `resolveUsingForCallRef`
-> + state-variable type index (NodeField.Signature + qname qualification)
-> + (contractID, typeName) → libraryName binding map + 4 fixture +
-> 4 test. `balance.add(amount)` 같은 state-var method call 이 SafeMath.add
-> 등 library 함수로 EdgeCalls 연결. Q9-3 (a) specific-first wildcard
-> fallback 검증. parameter receiver / return chaining / free-function
-> form / file-level using directive 은 V1.1+ follow-up.
+> emit. W6 V1.0 (state-variable receiver dispatch) ✅ **LANDED 2026-05-12**.
+> W6 V1.1 (parameter receiver dispatch) ✅ **LANDED 2026-05-12** —
+> function parameter type 인덱스 (funcID, paramName → typeName) 추가
+> + resolveUsingForCallRef 의 receiver lookup 에 state-var → parameter
+> fallback 도입. 3 fixture + 3 test. return chaining / free-function form
+> / file-level using / inherited using 만 V1.2+ follow-up 으로 남음.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
@@ -740,13 +738,57 @@ V0 carry-over (V1 follow-up)
   EdgeUsesFor 가 별도 가시화).
 
 V1.0 carry-over (V1.1+ follow-up)
-- Parameter receiver: 함수 인자로 받은 type 에 대한 method dispatch.
-  function parameter 의 declared type 인덱스 추가 필요.
+- Parameter receiver: **V1.1 LANDED 2026-05-12** (아래 LANDED 블록).
 - Return-value chaining: `foo().add(x)` 같은 expression. 미세 정적
-  추론, V0 한계 §4.6.6 의 receiver type 항목.
-- Free-function form `using {f1, f2} for T`: 별도 AST (using_alias).
-- File-level using directive (0.8.13+).
-- Inherited using directive (base contract 의 using 가 child 에 상속).
+  추론, V0 한계 §4.6.6 의 receiver type 항목. **V1.2+**
+- Free-function form `using {f1, f2} for T`: 별도 AST (using_alias). **V1.2+**
+- File-level using directive (0.8.13+). **V1.2+**
+- Inherited using directive (base contract 의 using 가 child 에 상속). **V1.2+**
+
+#### LANDED 2026-05-12 (W-C W6 V1.1 — parameter receiver dispatch)
+
+- 구현 추가:
+  - `internal/parse/solidity/overrides.go::runFunctionDecl`: Function 노드
+    emit 직후 `emitParameterMetaPending(v, id, declNode)` 호출. function_definition
+    의 named children (tree-sitter shape: parameter는 직계 named child)
+    순회, `parameter.name` + `parameter.type` 추출 후 dispatchKindUsingForParamType
+    PendingRef emit (SrcID=funcID, TargetQName=`<paramName>|<typeName>`).
+    Anonymous parameters (name field 부재) 는 skip.
+  - `internal/parse/solidity/resolve.go`:
+    - 신규 `paramTypeMap` 타입 (funcID → paramName → typeName).
+    - Pass 2 사전 빌드 loop 에 `using_for_param_type` 분기 추가
+      (bindings 와 함께 같은 sweep). switch 로 정리.
+    - resolveUsingForCallRef signature 에 paramTypes 인자 추가.
+    - receiver type lookup: state-var miss 시 paramTypes fallback.
+      state-var first 이유 — Solidity scoping 상 parameter 가 state var
+      를 shadow 못함 (solc error), 즉 순서는 hot-path 최적화일 뿐
+      correctness 영향 없음.
+- 4-step resolution chain 수정:
+  1. funcID → containerID (변경 없음)
+  2. **(containerID, receiverName) → typeName via stateVarTypes →
+     fallback (funcID, receiverName) → typeName via paramTypes**
+  3. (containerID, typeName | "*") → libraryName (변경 없음)
+  4. `<libraryName>.<methodName>` → libraryFunctionID (변경 없음)
+- Fixtures: `testdata/using_for_v11/{param_receiver, state_and_param,
+  anonymous_param}.sol`.
+- 테스트: `using_for_v11_test.go` 3 함수:
+  - `TestUsingForV11_ParamReceiverDispatch` — 1 EdgeCalls
+    (Calc.double → Math.times) for `x.times(2)` where x is uint256
+    parameter.
+  - `TestUsingForV11_StateAndParamMixed` — 같은 library 가 state-var
+    와 parameter 모두에서 dispatch 됨. 두 path 가 서로 mask 안 함.
+  - `TestUsingForV11_AnonymousParamSkipped` — name 없는 parameter 는
+    paramTypes 인덱스에 진입 안 함 (anonymous receiver 가 매칭될 일
+    없음, false-positive 가드).
+- 회귀: 25/25 PASS, vet clean. §7.0 Go regression: Sol-only 변경.
+- 가시화: EdgeCalls 가족 — V1.0 와 같이 viewer 추가 작업 없음.
+
+V1.1 carry-over (V1.2+ follow-up)
+- Return-value chaining (`foo().add(x)`): 정적 추론 인프라 필요
+  (call-expression 의 return type 추적).
+- Free-function form: 별도 AST (using_alias).
+- File-level using directive (module-scope binding).
+- Inherited using directive (base contract → child 상속).
 
 #### 4.6.5 §3.5 갱신 예정
 
