@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.13 14-tier dispatch + V1.14 cross-file struct validation + V1.15 single-return local-var receiver + V1.16 multi-return tuple destructuring (LHS explicit) + V1.17 Solidity shadowing precedence fix + **V1.18 cross-file tuple validation** (V1.14 idiom for V1.16, ConfInferred); block-scoped shadowing V1.19+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.13 14-tier dispatch + V1.14 cross-file struct validation + V1.15 single-return local-var receiver + V1.16 multi-return tuple destructuring (LHS explicit) + V1.17 Solidity shadowing precedence fix + V1.18 cross-file tuple validation + **V1.19 named return parameters → paramTypes** (`function f() returns (uint256 r)` 패턴 false-negative 수정); block-scoped shadowing / module-import V1.20+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set

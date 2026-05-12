@@ -35,13 +35,19 @@
 > 순서가 state-var → param → local-var 였으나 Solidity 의미상 inner
 > scope 가 outer 를 shadow 함 → local-var → param → state-var 로
 > 수정. local 이 state-var 를 shadow 하는 false-negative 사례 제거.
-> V1.18 ✅ **cross-file tuple validation** — V1.14 idiom 의 V1.16
+> V1.18 cross-file tuple validation — V1.14 idiom 의 V1.16
 > 적용. multi-file fixture (struct + library / V1.16 tuple caller)
-> 로 ConfInferred 정상 동작 확인. fixture-only validation cycle.
-> Block-scoped shadowing 정확화만 V1.19+ follow-up. Pre-declared
-> identifier-slot tuple 은 modern Sol 에서 `var` keyword deprecated
-> (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과 scope
-> 에서 제외.
+> 로 ConfInferred 정상 동작 확인.
+> V1.19 ✅ **named return parameters → paramTypes** —
+> `function f() returns (uint256 result)` 같은 패턴의 named return
+> slot 이 미캡처되어 receiver `result.method()` dispatch drop 됐던
+> false-negative 수정. emitNamedReturnParamMetaPending 신규 (V1.1 의
+> dispatchKindUsingForParamType 채널 재사용). V1.17 lookupReceiverType
+> 가 자동 pickup.
+> Block-scoped shadowing 정확화 / module-import 처리 만 V1.20+ follow-up.
+> Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
+> deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
+> scope 에서 제외.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).

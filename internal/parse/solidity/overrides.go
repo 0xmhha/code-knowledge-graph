@@ -131,6 +131,12 @@ func (v *declVisitor) runFunctionDecl() {
 		// captures only the first declared return type (multi-return
 		// tuples drop their tail — V1.4+).
 		emitFunctionReturnMetaPending(v, id, declNode)
+		// W-C W6 V1.19 (2026-05-12): emit name→type PendingRefs for
+		// named return parameters (`function f() returns (uint256 x)`).
+		// Solidity treats them as function-scope variables — they share
+		// the parameter namespace, so dispatchKindUsingForParamType is
+		// the right channel.
+		emitNamedReturnParamMetaPending(v, id, declNode)
 		// W-C W6 V1.15 (2026-05-12): emit local-variable name→type
 		// PendingRefs for every `variable_declaration_statement` in the
 		// function body (single-var form only — tuple destructuring is
@@ -278,6 +284,59 @@ func emitFunctionReturnMetaPending(v *declVisitor, funcID string, declNode *sitt
 // first declared return type for chained-call dispatch resolution.
 // Resolver sweeps these into the funcReturnTypes index — no graph edge.
 const dispatchKindUsingForFnReturn = "using_for_fn_return"
+
+// emitNamedReturnParamMetaPending — W-C W6 V1.19 (2026-05-12). Walks
+// every parameter child of the function's `return_type` and queues a
+// paramType PendingRef whenever the parameter has both a name and a
+// type. Solidity treats named return parameters as function-scope
+// variables initialised to zero — they share the parameter namespace
+// for identifier resolution, so emitting them through dispatchKind-
+// UsingForParamType (V1.1) lets lookupReceiverType pick them up via
+// paramTypes without any resolver changes.
+//
+// Distinct from emitFunctionReturnMetaPending (V1.3, dispatchKind-
+// UsingForFnReturn) — that captures the first-slot type for chained-
+// call resolution. V1.19 captures every named slot's (name, type)
+// pair for receiver-identifier dispatch. The two side-channels
+// coexist: same return-type walk, different PendingRef payloads.
+//
+// Anonymous return slots (no name field) skip silently — there's no
+// addressable receiver to resolve.
+func emitNamedReturnParamMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
+	if declNode == nil {
+		return
+	}
+	returnDef := declNode.ChildByFieldName("return_type")
+	if returnDef == nil {
+		return
+	}
+	for i := uint(0); i < uint(returnDef.NamedChildCount()); i++ {
+		child := returnDef.NamedChild(i)
+		if child == nil || child.Kind() != "parameter" {
+			continue
+		}
+		nameNode := child.ChildByFieldName("name")
+		if nameNode == nil {
+			continue // anonymous return slot — no addressable receiver
+		}
+		typeNode := child.ChildByFieldName("type")
+		if typeNode == nil {
+			continue
+		}
+		paramName := nameNode.Utf8Text(v.src)
+		typeName := extractTypeNameText(typeNode, v.src)
+		if paramName == "" || typeName == "" {
+			continue
+		}
+		v.pending = append(v.pending, parse.PendingRef{
+			SrcID:        funcID,
+			EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+			TargetQName:  paramName + "|" + typeName,
+			Line:         int(nameNode.StartPosition().Row) + 1,
+			DispatchKind: dispatchKindUsingForParamType,
+		})
+	}
+}
 
 // emitLocalVarMetaPending — W-C W6 V1.15/V1.16 (2026-05-12). Walks every
 // `variable_declaration_statement` reachable from a function's body and
