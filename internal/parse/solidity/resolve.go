@@ -499,6 +499,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.11 nested struct-field receiver — resolves
+			// `<obj>.<field1>.<field2>.<method>(...)` by walking
+			// structFieldTypes twice (obj's struct field1 → its
+			// struct's field2).
+			if pr.DispatchKind == dispatchKindUsingForNestedStructFieldCall {
+				if edge, ok := resolveUsingForNestedStructFieldCallRef(
+					pr, bindings, stateVarTypes, paramTypes,
+					structFieldTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -1541,6 +1555,104 @@ func resolveUsingForStructFieldCallRef(
 			return types.Edge{}, false
 		}
 	}
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForNestedStructFieldCallRef — W6 V1.11 (2026-05-12).
+// Resolves a depth-2 nested struct-field PendingRef
+// (`<obj>.<field1>.<field2>.<method>(...)`) to a single EdgeCalls
+// edge. 8-step chain — any failure drops:
+//
+//  1. funcID → callerContainerID
+//  2. objName → objType (stateVarTypes → paramTypes fallback)
+//  3. structFieldTypes[objType][field1] → field1Type
+//     (field1Type must itself be a struct for V1.11 to continue)
+//  4. structFieldTypes[field1Type][field2] → field2Type
+//  5. (callerContainerID, field2Type) → libraryName (bindings + `*`)
+//  6. `<libraryName>.<methodName>` → libraryFunctionID
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file). Intermediate struct definitions' files
+// don't downgrade.
+func resolveUsingForNestedStructFieldCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	structFieldTypes structFieldTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from matchNestedStructFieldReceiverMethodCall:
+	// `objName|field1|field2|methodName`.
+	parts := strings.SplitN(pr.TargetQName, "|", 4)
+	if len(parts) != 4 {
+		return types.Edge{}, false
+	}
+	objName, field1, field2, methodName := parts[0], parts[1], parts[2], parts[3]
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// Resolve obj's declared type (state-var first, then parameter).
+	var objType string
+	if varMap := stateVarTypes[callerContractID]; varMap != nil {
+		objType = varMap[objName]
+	}
+	if objType == "" {
+		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+			objType = paramMap[objName]
+		}
+	}
+	if objType == "" {
+		return types.Edge{}, false
+	}
+	// Step 3: field1 in objType's struct namespace.
+	field1Map := structFieldTypes[objType]
+	if field1Map == nil {
+		return types.Edge{}, false
+	}
+	field1Type, ok := field1Map[field1]
+	if !ok || field1Type == "" {
+		return types.Edge{}, false
+	}
+	// Step 4: field2 in field1Type's struct namespace.
+	field2Map := structFieldTypes[field1Type]
+	if field2Map == nil {
+		return types.Edge{}, false
+	}
+	field2Type, ok := field2Map[field2]
+	if !ok || field2Type == "" {
+		return types.Edge{}, false
+	}
+	// Step 5: binding lookup on field2Type.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[field2Type]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	// Step 6: library function.
 	libIDs := funcByQName[libName+"."+methodName]
 	if len(libIDs) == 0 {
 		return types.Edge{}, false

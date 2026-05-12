@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.10 11-tier dispatch — V1.0-V1.9 + **struct-field receiver V1.10**; multi-return tuple + nested struct field V1.11+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.11 12-tier dispatch — V1.0-V1.10 + **nested struct field V1.11**; multi-return tuple + depth ≥ 3 nested struct V1.12+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,24 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.11 (Sol `using For` nested struct field receiver
+`<obj>.<field1>.<field2>.<method>`) ✅ landed 2026-05-12. V1.10 의
+자연 depth-2 확장. `matchNestedStructFieldReceiverMethodCall` predicate
+(outer.object → mid_member → inner_member → identifier — pure 4-level
+member access chain, no calls in between) + 신규
+`dispatchKindUsingForNestedStructFieldCall` +
+`resolveUsingForNestedStructFieldCallRef` 6-step chain (funcID →
+containerID → objType → structFieldTypes[objType][field1] = field1Type
+→ structFieldTypes[field1Type][field2] = field2Type → libraryName →
+libraryFunctionID). V1.10 와 disambiguate: V1.10 의 outer.object =
+inner_member (depth 1), V1.11 의 outer.object = mid_member 이고
+mid_member.object = inner_member (depth 2). caller dispatch state-var
+→ V1.9 → V1.10 → V1.11 → V1.3-V1.8. real-world nested config / account-
+of-user 패턴 처리. 3 fixture + 3 test (basic, inner field unknown drop,
+middle field not-a-struct drop). 25/25 PASS, vet clean. V1.12+
+carry-over: depth ≥ 3 nested struct fields, this 변형, multi-return
+tuple destructuring, cross-file struct validation.
 
 W-C W6 V1.10 (Sol `using For` struct-field receiver
 `<obj>.<field>.<method>`) ✅ landed 2026-05-12. obj 는 state-var/

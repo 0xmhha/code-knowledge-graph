@@ -241,6 +241,24 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// W6 V1.11: `<obj>.<field1>.<field2>.<method>(...)` —
+			// nested struct field receiver. obj's struct has a nested
+			// struct field; field2 is a member of that nested struct.
+			// Resolver walks structFieldTypes twice.
+			if objName, f1, f2, methodName, ok := matchNestedStructFieldReceiverMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  objName + "|" + f1 + "|" + f2 + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForNestedStructFieldCall,
+				})
+				continue
+			}
 			// V1.3: chained call shape `<fn>().<method>(...)`. Inner
 			// expression is a plain function call (function-position
 			// identifier); resolver looks up the inner function's
@@ -365,6 +383,92 @@ func (v *declVisitor) runUsingForCalls() {
 			}
 		}
 	}
+}
+
+// matchNestedStructFieldReceiverMethodCall — W-C W6 V1.11 (2026-05-12).
+// Tests whether a member_expression fits the depth-2 nested struct
+// field receiver shape `<obj>.<field1>.<field2>.<method>(...)`. obj is
+// state-var/parameter whose declared type is a struct; field1 is a
+// nested-struct member of that type; field2 is a member of field1's
+// struct type; method is the using-for dispatch target.
+//
+// Returns (objName, field1Name, field2Name, methodName, true) on match.
+//
+// AST shape (4 levels of member_expression nesting, no call_expressions
+// in between — pure member access chain):
+//
+//	call_expression                              ← outer .method(...)
+//	  function: expression
+//	    member_expression                        ← outer
+//	      object: expression
+//	        member_expression                    ← mid <obj>.<field1>.<field2>
+//	          object: expression
+//	            member_expression                ← inner <obj>.<field1>
+//	              object: identifier (objName)
+//	              property: identifier (field1Name)
+//	          property: identifier (field2Name)
+//	      property: identifier (methodName)
+//
+// Disambiguation:
+//   - V1.10 (`<obj>.<field>.<method>`): one less member layer.
+//   - V1.4 (`<obj>.<fn>().<method>`): middle layer is call_expression,
+//     not member_expression.
+//   - V1.9 (`this.<state-var>.<method>`): innermost is `this`, not
+//     state-var/parameter identifier.
+//
+// Caller dispatch order: state-var → V1.9 → V1.10 → V1.11 → V1.3-V1.8.
+func matchNestedStructFieldReceiverMethodCall(member *sitter.Node, src []byte) (string, string, string, string, bool) {
+	if member == nil {
+		return "", "", "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	midMember := unwrapExpression(object)
+	if midMember == nil || midMember.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	midProperty := midMember.ChildByFieldName("property")
+	if midProperty == nil || midProperty.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	midObject := midMember.ChildByFieldName("object")
+	innerMember := unwrapExpression(midObject)
+	if innerMember == nil || innerMember.Kind() != "member_expression" {
+		return "", "", "", "", false
+	}
+	innerObj := innerMember.ChildByFieldName("object")
+	innerObjIdent := unwrapExpression(innerObj)
+	if innerObjIdent == nil || innerObjIdent.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	objText := innerObjIdent.Utf8Text(src)
+	if objText == "this" {
+		// `this.<field1>.<field2>.<method>` — V1.11.x cousin of V1.9,
+		// covered when V1.10's `this` -> state-var idiom isn't enough.
+		// V1.11 V0 only handles non-this receivers to keep scope tight;
+		// `this.<field1>.<field2>.<method>` is V1.12+.
+		return "", "", "", "", false
+	}
+	innerProperty := innerMember.ChildByFieldName("property")
+	if innerProperty == nil || innerProperty.Kind() != "identifier" {
+		return "", "", "", "", false
+	}
+	// Outer must be invoked.
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", "", "", false
+	}
+	return objText,
+		innerProperty.Utf8Text(src),
+		midProperty.Utf8Text(src),
+		property.Utf8Text(src),
+		true
 }
 
 // matchStructFieldReceiverMethodCall — W-C W6 V1.10 (2026-05-12). Tests
@@ -1101,6 +1205,14 @@ const dispatchKindUsingForTripleChainCall = "using_for_triple_chain_call"
 // (typeName, fieldName) → fieldType (structFieldTypes) →
 // (callerContractID, fieldType) → libraryName (bindings) → method.
 const dispatchKindUsingForStructFieldCall = "using_for_struct_field_call"
+
+// dispatchKindUsingForNestedStructFieldCall (V1.11) tags PendingRefs
+// for depth-2 nested struct field dispatch
+// `<obj>.<field1>.<field2>.<method>(...)`. TargetQName encodes
+// `<objName>|<field1>|<field2>|<methodName>` (4 parts). Resolver walks
+// structFieldTypes twice — obj's struct field1 → its struct's field2 →
+// binding lookup on field2's type.
+const dispatchKindUsingForNestedStructFieldCall = "using_for_nested_struct_field_call"
 
 // dispatchKindUsingForGenericChainCall (V1.8) tags PendingRefs from
 // the generic iterative chain walker. Covers arbitrary-depth chains
