@@ -389,8 +389,10 @@ func emitLocalVarMetaPending(v *declVisitor, funcID string, declNode *sitter.Nod
 // collectLocalVarMetaPending recursively descends every named child of n.
 // On `variable_declaration_statement`: handles both single-var (V1.15)
 // and tuple-destructuring (V1.16) forms by routing each typed slot
-// through emitLocalVarBinding. Other nodes recurse normally so nested
-// blocks (if / for / while bodies) reach their statements.
+// through emitLocalVarBinding. On `try_statement`: emits the returns
+// clause's named parameter slots (V1.20) so receivers bound in the
+// success block are addressable. Other nodes recurse normally so
+// nested blocks (if / for / while / try bodies) reach their statements.
 func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 	if n == nil {
 		return
@@ -423,9 +425,59 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// statement node itself.
 		return
 	}
+	if n.Kind() == "try_statement" {
+		// W6 V1.20: `try foo() returns (Ta a, Tb b) { ... }` — the
+		// returns clause named-parameter slots are exposed as direct
+		// `parameter` children of try_statement (distinct from
+		// function_definition's `return_type` field — different AST
+		// shape). Each slot is a function-scope identifier bound for
+		// the duration of the success block; we approximate as
+		// function-scoped (V1.15 idiom).
+		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
+			child := n.NamedChild(i)
+			if child == nil || child.Kind() != "parameter" {
+				continue
+			}
+			emitTryReturnsBinding(v, funcID, child)
+		}
+		// Fall through to recurse — try_statement's body
+		// (block_statement) and catch_clause bodies still contain
+		// statements that must be visited.
+	}
 	for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 		collectLocalVarMetaPending(v, funcID, n.NamedChild(i))
 	}
+}
+
+// emitTryReturnsBinding emits one localVar PendingRef for a try_
+// statement's returns-clause `parameter` slot (V1.20). Same encoding
+// as emitLocalVarBinding so lookupReceiverType picks it up via
+// localVarTypes. Anonymous slot (no name field) skips silently —
+// nothing addressable.
+func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node) {
+	if p == nil {
+		return
+	}
+	nameNode := p.ChildByFieldName("name")
+	if nameNode == nil {
+		return
+	}
+	typeNode := p.ChildByFieldName("type")
+	if typeNode == nil {
+		return
+	}
+	varName := nameNode.Utf8Text(v.src)
+	typeName := extractTypeNameText(typeNode, v.src)
+	if varName == "" || typeName == "" {
+		return
+	}
+	v.pending = append(v.pending, parse.PendingRef{
+		SrcID:        funcID,
+		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+		TargetQName:  varName + "|" + typeName,
+		Line:         int(nameNode.StartPosition().Row) + 1,
+		DispatchKind: dispatchKindUsingForLocalVar,
+	})
 }
 
 // emitLocalVarBinding emits one localVar PendingRef for a single

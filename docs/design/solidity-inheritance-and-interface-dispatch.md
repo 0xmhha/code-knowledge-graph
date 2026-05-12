@@ -38,13 +38,19 @@
 > V1.18 cross-file tuple validation — V1.14 idiom 의 V1.16
 > 적용. multi-file fixture (struct + library / V1.16 tuple caller)
 > 로 ConfInferred 정상 동작 확인.
-> V1.19 ✅ **named return parameters → paramTypes** —
+> V1.19 named return parameters → paramTypes —
 > `function f() returns (uint256 result)` 같은 패턴의 named return
 > slot 이 미캡처되어 receiver `result.method()` dispatch drop 됐던
-> false-negative 수정. emitNamedReturnParamMetaPending 신규 (V1.1 의
-> dispatchKindUsingForParamType 채널 재사용). V1.17 lookupReceiverType
-> 가 자동 pickup.
-> Block-scoped shadowing 정확화 / module-import 처리 만 V1.20+ follow-up.
+> false-negative 수정.
+> V1.20 ✅ **additional scope captures** — (a) for-loop init variable
+> (`for (uint256 i = 0; ...) { i.method() }`) 가 V1.15 recursive descent
+> 로 정상 동작함을 회귀 가드로 잠금. (b) try/catch returns clause
+> (`try foo() returns (uint256 r) { r.method() }`) 가 V1.19 의
+> function_definition.return_type walker 밖이라 미캡처 → false-negative
+> 수정. collectLocalVarMetaPending 에 try_statement 분기 추가 +
+> emitTryReturnsBinding helper 신규 (dispatchKindUsingForLocalVar 채널).
+> Block-scoped shadowing 정확화 / module-import 처리 / catch_clause
+> parameter 만 V1.21+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
