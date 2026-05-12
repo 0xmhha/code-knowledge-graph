@@ -7,22 +7,25 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W6 V1.0/V1.1/V1.3 binding-map types. The per-contract using-for
-// binding info reaches Pass 2 method-call resolution through four
+// W6 V1.0/V1.1/V1.3/V1.10 binding-map types. The per-contract using-for
+// binding info reaches Pass 2 method-call resolution through five
 // intermediate maps; declaring them as package types lets helpers
-// keep narrow signatures. The fifth lookup (funcID → contractID)
+// keep narrow signatures. The sixth lookup (funcID → contractID)
 // reuses the existing containerIDByFuncID map from W-C W2 review M1+M3.
 //
-//   bindingMap:        contractID → (typeName | "*") → libraryName
-//   stateVarTypes:     contractID → varName → typeName (NodeField.Signature)
-//   paramTypeMap:      funcID → paramName → typeName (V1.1)
-//   funcReturnTypeMap: funcID → first-return typeName (V1.3 — chained
-//                                call dispatch needs the inner function's
-//                                return type as the receiver type).
+//   bindingMap:         contractID → (typeName | "*") → libraryName
+//   stateVarTypes:      contractID → varName → typeName (NodeField.Signature)
+//   paramTypeMap:       funcID → paramName → typeName (V1.1)
+//   funcReturnTypeMap:  funcID → first-return typeName (V1.3)
+//   structFieldTypeMap: structName → fieldName → fieldType (V1.10 —
+//                                 struct-field receiver dispatch needs
+//                                 the field's declared type as the
+//                                 binding lookup key).
 type bindingMap map[string]map[string]string
 type stateVarTypeMap map[string]map[string]string
 type paramTypeMap map[string]map[string]string
 type funcReturnTypeMap map[string]string
+type structFieldTypeMap map[string]map[string]string
 
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
@@ -229,6 +232,10 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// `<fn>().<method>` chained dispatch can look up the inner
 	// function's return type as the receiver type.
 	funcReturnTypes := funcReturnTypeMap{}
+	// W6 V1.10 (2026-05-12) — pre-build (structName, fieldName) →
+	// fieldType so `<obj>.<field>.<method>` dispatch can look up the
+	// field's declared type and feed it to the binding map.
+	structFieldTypes := structFieldTypeMap{}
 	for _, r := range results {
 		for _, pr := range r.Pending {
 			switch pr.DispatchKind {
@@ -261,6 +268,18 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				// TargetQName encoding from emitFunctionReturnMetaPending:
 				// bare `typeName` (no `|`). First-return only (V0).
 				funcReturnTypes[pr.SrcID] = pr.TargetQName
+			case dispatchKindUsingForStructField:
+				// TargetQName encoding from runStructFieldMeta:
+				// `structName|fieldName|fieldType` (three parts).
+				parts := strings.SplitN(pr.TargetQName, "|", 3)
+				if len(parts) != 3 {
+					continue
+				}
+				structName, fieldName, fieldType := parts[0], parts[1], parts[2]
+				if structFieldTypes[structName] == nil {
+					structFieldTypes[structName] = map[string]string{}
+				}
+				structFieldTypes[structName][fieldName] = fieldType
 			}
 		}
 	}
@@ -355,13 +374,15 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
-			// W6 V1.0/V1.1/V1.3 typebind/param-type/fn-return — already
-			// consumed before this loop into the `bindings` / `paramTypes`
-			// / `funcReturnTypes` maps. Skip silently here so the default
+			// W6 V1.0/V1.1/V1.3/V1.10 typebind/param-type/fn-return/
+			// struct-field — already consumed before this loop into
+			// the bindings / paramTypes / funcReturnTypes /
+			// structFieldTypes maps. Skip silently here so the default
 			// switch doesn't try to emit a graph edge for them.
 			if pr.DispatchKind == dispatchKindUsingForTypeBind ||
 				pr.DispatchKind == dispatchKindUsingForParamType ||
-				pr.DispatchKind == dispatchKindUsingForFnReturn {
+				pr.DispatchKind == dispatchKindUsingForFnReturn ||
+				pr.DispatchKind == dispatchKindUsingForStructField {
 				continue
 			}
 			// W6 V1.0/V1.1 using-for method-call branch — resolves
@@ -459,6 +480,19 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				if edge, ok := resolveUsingForGenericChainCallRef(
 					pr, bindings, stateVarTypes, paramTypes,
 					funcReturnTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
+			// W6 V1.10 struct-field receiver — resolves
+			// `<obj>.<field>.<method>(...)` by walking obj's struct
+			// type to the field's declared type, then binding lookup.
+			if pr.DispatchKind == dispatchKindUsingForStructFieldCall {
+				if edge, ok := resolveUsingForStructFieldCallRef(
+					pr, bindings, stateVarTypes, paramTypes,
+					structFieldTypes, containerIDByFuncID, funcByQName,
 					nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
@@ -1424,6 +1458,94 @@ func resolveUsingForGenericChainCallRef(
 	if len(libIDs) == 0 {
 		return types.Edge{}, false
 	}
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForStructFieldCallRef — W6 V1.10 (2026-05-12). Resolves a
+// struct-field-receiver PendingRef (`<obj>.<field>.<method>(...)`) to a
+// single EdgeCalls edge. 7-step chain — any failure drops:
+//
+//  1. funcID → callerContainerID (containerIDByFuncID).
+//  2. objName → objType (stateVarTypes → paramTypes fallback).
+//  3. objType → structFieldTypes (must be a known struct name; primitives
+//     and contracts naturally miss because they aren't in the index).
+//  4. structFieldTypes[objType][fieldName] → fieldType.
+//  5. (callerContainerID, fieldType) → libraryName (bindings + `*`).
+//  6. `<libraryName>.<methodName>` → libraryFunctionID.
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file). obj's container / struct's file don't
+// downgrade.
+func resolveUsingForStructFieldCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	structFieldTypes structFieldTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from matchStructFieldReceiverMethodCall:
+	// `objName|fieldName|methodName`.
+	parts := strings.SplitN(pr.TargetQName, "|", 3)
+	if len(parts) != 3 {
+		return types.Edge{}, false
+	}
+	objName, fieldName, methodName := parts[0], parts[1], parts[2]
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// Resolve obj's declared type (state-var first, then parameter).
+	var objType string
+	if varMap := stateVarTypes[callerContractID]; varMap != nil {
+		objType = varMap[objName]
+	}
+	if objType == "" {
+		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+			objType = paramMap[objName]
+		}
+	}
+	if objType == "" {
+		return types.Edge{}, false
+	}
+	// objType must be a known struct; structFieldTypes[objType] presence
+	// is an implicit "is-struct" check.
+	fieldMap := structFieldTypes[objType]
+	if fieldMap == nil {
+		return types.Edge{}, false
+	}
+	fieldType, ok := fieldMap[fieldName]
+	if !ok || fieldType == "" {
+		return types.Edge{}, false
+	}
+	// Binding lookup on the field's type.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[fieldType]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
 	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
 	conf := types.ConfExtracted
 	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {

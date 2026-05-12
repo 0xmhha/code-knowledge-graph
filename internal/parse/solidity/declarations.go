@@ -69,6 +69,12 @@ func (v *declVisitor) visit() {
 	v.runEmits()
 	v.runHasModifier()
 	v.runInheritance()
+	// W6 V1.10 (2026-05-12): struct field type metadata. Walks each
+	// struct_declaration's struct_body children and emits a side-channel
+	// PendingRef per struct_member carrying (structName, fieldName,
+	// fieldType). Resolver builds the structFieldTypes index for
+	// struct-field receiver dispatch (`obj.field.method()`).
+	v.runStructFieldMeta()
 	// W3 (interface dispatch): walks body member_expression nodes that
 	// fit the `IFoo(addr).bar()` shape and queues EdgeInvokes PendingRefs
 	// resolved in Pass 2 (resolveInterfaceDispatch). Confidence is always
@@ -436,6 +442,100 @@ func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool
 	}
 	return "", 0, false
 }
+
+// runStructFieldMeta — W-C W6 V1.10 (2026-05-12). Walks every
+// struct_declaration in the file and emits a PendingRef per struct_member
+// carrying (structName, fieldName, fieldType) so Pass 2 can build a
+// structFieldTypes index for struct-field receiver dispatch.
+//
+// tree-sitter-solidity v1.2.13 shape:
+//
+//	struct_declaration
+//	  name: identifier (structName)
+//	  body: struct_body
+//	    struct_member (multiple)
+//	      name: identifier (fieldName)
+//	      type: type_name (fieldType)
+//
+// Emit decisions:
+//   - mapping fields drop (extractTypeNameText returns "" for them) —
+//     they have no method-dispatch semantics.
+//   - struct definitions outside any contract / library are still
+//     captured (file-level struct declarations are common in Sol).
+//   - SrcID = v.fileID; the index keys on the encoded TargetQName
+//     `<structName>|<fieldName>|<fieldType>`, so multiple PendingRefs
+//     per file/struct fan out naturally.
+//
+// Tree-sitter query reuses queryStruct (the existing NodeStruct emitter)
+// to find struct_declaration nodes — saves a per-file query compilation
+// cost. struct_body / struct_member walking is hand-rolled because the
+// nested shape is awkward to express in a single query alternation.
+func (v *declVisitor) runStructFieldMeta() {
+	query, qErr := sitter.NewQuery(v.lang, queryStruct)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var nameNode *sitter.Node
+		var declNode *sitter.Node
+		for _, c := range m.Captures {
+			switch names[c.Index] {
+			case "name":
+				n := c.Node
+				nameNode = &n
+			case "decl":
+				n := c.Node
+				declNode = &n
+			}
+		}
+		if nameNode == nil || declNode == nil {
+			continue
+		}
+		structName := nameNode.Utf8Text(v.src)
+		body := declNode.ChildByFieldName("body")
+		if body == nil {
+			continue
+		}
+		line := int(nameNode.StartPosition().Row) + 1
+		for i := uint(0); i < uint(body.NamedChildCount()); i++ {
+			memberNode := body.NamedChild(i)
+			if memberNode == nil || memberNode.Kind() != "struct_member" {
+				continue
+			}
+			fieldNameNode := memberNode.ChildByFieldName("name")
+			fieldTypeNode := memberNode.ChildByFieldName("type")
+			if fieldNameNode == nil || fieldTypeNode == nil {
+				continue
+			}
+			fieldName := fieldNameNode.Utf8Text(v.src)
+			fieldType := extractTypeNameText(fieldTypeNode, v.src)
+			if fieldName == "" || fieldType == "" {
+				continue
+			}
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        v.fileID,
+				EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+				TargetQName:  structName + "|" + fieldName + "|" + fieldType,
+				Line:         line,
+				DispatchKind: dispatchKindUsingForStructField,
+			})
+		}
+	}
+}
+
+// dispatchKindUsingForStructField (W-C W6 V1.10) carries struct field
+// (structName, fieldName, fieldType) bindings as side-channel data.
+// Resolver sweeps these into structFieldTypes index — no graph edge.
+const dispatchKindUsingForStructField = "using_for_struct_field"
 
 // extractTypeNameText returns the user-written type expression for a
 // state_variable_declaration's type_name child. Used by W-C W6 V1.0 to

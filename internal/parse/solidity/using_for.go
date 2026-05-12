@@ -222,6 +222,25 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// W6 V1.10: `<obj>.<field>.<method>(...)` — struct-field
+			// receiver. obj is a state-var/parameter whose type is a
+			// struct; field is one of the struct's members. Resolver
+			// walks structFieldTypes to find the field's type, then
+			// uses that as the binding lookup key.
+			if objName, fieldName, methodName, ok := matchStructFieldReceiverMethodCall(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  objName + "|" + fieldName + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForStructFieldCall,
+				})
+				continue
+			}
 			// V1.3: chained call shape `<fn>().<method>(...)`. Inner
 			// expression is a plain function call (function-position
 			// identifier); resolver looks up the inner function's
@@ -346,6 +365,74 @@ func (v *declVisitor) runUsingForCalls() {
 			}
 		}
 	}
+}
+
+// matchStructFieldReceiverMethodCall — W-C W6 V1.10 (2026-05-12). Tests
+// whether a member_expression fits the struct-field-receiver shape
+// `<obj>.<field>.<method>(...)` where:
+//   - `<obj>` is an identifier (state-var or parameter receiver).
+//   - `<obj>` is NOT "this" — that's V1.9.
+//   - `<field>` is a struct member name (resolver verifies against the
+//     struct field type index).
+//   - `<method>` is the using-for dispatch target.
+//
+// Returns (objName, fieldName, methodName, true) on match.
+//
+// AST shape (same as V1.9 except inner.object is any non-"this"
+// identifier):
+//
+//	call_expression                            ← outer .method(...)
+//	  function: expression
+//	    member_expression                      ← outer
+//	      object: expression
+//	        member_expression                  ← inner <obj>.<field>
+//	          object: identifier (objName, != "this")
+//	          property: identifier (fieldName)
+//	      property: identifier (method)
+//
+// Disambiguation:
+//   - V1.9 (`this.<field>.<method>`): caller dispatch tries V1.9 first;
+//     V1.9's matchThisReceiverMethodCall requires inner.object text =
+//     "this", so V1.10 only fires for non-this receivers.
+//   - V1.4 (`<obj>.<fn>().<method>`): V1.4's middle is a call, not a
+//     member access. Shape-disjoint.
+//
+// Caller dispatch order: state-var → V1.9 → V1.10 → V1.3-V1.8.
+func matchStructFieldReceiverMethodCall(member *sitter.Node, src []byte) (string, string, string, bool) {
+	if member == nil {
+		return "", "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	innerMember := unwrapExpression(object)
+	if innerMember == nil || innerMember.Kind() != "member_expression" {
+		return "", "", "", false
+	}
+	innerObj := innerMember.ChildByFieldName("object")
+	innerObjIdent := unwrapExpression(innerObj)
+	if innerObjIdent == nil || innerObjIdent.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	objText := innerObjIdent.Utf8Text(src)
+	if objText == "this" {
+		return "", "", "", false // V1.9 handles this case
+	}
+	innerProperty := innerMember.ChildByFieldName("property")
+	if innerProperty == nil || innerProperty.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	// Outer must be invoked.
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", "", false
+	}
+	return objText, innerProperty.Utf8Text(src), property.Utf8Text(src), true
 }
 
 // matchThisReceiverMethodCall — W-C W6 V1.9 (2026-05-12). Tests whether
@@ -1006,6 +1093,14 @@ const dispatchKindUsingForDeepCrossChainCall = "using_for_deep_cross_chain_call"
 // Resolver walks three levels of funcReturnTypes — V1.5's pattern
 // with one more link.
 const dispatchKindUsingForTripleChainCall = "using_for_triple_chain_call"
+
+// dispatchKindUsingForStructFieldCall (V1.10) tags PendingRefs for
+// struct-field-receiver dispatch `<obj>.<field>.<method>(...)`.
+// TargetQName encodes `<objName>|<fieldName>|<methodName>`.
+// Resolver chain: obj → typeName (stateVarTypes / paramTypes) →
+// (typeName, fieldName) → fieldType (structFieldTypes) →
+// (callerContractID, fieldType) → libraryName (bindings) → method.
+const dispatchKindUsingForStructFieldCall = "using_for_struct_field_call"
 
 // dispatchKindUsingForGenericChainCall (V1.8) tags PendingRefs from
 // the generic iterative chain walker. Covers arbitrary-depth chains

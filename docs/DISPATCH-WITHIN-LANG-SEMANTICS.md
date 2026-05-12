@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.9 10-tier dispatch — V1.0-V1.8 + **this-receiver V1.9**; struct-field receivers + multi-return tuple V1.10+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.10 11-tier dispatch — V1.0-V1.9 + **struct-field receiver V1.10**; multi-return tuple + nested struct field V1.11+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,21 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.10 (Sol `using For` struct-field receiver
+`<obj>.<field>.<method>`) ✅ landed 2026-05-12. obj 는 state-var/
+parameter 의 declared type 이 known struct, field 는 그 struct 의
+member. `runStructFieldMeta` (queryStruct 매칭 + struct_body 의
+struct_member 순회 → side-channel PendingRef 로 (structName, fieldName,
+fieldType) 색인) + `matchStructFieldReceiverMethodCall` predicate
+(V1.9 와 동일 shape 단 inner.object 가 "this" 아닌 identifier) + 신규
+`dispatchKindUsingForStructFieldCall` + `resolveUsingForStructFieldCallRef`
+6-step chain (funcID → containerID → objType → structFieldTypes lookup
+→ fieldType → libraryName → libraryFunctionID). 신규 structFieldTypeMap
+타입. real-world OpenZeppelin 의 흔한 `info.amount.add(x)` 패턴 처리.
+3 fixture + 3 test (basic struct state-var, unknown field drop, struct
+param fallback). 25/25 PASS, vet clean. V1.11+ carry-over: multi-return
+tuple destructuring, nested struct field, cross-file struct validation.
 
 W-C W6 V1.9 (Sol `using For` `this.<state-var>.<method>` receiver)
 ✅ landed 2026-05-12. Sol stylistic variant of V1.0's bare-name
