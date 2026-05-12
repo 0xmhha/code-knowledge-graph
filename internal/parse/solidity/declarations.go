@@ -27,6 +27,14 @@ type declVisitor struct {
 	// alias before pushing onto the binding pipeline. Populated by
 	// runImportAliases prior to runUsingFor.
 	importAliases map[string]string
+	// W-C W6 V1.29 (2026-05-12): per-file set of whole-file namespace
+	// aliases from `import "./util.sol" as L` directives — `L` is a
+	// namespace prefix, not a library name. runUsingFor consults this
+	// set when iterating the type_alias identifier sequence of
+	// `using L.SafeMath for ...` so the leading namespace identifier
+	// is skipped (otherwise Pass 2 byName[NodeContract] would emit a
+	// false-positive EdgeUsesFor against any unrelated contract named L).
+	namespaceAliases map[string]bool
 }
 
 // newDeclVisitor allocates a per-file visitor with a local abi map. The
@@ -35,12 +43,13 @@ type declVisitor struct {
 // concurrent ParseFile dispatch buildpipe now uses.
 func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.Node) *declVisitor {
 	v := &declVisitor{
-		rel:           rel,
-		src:           src,
-		lang:          lang,
-		root:          root,
-		abi:           map[string][]ABISig{},
-		importAliases: map[string]string{},
+		rel:              rel,
+		src:              src,
+		lang:             lang,
+		root:             root,
+		abi:              map[string][]ABISig{},
+		importAliases:    map[string]string{},
+		namespaceAliases: map[string]bool{},
 	}
 	fileQ := "file:" + rel
 	v.fileID = parse.MakeID(fileQ, "sol", 0)
@@ -532,6 +541,22 @@ func (v *declVisitor) runImportAliases() {
 			case "alias":
 				aliases = append(aliases, c)
 			}
+		}
+		// Whole-file alias form (V1.29): `import "./util.sol" as L` —
+		// the directive has alias but no import_name. Aliases without
+		// a matched import_name partner are namespace prefixes, not
+		// library names. Register them in namespaceAliases so
+		// runUsingFor skips emitting PendingRefs for them when they
+		// appear as the leading identifier in a qualified type_alias
+		// (`using L.SafeMath for ...`).
+		if len(aliases) > 0 && len(importNames) == 0 {
+			for _, a := range aliases {
+				name := a.Utf8Text(v.src)
+				if name != "" {
+					v.namespaceAliases[name] = true
+				}
+			}
+			continue
 		}
 		// Pair alias[i] ↔ import_name[i] up to the shorter length.
 		// Solidity grammar always emits matched pairs for aliased

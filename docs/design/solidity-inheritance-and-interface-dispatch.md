@@ -74,14 +74,18 @@
 > abstract 도 자동 cover 함을 fixture 로 잠금.
 > V1.27 inherited modifier `using` regression guard — V1.0 + V1.2 +
 > V1.22 3-way intersection guard.
-> V1.28 ✅ **aliased import resolution** —
+> V1.28 aliased import resolution —
 > `import {SafeMath as SM} from "./util.sol"; using SM for uint256;`
-> 패턴이 SM 을 library identifier 로 lookup 해 miss → false-negative.
-> declVisitor 에 per-file importAliases map 추가 + runImportAliases
-> walker (import_directive 의 import_name/alias 페어를 positional
-> 매칭) + runUsingFor 에서 libName resolution 직전 alias map consult.
-> Whole-file alias (`import "./util.sol" as L; L.SafeMath.add`
-> qualified access) 와 block-scoped shadowing 정확화는 V1.29+ follow-up.
+> 패턴의 false-negative 수정. declVisitor 에 per-file importAliases
+> map + runImportAliases walker + runUsingFor 에서 alias substitute.
+> V1.29 ✅ **whole-file alias qualified using** —
+> `import "./util.sol" as L; using L.SafeMath for uint256;` — type_alias
+> 가 multi-identifier sequence [L, SafeMath]. tree-sitter query 가
+> 각 identifier 별 매치 발산 → L PendingRef 도 emit 되어 unrelated
+> contract 이름 L 과 충돌 시 false-positive EdgeUsesFor. namespaceAliases
+> set 신규 (runImportAliases 가 import_name 없는 whole-file alias 를
+> 등록), runUsingFor 가 leading namespace-alias 식별자 skip.
+> Block-scoped shadowing 정확화 만 V1.30+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

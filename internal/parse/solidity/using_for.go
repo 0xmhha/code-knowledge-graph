@@ -102,6 +102,18 @@ func (v *declVisitor) runUsingFor() {
 		containerStart := int(containerNode.StartByte())
 		srcID := parse.MakeID(containerName, "sol", containerStart)
 		libName := libNode.Utf8Text(v.src)
+		// W-C W6 V1.29 (2026-05-12): skip leading namespace-alias
+		// identifiers. tree-sitter emits one query match per
+		// type_alias child identifier, so `using L.SafeMath for ...`
+		// fans out into two matches (libName="L" and libName="SafeMath").
+		// The "L" match is a namespace prefix from
+		// `import "./util.sol" as L` — registered in namespaceAliases
+		// by runImportAliases. Without this skip Pass 2's byName
+		// lookup could surface an unrelated contract named L as a
+		// false-positive EdgeUsesFor.
+		if v.namespaceAliases[libName] {
+			continue
+		}
 		// W-C W6 V1.28 (2026-05-12): apply per-file alias map populated
 		// by runImportAliases. `import {SafeMath as SM} from "..."` +
 		// `using SM for ...` → SM is resolved to SafeMath here so the
