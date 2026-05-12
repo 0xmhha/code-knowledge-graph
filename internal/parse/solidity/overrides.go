@@ -131,6 +131,12 @@ func (v *declVisitor) runFunctionDecl() {
 		// captures only the first declared return type (multi-return
 		// tuples drop their tail — V1.4+).
 		emitFunctionReturnMetaPending(v, id, declNode)
+		// W-C W6 V1.15 (2026-05-12): emit local-variable name→type
+		// PendingRefs for every `variable_declaration_statement` in the
+		// function body (single-var form only — tuple destructuring is
+		// V1.16+). Pass 2 indexes these into (funcID, varName) → typeName
+		// for local-var receiver dispatch resolution.
+		emitLocalVarMetaPending(v, id, declNode)
 
 		if !override.present {
 			continue
@@ -272,6 +278,99 @@ func emitFunctionReturnMetaPending(v *declVisitor, funcID string, declNode *sitt
 // first declared return type for chained-call dispatch resolution.
 // Resolver sweeps these into the funcReturnTypes index — no graph edge.
 const dispatchKindUsingForFnReturn = "using_for_fn_return"
+
+// emitLocalVarMetaPending — W-C W6 V1.15 (2026-05-12). Walks every
+// `variable_declaration_statement` reachable from a function's body and
+// queues one PendingRef per single-var declaration carrying
+// (varName, typeName). Pass 2 indexes these into (funcID, varName) →
+// typeName for local-var receiver dispatch resolution.
+//
+// Scope (V1.15 V0):
+//   - Single-var form only: `Type x = expr;`. The variable_declaration
+//     child of variable_declaration_statement must be of kind
+//     `variable_declaration` (not `variable_declaration_tuple`). Tuple
+//     destructuring (`(Ta a, Tb b) = foo();`) is V1.16+.
+//   - All blocks descended: variable_declaration_statement inside
+//     if / for / while bodies are captured too. V1.15 V0 treats locals
+//     as function-scoped (no block-scope shadowing — first-declaration
+//     wins by map-overwrite order, which matches typical Solidity style
+//     where shadowing in nested blocks is rare).
+//
+// TargetQName encoding: `varName|typeName` (mirrors V1.1 parameter form).
+// SrcID = function's node ID so Pass 2 joins against the same funcID
+// space used by containerIDByFuncID / paramTypes.
+//
+// Tree-sitter shape (verified via node-types.json v1.2.13):
+//
+//	variable_declaration_statement
+//	  value: expression (optional, RHS)
+//	  children:
+//	    variable_declaration                ← single-var (V1.15 scope)
+//	      location: 'calldata' | 'memory' | 'storage' (optional)
+//	      name: identifier
+//	      type: type_name
+//	    | variable_declaration_tuple        ← V1.16+ (drop here)
+func emitLocalVarMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
+	if declNode == nil {
+		return
+	}
+	body := declNode.ChildByFieldName("body")
+	if body == nil {
+		return
+	}
+	collectLocalVarMetaPending(v, funcID, body)
+}
+
+// collectLocalVarMetaPending recursively descends every named child of n,
+// emitting a meta PendingRef for each `variable_declaration_statement`
+// containing a single-var `variable_declaration` child. Tuple-form
+// statements are skipped (V1.16+).
+func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
+	if n == nil {
+		return
+	}
+	if n.Kind() == "variable_declaration_statement" {
+		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
+			child := n.NamedChild(i)
+			if child == nil || child.Kind() != "variable_declaration" {
+				continue
+			}
+			nameNode := child.ChildByFieldName("name")
+			typeNode := child.ChildByFieldName("type")
+			if nameNode == nil || typeNode == nil {
+				continue
+			}
+			varName := nameNode.Utf8Text(v.src)
+			typeName := extractTypeNameText(typeNode, v.src)
+			if varName == "" || typeName == "" {
+				continue
+			}
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        funcID,
+				EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
+				TargetQName:  varName + "|" + typeName,
+				Line:         int(nameNode.StartPosition().Row) + 1,
+				DispatchKind: dispatchKindUsingForLocalVar,
+			})
+			// Only one variable_declaration per statement in single-var form;
+			// further named children are the `value` expression which we
+			// don't care about here.
+			break
+		}
+		// Don't recurse into the variable_declaration_statement — no nested
+		// declaration statements inside it.
+		return
+	}
+	for i := uint(0); i < uint(n.NamedChildCount()); i++ {
+		collectLocalVarMetaPending(v, funcID, n.NamedChild(i))
+	}
+}
+
+// dispatchKindUsingForLocalVar (W-C W6 V1.15) tags PendingRefs carrying
+// function-local variable (name, type) bindings for the local-var
+// receiver dispatch path. Resolver sweeps these into localVarTypes
+// index — pure side-channel, no graph edge.
+const dispatchKindUsingForLocalVar = "using_for_local_var_type"
 
 // overrideInfo carries the parsed result of an override_specifier.
 //

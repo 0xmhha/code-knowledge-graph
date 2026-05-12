@@ -21,11 +21,16 @@ import (
 //                                 struct-field receiver dispatch needs
 //                                 the field's declared type as the
 //                                 binding lookup key).
+//   localVarTypeMap:    funcID → localVarName → typeName (V1.15 —
+//                                 function-local variable receiver
+//                                 dispatch; resolver fallback after
+//                                 stateVarTypes → paramTypes).
 type bindingMap map[string]map[string]string
 type stateVarTypeMap map[string]map[string]string
 type paramTypeMap map[string]map[string]string
 type funcReturnTypeMap map[string]string
 type structFieldTypeMap map[string]map[string]string
+type localVarTypeMap map[string]map[string]string
 
 // Resolve unions per-file results. V0 cross-file resolution is name-based:
 // pending edges (emits_event, has_modifier, writes_mapping) are matched
@@ -236,6 +241,11 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// fieldType so `<obj>.<field>.<method>` dispatch can look up the
 	// field's declared type and feed it to the binding map.
 	structFieldTypes := structFieldTypeMap{}
+	// W6 V1.15 (2026-05-12) — pre-build (funcID, localVarName) →
+	// typeName so `Type x = ...; x.method(...)` local-var receiver
+	// dispatch can resolve x's declared type. Fallback chain on receivers:
+	// stateVarTypes → paramTypes → localVarTypes.
+	localVarTypes := localVarTypeMap{}
 	for _, r := range results {
 		for _, pr := range r.Pending {
 			switch pr.DispatchKind {
@@ -280,6 +290,19 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 					structFieldTypes[structName] = map[string]string{}
 				}
 				structFieldTypes[structName][fieldName] = fieldType
+			case dispatchKindUsingForLocalVar:
+				// TargetQName encoding from emitLocalVarMetaPending:
+				// `varName|typeName` (two parts).
+				sep := strings.IndexByte(pr.TargetQName, '|')
+				if sep < 0 {
+					continue
+				}
+				varName := pr.TargetQName[:sep]
+				typeName := pr.TargetQName[sep+1:]
+				if localVarTypes[pr.SrcID] == nil {
+					localVarTypes[pr.SrcID] = map[string]string{}
+				}
+				localVarTypes[pr.SrcID][varName] = typeName
 			}
 		}
 	}
@@ -395,7 +418,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			// as the other Sol resolvers.
 			if pr.DispatchKind == dispatchKindUsingForCall {
 				if edge, ok := resolveUsingForCallRef(
-					pr, bindings, stateVarTypes, paramTypes,
+					pr, bindings, stateVarTypes, paramTypes, localVarTypes,
 					containerIDByFuncID, funcByQName, nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
@@ -508,7 +531,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			// type to the field's declared type, then binding lookup.
 			if pr.DispatchKind == dispatchKindUsingForStructFieldCall {
 				if edge, ok := resolveUsingForStructFieldCallRef(
-					pr, bindings, stateVarTypes, paramTypes,
+					pr, bindings, stateVarTypes, paramTypes, localVarTypes,
 					structFieldTypes, containerIDByFuncID, funcByQName,
 					nodeFile,
 				); ok {
@@ -522,7 +545,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			// struct's field2).
 			if pr.DispatchKind == dispatchKindUsingForNestedStructFieldCall {
 				if edge, ok := resolveUsingForNestedStructFieldCallRef(
-					pr, bindings, stateVarTypes, paramTypes,
+					pr, bindings, stateVarTypes, paramTypes, localVarTypes,
 					structFieldTypes, containerIDByFuncID, funcByQName,
 					nodeFile,
 				); ok {
@@ -535,7 +558,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			// through structFieldTypes.
 			if pr.DispatchKind == dispatchKindUsingForGenericMemberChainCall {
 				if edge, ok := resolveUsingForGenericMemberChainCallRef(
-					pr, bindings, stateVarTypes, paramTypes,
+					pr, bindings, stateVarTypes, paramTypes, localVarTypes,
 					structFieldTypes, containerIDByFuncID, funcByQName,
 					nodeFile,
 				); ok {
@@ -741,17 +764,55 @@ func resolveUsingForRef(
 	}, true
 }
 
-// resolveUsingForCallRef resolves one W6 V1.0/V1.1 method-call PendingRef
-// (`<receiver>.<method>(...)`) to a single EdgeCalls edge. Four-step
-// chain — any step's failure drops the edge (V0 strict-purge):
+// lookupReceiverType resolves a receiver identifier to its declared type
+// using the V1.0 / V1.1 / V1.15 three-tier fallback: stateVarTypes
+// (V1.0 state-variable) → paramTypes (V1.1 function parameter) →
+// localVarTypes (V1.15 function-local declaration). Returns "" when no
+// tier has a binding.
+//
+// Shared across every using-for resolver that needs to look up an
+// identifier-named receiver (V1.0/V1.1/V1.9, V1.4/V1.6/V1.8 cross-mode,
+// V1.10/V1.11/V1.12 struct-walker obj). V1.13's `this.<state-var>...`
+// shape intentionally bypasses this helper — `this` references the
+// caller contract, so the named member must be a state variable, never
+// a param or local.
+func lookupReceiverType(
+	name, contractID, funcID string,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
+) string {
+	if varMap := stateVarTypes[contractID]; varMap != nil {
+		if t := varMap[name]; t != "" {
+			return t
+		}
+	}
+	if paramMap := paramTypes[funcID]; paramMap != nil {
+		if t := paramMap[name]; t != "" {
+			return t
+		}
+	}
+	if localMap := localVarTypes[funcID]; localMap != nil {
+		if t := localMap[name]; t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
+// resolveUsingForCallRef resolves one W6 V1.0/V1.1/V1.9/V1.15
+// method-call PendingRef (`<receiver>.<method>(...)`) to a single
+// EdgeCalls edge. Four-step chain — any step's failure drops the edge
+// (V0 strict-purge):
 //
 //  1. funcID → enclosing containerID via containerIDByFuncID.
-//  2. (containerID, receiverName) → typeName via stateVarTypes
-//     (state-variable receiver, V1.0).
-//     Fall back to (funcID, receiverName) → typeName via paramTypes
-//     (function-parameter receiver, V1.1) when no state var matches.
-//     state-var first because state declarations shadow parameters in
-//     Solidity scoping.
+//  2. receiverName → typeName via three-tier fallback:
+//     - (containerID, name) → stateVarTypes (V1.0 state-var)
+//     - (funcID, name) → paramTypes (V1.1 parameter)
+//     - (funcID, name) → localVarTypes (V1.15 local-var)
+//     stateVar / param / local share one identifier namespace per
+//     function in Solidity (solc errors on shadowing within scope), so
+//     the order shapes precedence but cannot mis-resolve in valid code.
 //  3. (containerID, typeName) → libraryName via bindings — falls back to
 //     wildcard "*" binding when no specific binding exists (Q9-3 (a)
 //     specific-first decision).
@@ -767,6 +828,7 @@ func resolveUsingForCallRef(
 	bindings bindingMap,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
 	containerIDByFuncID map[string]string,
 	funcByQName map[string][]string,
 	nodeFile map[string]string,
@@ -783,20 +845,12 @@ func resolveUsingForCallRef(
 	if !ok {
 		return types.Edge{}, false
 	}
-	// Receiver type lookup: state-variable first (V1.0), then parameter
-	// (V1.1). Solidity scoping rules mean a function parameter cannot
-	// shadow a state variable in the receiver position — solc errors out
-	// — so the order doesn't change correctness, but state-var first
-	// keeps the common case on the hot path.
-	var typeName string
-	if varMap := stateVarTypes[contractID]; varMap != nil {
-		typeName = varMap[receiverName]
-	}
-	if typeName == "" {
-		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
-			typeName = paramMap[receiverName]
-		}
-	}
+	// Receiver type lookup chain: state-var (V1.0) → parameter (V1.1) →
+	// local-var (V1.15). Solidity scoping rules mean these three name-
+	// spaces don't legally overlap within a single function, so the
+	// order shapes precedence but cannot mis-resolve in valid code.
+	typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
+		stateVarTypes, paramTypes, localVarTypes)
 	if typeName == "" {
 		return types.Edge{}, false
 	}
@@ -1533,6 +1587,7 @@ func resolveUsingForStructFieldCallRef(
 	bindings bindingMap,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
 	structFieldTypes structFieldTypeMap,
 	containerIDByFuncID map[string]string,
 	funcByQName map[string][]string,
@@ -1550,16 +1605,9 @@ func resolveUsingForStructFieldCallRef(
 	if !ok {
 		return types.Edge{}, false
 	}
-	// Resolve obj's declared type (state-var first, then parameter).
-	var objType string
-	if varMap := stateVarTypes[callerContractID]; varMap != nil {
-		objType = varMap[objName]
-	}
-	if objType == "" {
-		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
-			objType = paramMap[objName]
-		}
-	}
+	// V1.15: state-var → param → local-var three-tier fallback.
+	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
+		stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1622,6 +1670,7 @@ func resolveUsingForNestedStructFieldCallRef(
 	bindings bindingMap,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
 	structFieldTypes structFieldTypeMap,
 	containerIDByFuncID map[string]string,
 	funcByQName map[string][]string,
@@ -1639,16 +1688,9 @@ func resolveUsingForNestedStructFieldCallRef(
 	if !ok {
 		return types.Edge{}, false
 	}
-	// Resolve obj's declared type (state-var first, then parameter).
-	var objType string
-	if varMap := stateVarTypes[callerContractID]; varMap != nil {
-		objType = varMap[objName]
-	}
-	if objType == "" {
-		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
-			objType = paramMap[objName]
-		}
-	}
+	// V1.15: state-var → param → local-var three-tier fallback.
+	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
+		stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1728,6 +1770,7 @@ func resolveUsingForGenericMemberChainCallRef(
 	bindings bindingMap,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
 	structFieldTypes structFieldTypeMap,
 	containerIDByFuncID map[string]string,
 	funcByQName map[string][]string,
@@ -1751,16 +1794,9 @@ func resolveUsingForGenericMemberChainCallRef(
 	if !ok {
 		return types.Edge{}, false
 	}
-	// Resolve obj's declared type.
-	var objType string
-	if varMap := stateVarTypes[callerContractID]; varMap != nil {
-		objType = varMap[objName]
-	}
-	if objType == "" {
-		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
-			objType = paramMap[objName]
-		}
-	}
+	// V1.15: state-var → param → local-var three-tier fallback.
+	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
+		stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
