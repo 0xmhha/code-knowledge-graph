@@ -67,13 +67,12 @@
 > "receive") 으로 disambiguate, synthetic qname "Container.fallback" /
 > "Container.receive", SubKind 동일. V1.22 meta idiom + nearestFunction
 > QnameAndStart 확장.
-> V1.25 ✅ **free function regression guard** — Sol 0.7.4+ file-level
-> function_definition. nearestContractName "" → bare qname, Pass 1.5
-> containerIDByFuncID 미진입, `using` 은 contract-scope 만이라 free
-> function 내부에 dispatch 발산 없음. Fixture 가 (a) free function
-> parse 정상, (b) phantom EdgeCalls 미생성, (c) 같은 파일의 contract
-> using-for 정상 동작 확정.
-> Block-scoped shadowing 정확화 / module-import 만 V1.26+ follow-up.
+> V1.25 free function regression guard — Sol 0.7.4+ file-level
+> function_definition. phantom EdgeCalls 미생성 확정.
+> V1.26 ✅ **abstract contract body scope regression guard** — abstract
+> 가 contract_declaration AST kind 와 동일 (W4 SubKind 만 다름). V1.x
+> using-for indexing 이 abstract 도 자동 cover 함을 fixture 로 잠금.
+> Block-scoped shadowing 정확화 / module-import 만 V1.27+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
