@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.3 dispatch chain — state-var / parameter / inherited / return chaining; cross-contract chaining V1.4+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.4 dispatch chain — state-var / parameter / inherited / return chain / cross-contract chain; deeper chains + multi-return tuple V1.5+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,22 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.4 (Sol `using For` cross-contract chained dispatch
+`<obj>.<fn>().<method>`) ✅ landed 2026-05-12. receiver obj 가 state
+var 또는 parameter (V1.0/V1.1 인덱스 재사용); typeName 이 known
+Contract / Interface 이면 inner method 의 declaration 을 그 container
+의 namespace 에서 찾고, 그 method 의 return type 을 V1.3 처럼 receiver
+type 으로 사용. `matchCrossContractChain` predicate (outer
+member_expression.object 가 inner call_expression, inner
+call_expression.function 이 inner member_expression) + 신규
+`dispatchKindUsingForCrossChainCall` + `resolveUsingForCrossChainCallRef`
+7-step chain (funcID → containerID → receiverType → innerFuncID →
+returnType → libraryName → libraryFunctionID). Type cast
+(`IFoo(addr).bar()`) 는 inner function 이 identifier 라 V1.3 가 먼저
+매칭, V1.4 는 member_expression 만. 3 fixture + 3 test (basic,
+unknown_method drop, primitive_drop). 25/25 PASS, vet clean. V1.5+
+carry-over: deeper chains, multi-return tuple slot.
 
 W-C W6 V1.3 (Sol `using For` chained-call dispatch `<fn>().<method>`)
 ✅ landed 2026-05-12. V1.3 첫 시도 = free-function form (`using {Lib.f1,

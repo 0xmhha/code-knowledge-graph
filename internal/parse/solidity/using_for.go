@@ -223,6 +223,25 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// V1.4: cross-contract chained shape `<obj>.<innerFn>().<method>(...)`.
+			// Inner expression is a member call on a state-var / parameter
+			// receiver. Resolver follows the receiver's contract type to
+			// look up the inner function's declaration, then uses that
+			// function's return type as the V1.3-style chain receiver.
+			if receiverObj, innerFnName, methodName, ok := matchCrossContractChain(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  receiverObj + "|" + innerFnName + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForCrossChainCall,
+				})
+				continue
+			}
 		}
 	}
 }
@@ -260,6 +279,81 @@ func matchStateVarMethodCall(member *sitter.Node, src []byte) (string, string, b
 		return "", "", false
 	}
 	return innerObj.Utf8Text(src), property.Utf8Text(src), true
+}
+
+// matchCrossContractChain — W-C W6 V1.4 (2026-05-12). Tests whether a
+// member_expression fits the cross-contract chained shape
+// `<obj>.<innerFn>().<method>` where the outer expression is invoking
+// `<method>` on the return value of a method call on a state-var /
+// parameter receiver.
+//
+// Returns (receiverObjName, innerFnName, methodName, true) on match.
+//
+// AST shape (verified via probe):
+//
+//	call_expression                                ← outer .method(...)
+//	  function: expression
+//	    member_expression                          ← outer
+//	      object: expression
+//	        call_expression                        ← inner .innerFn(...)
+//	          function: expression
+//	            member_expression                  ← inner
+//	              object: expression
+//	                identifier (receiverObjName)   ← state var / param
+//	              property: identifier (innerFnName)
+//	      property: identifier (methodName)
+//
+// Rejects:
+//   - `factory().bar()` — inner function-position is identifier, not
+//     member_expression (handled by matchChainedMethodCall, V1.3).
+//   - `obj.field.bar()` — inner is just member access without call
+//     (V1.x property-chain support).
+//   - Deeper chains like `obj.foo().baz().bar()` — outer's object is
+//     itself a call_expression whose function is a member_expression on
+//     another call_expression. V1.5+ recursive chains.
+//
+// Edge case: the receiverObjName might also match an interface variable
+// (`IFoo iface; iface.fn()`) — the resolver re-checks against
+// stateVarTypes / paramTypes, where the typeName recorded by V1.0/V1.1
+// would be "IFoo". The resolver step 3 maps that to the interface's
+// declared methods.
+func matchCrossContractChain(member *sitter.Node, src []byte) (string, string, string, bool) {
+	if member == nil {
+		return "", "", "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	object := member.ChildByFieldName("object")
+	innerCall := unwrapExpression(object)
+	if innerCall == nil || innerCall.Kind() != "call_expression" {
+		return "", "", "", false
+	}
+	innerFn := innerCall.ChildByFieldName("function")
+	innerMember := unwrapExpression(innerFn)
+	if innerMember == nil || innerMember.Kind() != "member_expression" {
+		return "", "", "", false
+	}
+	innerObj := innerMember.ChildByFieldName("object")
+	innerObjIdent := unwrapExpression(innerObj)
+	if innerObjIdent == nil || innerObjIdent.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	innerProperty := innerMember.ChildByFieldName("property")
+	if innerProperty == nil || innerProperty.Kind() != "identifier" {
+		return "", "", "", false
+	}
+	// Outer must be a call_expression (the chained `.method()` is itself
+	// invoked).
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", "", false
+	}
+	return innerObjIdent.Utf8Text(src), innerProperty.Utf8Text(src), property.Utf8Text(src), true
 }
 
 // matchChainedMethodCall — W-C W6 V1.3 (2026-05-12). Tests whether a
@@ -345,3 +439,12 @@ const dispatchKindUsingForCall = "using_for_call"
 // receiver lookup goes through funcReturnTypes instead of stateVarTypes
 // / paramTypes (Pass 2 splits the resolver paths by DispatchKind).
 const dispatchKindUsingForChainCall = "using_for_chain_call"
+
+// dispatchKindUsingForCrossChainCall (V1.4) tags PendingRefs for
+// cross-contract chained dispatch: `<obj>.<innerFn>().<method>(...)`.
+// TargetQName encodes `<receiverObjName>|<innerFnName>|<methodName>`
+// (three parts, '|'-separated). Pass 2 splits the chain across
+// stateVarTypes / paramTypes (obj→type) + byName (type→contract) +
+// funcByQName (contract.innerFn→funcID) + funcReturnTypes (funcID→
+// returnType) + bindings (callerContractID, returnType→library).
+const dispatchKindUsingForCrossChainCall = "using_for_cross_chain_call"

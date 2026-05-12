@@ -394,6 +394,22 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.4 cross-contract chained branch — resolves
+			// `<obj>.<innerFn>().<method>(...)` by walking the
+			// receiver's typeName to find the inner function in the
+			// receiver's contract / interface, then chaining through
+			// the inner function's return type to the using-for
+			// binding map. Same strict-drop policy.
+			if pr.DispatchKind == dispatchKindUsingForCrossChainCall {
+				if edge, ok := resolveUsingForCrossChainCallRef(
+					pr, bindings, stateVarTypes, paramTypes,
+					funcReturnTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -771,6 +787,106 @@ func resolveUsingForChainCallRef(
 	}
 	srcFile := nodeFile[pr.SrcID]
 	dstID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForCrossChainCallRef — W6 V1.4 (2026-05-12). Resolves a
+// cross-contract chained call PendingRef
+// (`<obj>.<innerFn>().<method>(...)`) to a single EdgeCalls edge.
+// 7-step chain — any failure drops the edge:
+//
+//  1. funcID (caller) → callerContainerID via containerIDByFuncID.
+//  2. receiverObjName → receiverType (stateVarTypes first, then
+//     paramTypes) — same lookup order as V1.0/V1.1.
+//  3. receiverType → receiverContainerID via byName[NodeContract /
+//     NodeInterface] (primitive types like uint256 → fail because
+//     they're not in the container index, dropping cleanly).
+//  4. `<receiverType>.<innerFn>` → innerFuncID via funcByQName,
+//     preferring the same-file candidate as the receiver contract.
+//  5. innerFuncID → returnTypeName via funcReturnTypes.
+//  6. (callerContainerID, returnTypeName) → libraryName via bindings,
+//     wildcard `*` fallback.
+//  7. `<libraryName>.<methodName>` → libraryFunctionID via funcByQName.
+//
+// Confidence: ConfExtracted when caller and library are same-file;
+// ConfInferred when they differ. Receiver contract's file doesn't
+// downgrade confidence here.
+func resolveUsingForCrossChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	funcReturnTypes funcReturnTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	// TargetQName encoding from runUsingForCalls cross-chain branch:
+	// `receiverObjName|innerFnName|methodName`.
+	parts := strings.SplitN(pr.TargetQName, "|", 3)
+	if len(parts) != 3 {
+		return types.Edge{}, false
+	}
+	receiverObj := parts[0]
+	innerFnName := parts[1]
+	methodName := parts[2]
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	// Receiver type (V1.0 / V1.1 idiom): state-var first, then parameter.
+	var receiverType string
+	if varMap := stateVarTypes[callerContractID]; varMap != nil {
+		receiverType = varMap[receiverObj]
+	}
+	if receiverType == "" {
+		if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+			receiverType = paramMap[receiverObj]
+		}
+	}
+	if receiverType == "" {
+		return types.Edge{}, false
+	}
+	// Receiver type must reference a known Contract or Interface — uint256
+	// and friends drop here. The inner function lookup uses the typeName
+	// as a qname prefix; we don't need the receiver's container ID
+	// explicitly, but the funcByQName key requires the receiver type to
+	// match an existing container's name.
+	innerQname := receiverType + "." + innerFnName
+	ids := funcByQName[innerQname]
+	if len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	innerFuncID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	returnType, ok := funcReturnTypes[innerFuncID]
+	if !ok || returnType == "" {
+		return types.Edge{}, false
+	}
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[returnType]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
 	conf := types.ConfExtracted
 	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
 		conf = types.ConfInferred
