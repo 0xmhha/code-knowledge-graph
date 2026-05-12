@@ -62,6 +62,12 @@ func (v *declVisitor) visit() {
 	// continue to resolve against the same Function node.
 	v.runFunctionDecl()
 	v.runDecl(queryModifier, types.NodeModifier)
+	// W-C W6 V1.22 (2026-05-12): emit parameter / local-var meta for
+	// every modifier_definition so receivers used inside the modifier
+	// body (params, locals) flow through the same lookupReceiverType
+	// path as function bodies. runDecl(queryModifier, ...) creates the
+	// NodeModifier; this pass adds the side-channel meta PendingRefs.
+	v.runModifierMeta()
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)
 	v.runDecl(queryEnum, types.NodeEnum)
@@ -120,7 +126,13 @@ func (v *declVisitor) runDecl(q string, nt types.NodeType) {
 			startByte := int(node.StartByte())
 			endByte := int(node.EndByte())
 			qname := ident
-			if nt == types.NodeFunction {
+			// W-C W6 V1.22 (2026-05-12): modifiers also get a
+			// Container.<name> qname so containerIDByFuncID (Pass 1.5)
+			// can resolve their enclosing contract from the qname
+			// prefix — same idiom as NodeFunction. byName indexing
+			// (resolve.go) keys NodeModifier on bare Name field, so
+			// the qname change doesn't break EdgeHasModifier resolution.
+			if nt == types.NodeFunction || nt == types.NodeModifier {
 				if cn := nearestContractName(&node, v.src); cn != "" {
 					qname = cn + "." + ident
 				}
@@ -393,6 +405,58 @@ func (v *declVisitor) collectABI() {
 
 // helpers
 
+// runModifierMeta — W-C W6 V1.22 (2026-05-12). Walks every
+// modifier_definition node and emits the V1.1 / V1.15 meta PendingRefs
+// against its modifier ID. modifier_definition has the same shape as
+// function_definition for parameter children and body field, so the
+// existing emit helpers work without modification. (Modifiers have no
+// return_type, so emitFunctionReturnMetaPending / emit-named-return are
+// not applicable here.)
+//
+// The modifier ID is recomputed from the same (qname, startByte) pair
+// that runDecl(NodeModifier) used (qname is now `Container.modifier`
+// per the V1.22 runDecl change). Two-pass split keeps runDecl generic
+// and isolates the meta walk to its own function.
+func (v *declVisitor) runModifierMeta() {
+	query, qErr := sitter.NewQuery(v.lang, queryModifier)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var nameNode, declNode *sitter.Node
+		for _, c := range m.Captures {
+			switch names[c.Index] {
+			case "name":
+				n := c.Node
+				nameNode = &n
+			case "decl":
+				n := c.Node
+				declNode = &n
+			}
+		}
+		if nameNode == nil || declNode == nil {
+			continue
+		}
+		ident := nameNode.Utf8Text(v.src)
+		qname := ident
+		if cn := nearestContractName(nameNode, v.src); cn != "" {
+			qname = cn + "." + ident
+		}
+		id := parse.MakeID(qname, "sol", int(nameNode.StartByte()))
+		emitParameterMetaPending(v, id, declNode)
+		emitLocalVarMetaPending(v, id, declNode)
+	}
+}
+
 // nearestContractName walks the parent chain looking for an enclosing
 // contract-like declaration and returns its name (empty if none).
 //
@@ -427,7 +491,13 @@ func nearestContractName(n *sitter.Node, src []byte) string {
 func nearestFunctionQnameAndStart(n *sitter.Node, src []byte) (string, int, bool) {
 	cn := nearestContractName(n, src)
 	for cur := n; cur != nil; cur = cur.Parent() {
-		if cur.Kind() == "function_definition" {
+		// W-C W6 V1.22 (2026-05-12): modifier_definition joins
+		// function_definition as a possible enclosing-callable scope.
+		// Both share Contract.<name> qname (V1.22 runDecl change) and
+		// are indexed in containerIDByFuncID (V1.22 Pass 1.5 change),
+		// so using-for PendingRefs emitted from inside a modifier body
+		// resolve through the same path as function-body emits.
+		if cur.Kind() == "function_definition" || cur.Kind() == "modifier_definition" {
 			id := cur.ChildByFieldName("name")
 			if id == nil {
 				return "", 0, false

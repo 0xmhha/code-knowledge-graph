@@ -46,12 +46,19 @@
 > regression guard. (b) try/catch returns clause named-param false-
 > negative 수정 (collectLocalVarMetaPending 에 try_statement 분기 추가
 > + emitTryReturnsBinding helper).
-> V1.21 ✅ **catch_clause named parameter** — `catch Type(Ta a) { ... }`
-> 의 catch parameter 가 V1.20 try_statement 분기 밖이라 미캡처 →
-> false-negative 수정. collectLocalVarMetaPending 에 catch_clause
-> 분기 추가, V1.20 의 emitTryReturnsBinding helper 재사용.
-> Block-scoped shadowing 정확화 / module-import 처리 만 V1.22+
-> follow-up.
+> V1.21 catch_clause named parameter — `catch Type(Ta a) { ... }` 의
+> catch parameter 가 V1.20 try_statement 분기 밖이라 미캡처 → false-
+> negative 수정. collectLocalVarMetaPending 에 catch_clause 분기 추가,
+> V1.20 의 emitTryReturnsBinding helper 재사용.
+> V1.22 ✅ **modifier body scope captures** —
+> modifier_definition 의 parameter/local 이 V1.1/V1.15 emit 에서 미캡처
+> (runFunctionDecl 만 호출됨) → modifier body 내 receiver dispatch drop.
+> runModifierMeta walker 신규 + NodeModifier qname 에 Container 접두사
+> 추가 + Pass 1.5 containerIDByFuncID 에 NodeModifier 포함 +
+> nearestFunctionQnameAndStart 가 modifier_definition 도 인식.
+> constructor_definition (graph node 없음 — V1.23+) / fallback_receive_
+> definition / free function / block-scoped shadowing 정확화 /
+> module-import 만 V1.23+ follow-up.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

@@ -36,23 +36,6 @@
       "sub_kind": "function"
     },
     {
-      "id": "4839dadb79472c7e",
-      "type": "Modifier",
-      "name": "nonZero",
-      "qualified_name": "nonZero",
-      "file_path": "Vault.sol",
-      "start_line": 7,
-      "end_line": 7,
-      "start_byte": 164,
-      "end_byte": 171,
-      "language": "sol",
-      "in_degree": 0,
-      "out_degree": 0,
-      "pagerank": 0,
-      "usage_score": 0,
-      "confidence": "EXTRACTED"
-    },
-    {
       "id": "4e83e42cc92b8815",
       "type": "Contract",
       "name": "Token",
@@ -191,16 +174,26 @@
       "pagerank": 0,
       "usage_score": 0,
       "confidence": "EXTRACTED"
+    },
+    {
+      "id": "f9c1b159c703b3ad",
+      "type": "Modifier",
+      "name": "nonZero",
+      "qualified_name": "Vault.nonZero",
+      "file_path": "Vault.sol",
+      "start_line": 7,
+      "end_line": 7,
+      "start_byte": 164,
+      "end_byte": 171,
+      "language": "sol",
+      "in_degree": 0,
+      "out_degree": 0,
+      "pagerank": 0,
+      "usage_score": 0,
+      "confidence": "EXTRACTED"
     }
   ],
   "edges": [
-    {
-      "src": "56d35064ce55bc04",
-      "dst": "4839dadb79472c7e",
-      "type": "defines",
-      "count": 1,
-      "confidence": "EXTRACTED"
-    },
     {
       "src": "56d35064ce55bc04",
       "dst": "acf8ee6269bbd426",
@@ -225,6 +218,13 @@
     {
       "src": "56d35064ce55bc04",
       "dst": "ea43c6b89d62ce82",
+      "type": "defines",
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "src": "56d35064ce55bc04",
+      "dst": "f9c1b159c703b3ad",
       "type": "defines",
       "count": 1,
       "confidence": "EXTRACTED"
@@ -267,7 +267,7 @@
     },
     {
       "src": "acf8ee6269bbd426",
-      "dst": "4839dadb79472c7e",
+      "dst": "f9c1b159c703b3ad",
       "type": "has_modifier",
       "line": 9,
       "count": 1,

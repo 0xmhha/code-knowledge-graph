@@ -172,7 +172,11 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	stateVarTypes := stateVarTypeMap{}
 	for _, r := range results {
 		for _, n := range r.Nodes {
-			if n.Type != types.NodeFunction && n.Type != types.NodeField {
+			// W-C W6 V1.22 (2026-05-12): NodeModifier joins NodeFunction
+			// in containerIDByFuncID — modifier bodies can host using-for
+			// receivers (params, locals) just like function bodies. Same
+			// qname-prefix idiom (Container.<name>).
+			if n.Type != types.NodeFunction && n.Type != types.NodeField && n.Type != types.NodeModifier {
 				continue
 			}
 			dot := strings.IndexByte(n.QualifiedName, '.')
@@ -184,7 +188,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			if !ok {
 				continue
 			}
-			if n.Type == types.NodeFunction {
+			if n.Type == types.NodeFunction || n.Type == types.NodeModifier {
 				containerIDByFuncID[n.ID] = cid
 				continue
 			}
