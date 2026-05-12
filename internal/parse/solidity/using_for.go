@@ -298,6 +298,35 @@ func (v *declVisitor) runUsingForCalls() {
 				})
 				continue
 			}
+			// V1.8: generic iterative walker — fallback for chains
+			// deeper than V1.7's hardcoded patterns. Covers depth ≥ 4
+			// same-contract chains and depth ≥ 3 cross-contract chains.
+			// V1.3-V1.7 catch shorter shapes via earlier dispatch
+			// branches; V1.8 only fires when the previous predicates
+			// have rejected.
+			if mode, recvObj, segs, methodName, ok := matchGenericChain(&memberNode, v.src); ok {
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				// Encode as `mode|<recv>|<seg1>|...|<segN>|method`
+				// (recv part is empty string for same-contract — kept
+				// in the encoding so the resolver's SplitN positions
+				// remain consistent across modes).
+				encoded := mode + "|" + recvObj
+				for _, s := range segs {
+					encoded += "|" + s
+				}
+				encoded += "|" + methodName
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeCalls,
+					TargetQName:  encoded,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					DispatchKind: dispatchKindUsingForGenericChainCall,
+				})
+				continue
+			}
 		}
 	}
 }
@@ -413,6 +442,103 @@ func matchDeepChainedMethodCall(member *sitter.Node, src []byte) (string, string
 		return "", "", "", false
 	}
 	return innerIdent.Utf8Text(src), middleProperty.Utf8Text(src), property.Utf8Text(src), true
+}
+
+// matchGenericChain — W-C W6 V1.8 (2026-05-12). Generic iterative
+// walker for arbitrary-depth chained dispatch. Used as the final
+// fallback after V1.3-V1.7's hardcoded predicates have rejected.
+//
+// Two chain shapes recognised:
+//
+//   - same-contract: `<fn1>().<fn2>()....<fnN>().<method>(...)`
+//     The innermost function-position is a plain identifier (local
+//     function reference). Returns mode="same", recvObj="".
+//
+//   - cross-contract: `<obj>.<fn1>().<fn2>()....<fnN>().<method>(...)`
+//     The innermost function-position is a member_expression whose
+//     object is a plain identifier (receiver var / parameter).
+//     Returns mode="cross", recvObj=identifier text.
+//
+// Segments returned in source order: segs[0] is the innermost chain
+// link (called first in the runtime chain), segs[N-1] is the outermost
+// chain link (called last before method).
+//
+// Returns (mode, recvObj, segs, method, true) on match. Drops shapes:
+//   - empty chain (`<obj>.<method>(...)` — covered by V1.0/V1.1).
+//   - non-call-expression inner shapes (`obj.field.method()`).
+//   - outermost wrapper not a call_expression (member-read, not call).
+//
+// Caller dispatch order ensures V1.8 only fires after V1.3-V1.7 reject:
+// V1.3 catches depth-1 same-contract, V1.5 depth-2, V1.7 depth-3,
+// V1.4 depth-1 cross-contract, V1.6 depth-2 cross-contract. V1.8
+// handles depth ≥ 4 same-contract and depth ≥ 3 cross-contract.
+func matchGenericChain(member *sitter.Node, src []byte) (string, string, []string, string, bool) {
+	if member == nil {
+		return "", "", nil, "", false
+	}
+	property := member.ChildByFieldName("property")
+	if property == nil || property.Kind() != "identifier" {
+		return "", "", nil, "", false
+	}
+	// Outer must be invoked (it's a method call, not just a read).
+	parent := member.Parent()
+	if parent != nil && parent.Kind() == "expression" {
+		parent = parent.Parent()
+	}
+	if parent == nil || parent.Kind() != "call_expression" {
+		return "", "", nil, "", false
+	}
+	method := property.Utf8Text(src)
+	// Walk down: outer.object → call → fn → ...
+	// segs collected in REVERSE order (outermost first), reversed at end.
+	var revSegs []string
+	cur := unwrapExpression(member.ChildByFieldName("object"))
+	for cur != nil && cur.Kind() == "call_expression" {
+		fn := unwrapExpression(cur.ChildByFieldName("function"))
+		if fn == nil {
+			return "", "", nil, "", false
+		}
+		switch fn.Kind() {
+		case "identifier":
+			// Innermost — same-contract chain. Done.
+			fnName := fn.Utf8Text(src)
+			revSegs = append(revSegs, fnName)
+			return "same", "", reverseStrSlice(revSegs), method, true
+		case "member_expression":
+			seg := fn.ChildByFieldName("property")
+			if seg == nil || seg.Kind() != "identifier" {
+				return "", "", nil, "", false
+			}
+			revSegs = append(revSegs, seg.Utf8Text(src))
+			innerObj := unwrapExpression(fn.ChildByFieldName("object"))
+			if innerObj == nil {
+				return "", "", nil, "", false
+			}
+			if innerObj.Kind() == "identifier" {
+				// Innermost member.object is identifier — cross-contract.
+				return "cross", innerObj.Utf8Text(src), reverseStrSlice(revSegs), method, true
+			}
+			if innerObj.Kind() == "call_expression" {
+				cur = innerObj
+				continue
+			}
+			// Unknown inner shape (e.g. member-of-member `a.b.c`) — V1.x.
+			return "", "", nil, "", false
+		default:
+			return "", "", nil, "", false
+		}
+	}
+	return "", "", nil, "", false
+}
+
+// reverseStrSlice reverses a string slice in place and returns it.
+// Helper for matchGenericChain — segments collected outermost-first
+// during the walk, reversed at the end so callers see source order.
+func reverseStrSlice(s []string) []string {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
+	return s
 }
 
 // matchTripleChainedMethodCall — W-C W6 V1.7 (2026-05-12). Tests
@@ -796,3 +922,18 @@ const dispatchKindUsingForDeepCrossChainCall = "using_for_deep_cross_chain_call"
 // Resolver walks three levels of funcReturnTypes — V1.5's pattern
 // with one more link.
 const dispatchKindUsingForTripleChainCall = "using_for_triple_chain_call"
+
+// dispatchKindUsingForGenericChainCall (V1.8) tags PendingRefs from
+// the generic iterative chain walker. Covers arbitrary-depth chains
+// after V1.3-V1.7 hardcoded predicates reject — depth ≥ 4
+// same-contract chains and depth ≥ 3 cross-contract chains.
+//
+// TargetQName encodes:
+//
+//	"same|<fn1>|<fn2>|...|<fnN>|<method>"  (same-contract, N ≥ 4)
+//	"cross|<obj>|<fn1>|<fn2>|...|<fnN>|<method>"  (cross-contract, N ≥ 3)
+//
+// Resolver splits on `|`, dispatches on the leading mode token,
+// iterates funcReturnTypes for each segment, and finishes with the
+// using-for binding lookup on the last segment's return type.
+const dispatchKindUsingForGenericChainCall = "using_for_generic_chain_call"

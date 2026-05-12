@@ -112,7 +112,7 @@ regression `--no-cache` diff vs schema 1.9: edges + nodes counts identical
 | W-C W1 (Sol inheritance) | 없음 (schema bump 후) | ✅ **LANDED 2026-05-11** |
 | W-C W2 (Sol virtual/override) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
 | W-C W3 (Sol interface dispatch) | W-C W1 완료 | ✅ **LANDED 2026-05-11** |
-| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.7 8-tier dispatch — state-var / parameter / inherited / return chain / cross-contract chain / depth-2 / deep cross-contract / depth-3 same-contract; depth ≥ 4 + cross-contract depth-3 + generic walker + multi-return tuple V1.8+; free-fn / file-level grammar-blocked) |
+| W-C W6 (Sol using For) | W-C W1 완료 | ✅ **LANDED 2026-05-12** (V0 binding + V1.0-V1.8 9-tier dispatch — state-var / parameter / inherited / return chain / cross-contract / depth-2 / deep cross-contract / depth-3 / **generic walker arbitrary depth**; multi-return tuple + member-of-member receiver V1.9+; free-fn / file-level grammar-blocked) |
 
 **Status — 2026-05-11**: W-A (Go cross-function lock propagation) ✅ landed.
 `internal/buildpipe/lock_propagation.go` (Stage B DFS depth=5, visited-set
@@ -202,6 +202,23 @@ identifier 가 없음. 3 fixture + 3 test (param_receiver,
 state_and_param mixed, anonymous_param 가드). 25/25 PASS, vet clean.
 V1.2+ carry-over: return-value chaining, free-function form, file-level
 using directive, inherited using.
+
+W-C W6 V1.8 (Sol `using For` generic iterative chain walker)
+✅ landed 2026-05-12. V1.3/V1.5/V1.7 same-contract + V1.4/V1.6
+cross-contract 의 hardcoded pattern 을 iterative walker 로 통합 —
+임의 depth N 처리. `matchGenericChain` predicate (outer 부터
+inner-most 까지 walk, two modes: same/cross) + 신규
+`dispatchKindUsingForGenericChainCall` + `resolveUsingForGenericChainCallRef`
+iterative resolution (callerContainer → starting namespace → for-each
+segment threading through funcReturnTypes → final return type →
+binding lookup → libraryFunctionID). PendingRef encoding 가변 길이
+(`same|<empty>|<segs>|method` or `cross|<obj>|<segs>|method`). caller
+dispatch state-var → V1.3 → V1.4 → V1.5 → V1.6 → V1.7 → V1.8 (V1.8
+가 depth ≥ 4 same / depth ≥ 3 cross 만 unique). 3 fixture + 3 test
+(depth-4 same, depth-3 cross, depth-5 same generic scale). V1.3-V1.7
+hardcoded 는 명확한 shape 별 코드 path 보존 위해 V1.8 후에도 유지
+(deprecation 은 V2+ 검토). 25/25 PASS, vet clean. V1.9+ carry-over:
+multi-return tuple slot, member-of-member receivers.
 
 W-C W6 V1.7 (Sol `using For` depth-3 same-contract chained dispatch
 `<fn>().<fn>().<fn>().<method>`) ✅ landed 2026-05-12. V1.5 (depth-2)

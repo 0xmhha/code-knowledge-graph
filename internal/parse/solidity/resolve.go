@@ -450,6 +450,21 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W6 V1.8 generic chain branch — handles arbitrary-depth
+			// chains (depth ≥ 4 same-contract, depth ≥ 3 cross-
+			// contract). Iterative walker through funcReturnTypes;
+			// V1.3-V1.7 hardcoded predicates caught the shallow cases
+			// before reaching this point.
+			if pr.DispatchKind == dispatchKindUsingForGenericChainCall {
+				if edge, ok := resolveUsingForGenericChainCallRef(
+					pr, bindings, stateVarTypes, paramTypes,
+					funcReturnTypes, containerIDByFuncID, funcByQName,
+					nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			var targetType types.NodeType
 			switch pr.EdgeType {
 			case types.EdgeEmitsEvent:
@@ -1259,6 +1274,152 @@ func resolveUsingForTripleChainCallRef(
 		}
 	}
 	// Step 9: library function.
+	libIDs := funcByQName[libName+"."+methodName]
+	if len(libIDs) == 0 {
+		return types.Edge{}, false
+	}
+	dstID := pickSameFileCandidate(libIDs, srcFile, nodeFile)
+	conf := types.ConfExtracted
+	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
+		conf = types.ConfInferred
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
+		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveUsingForGenericChainCallRef — W6 V1.8 (2026-05-12). Generic
+// iterative resolver for arbitrary-depth chained dispatch. Subsumes the
+// hardcoded V1.3 / V1.5 / V1.7 (same-contract chains) and V1.4 / V1.6
+// (cross-contract chains) for chains the earlier predicates didn't
+// already claim. Driven by `matchGenericChain`'s encoded PendingRef.
+//
+// TargetQName encoding (split by `|`):
+//
+//	"same|<recv-empty>|<fn1>|<fn2>|...|<fnN>|<method>"  (recv slot is "")
+//	"cross|<obj>|<fn1>|<fn2>|...|<fnN>|<method>"
+//
+// Resolution algorithm:
+//
+//  1. funcID → callerContainerID (containerIDByFuncID).
+//  2. Determine starting namespace:
+//     - same-contract: starting namespace = callerContainer.
+//     - cross-contract: receiverObj → receiverType
+//       (stateVarTypes → paramTypes fallback). starting namespace =
+//       receiverType.
+//  3. For each fn_i in segs (left-to-right):
+//     - `<currentNamespace>.<fn_i>` → fnFuncID (funcByQName).
+//     - fnFuncID → returnType_i (funcReturnTypes).
+//     - currentNamespace = returnType_i for the next iteration.
+//  4. After consuming all segments: currentNamespace is the final
+//     return type. (callerContainerID, currentNamespace) → libraryName
+//     via bindings (with wildcard `*` fallback).
+//  5. `<libraryName>.<methodName>` → libraryFunctionID.
+//
+// Confidence: ConfExtracted (caller + library same-file) /
+// ConfInferred (cross-file). Intermediate functions' files don't
+// downgrade. Same policy as V1.3-V1.7.
+func resolveUsingForGenericChainCallRef(
+	pr parse.PendingRef,
+	bindings bindingMap,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	funcReturnTypes funcReturnTypeMap,
+	containerIDByFuncID map[string]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	parts := strings.Split(pr.TargetQName, "|")
+	// Minimum parts: mode + recv + at least 1 segment + method = 4
+	// (same-contract depth-1 hypothetical). Real V1.8 PendingRefs have
+	// depth ≥ 3 cross or ≥ 4 same, but we don't enforce that here —
+	// resolver works for any depth.
+	if len(parts) < 4 {
+		return types.Edge{}, false
+	}
+	mode := parts[0]
+	recvObj := parts[1]
+	segs := parts[2 : len(parts)-1]
+	methodName := parts[len(parts)-1]
+	if len(segs) == 0 || methodName == "" {
+		return types.Edge{}, false
+	}
+
+	callerContractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+
+	// Determine starting namespace.
+	var currentNamespace string
+	switch mode {
+	case "same":
+		// Same-contract: starting namespace is caller container name.
+		for qname, ids := range funcByQName {
+			for _, fid := range ids {
+				if fid == pr.SrcID {
+					if dot := strings.IndexByte(qname, '.'); dot >= 0 {
+						currentNamespace = qname[:dot]
+					}
+					break
+				}
+			}
+			if currentNamespace != "" {
+				break
+			}
+		}
+		if currentNamespace == "" {
+			return types.Edge{}, false
+		}
+	case "cross":
+		// Cross-contract: starting namespace is receiverObj's type.
+		if recvObj == "" {
+			return types.Edge{}, false
+		}
+		if varMap := stateVarTypes[callerContractID]; varMap != nil {
+			currentNamespace = varMap[recvObj]
+		}
+		if currentNamespace == "" {
+			if paramMap := paramTypes[pr.SrcID]; paramMap != nil {
+				currentNamespace = paramMap[recvObj]
+			}
+		}
+		if currentNamespace == "" {
+			return types.Edge{}, false
+		}
+	default:
+		return types.Edge{}, false
+	}
+
+	// Walk each chain segment, threading funcReturnTypes.
+	for _, seg := range segs {
+		fnIDs := funcByQName[currentNamespace+"."+seg]
+		if len(fnIDs) == 0 {
+			return types.Edge{}, false
+		}
+		fnFuncID := pickSameFileCandidate(fnIDs, srcFile, nodeFile)
+		returnType, ok := funcReturnTypes[fnFuncID]
+		if !ok || returnType == "" {
+			return types.Edge{}, false
+		}
+		currentNamespace = returnType
+	}
+
+	// Binding lookup on the final return type.
+	bindMap := bindings[callerContractID]
+	if bindMap == nil {
+		return types.Edge{}, false
+	}
+	libName, hit := bindMap[currentNamespace]
+	if !hit {
+		libName, hit = bindMap["*"]
+		if !hit {
+			return types.Edge{}, false
+		}
+	}
+	// Library function lookup.
 	libIDs := funcByQName[libName+"."+methodName]
 	if len(libIDs) == 0 {
 		return types.Edge{}, false

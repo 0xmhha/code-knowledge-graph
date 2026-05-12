@@ -13,17 +13,18 @@
 > see `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4 Status block).
 > W1 / W2 / W3 ✅ LANDED 2026-05-11. W6 V0 (using For binding) ✅
 > **LANDED 2026-05-12** — EdgeUsesFor (Contract → Library) first-class
-> emit. W6 V1.0~V1.7 (8-tier dispatch resolution) ✅ **LANDED
-> 2026-05-12** — state-var (V1.0) / parameter (V1.1) / inherited
-> propagation (V1.2) / return chain `<fn>().<method>` (V1.3) / cross-
-> contract `<obj>.<fn>().<method>` (V1.4) / depth-2 `<fn>().<fn>().<method>`
-> (V1.5) / deep cross-contract `<obj>.<fn>().<fn>().<method>` (V1.6) /
-> depth-3 `<fn>().<fn>().<fn>().<method>` (V1.7).
+> emit. W6 V1.0~V1.8 (9-tier dispatch resolution) ✅ **LANDED
+> 2026-05-12** — state-var (V1.0) / parameter (V1.1) / inherited (V1.2)
+> / return chain (V1.3) / cross-contract (V1.4) / depth-2 (V1.5) /
+> deep cross-contract (V1.6) / depth-3 (V1.7) / **generic walker
+> arbitrary depth (V1.8)**. V1.8 generic iterative walker handles
+> depth ≥ 4 same-contract + depth ≥ 3 cross-contract via single
+> resolver, unblocking arbitrary chain depth.
 > file-level using directive (0.8.13+) + free-function form
 > (`using {f1, f2} for T`) 둘 다 tree-sitter-solidity v1.2.13 grammar
 > 한계로 ERROR-node parse — V1.x grammar 업그레이드 대기.
-> depth ≥ 4 generic chains + cross-contract depth-3 + generic walker
-> refactor + multi-return tuple 만 V1.8+ follow-up.
+> Multi-return tuple slot + member-of-member receiver (`a.b.c.foo()`)
+> 만 V1.9+ follow-up.
 > **Out of scope**: cross-contract security analysis (reentrancy, access
 > control — that's senior-secops territory), assembly blocks, EVM-level
 > opcodes, low-level `call` / `delegatecall` / `staticcall` (separate spec).
