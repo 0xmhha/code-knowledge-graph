@@ -78,14 +78,14 @@
 > `import {SafeMath as SM} from "./util.sol"; using SM for uint256;`
 > 패턴의 false-negative 수정. declVisitor 에 per-file importAliases
 > map + runImportAliases walker + runUsingFor 에서 alias substitute.
-> V1.29 ✅ **whole-file alias qualified using** —
-> `import "./util.sol" as L; using L.SafeMath for uint256;` — type_alias
-> 가 multi-identifier sequence [L, SafeMath]. tree-sitter query 가
-> 각 identifier 별 매치 발산 → L PendingRef 도 emit 되어 unrelated
-> contract 이름 L 과 충돌 시 false-positive EdgeUsesFor. namespaceAliases
-> set 신규 (runImportAliases 가 import_name 없는 whole-file alias 를
-> 등록), runUsingFor 가 leading namespace-alias 식별자 skip.
-> Block-scoped shadowing 정확화 만 V1.30+ follow-up.
+> V1.29 whole-file alias qualified using — namespaceAliases set +
+> leading namespace identifier skip + collision false-positive 차단.
+> V1.30 ✅ **block-scoped shadowing (V0 first-decl-wins)** —
+> Pass 2 의 localVarTypes sweep 이 map overwrite 였음 (last emit wins)
+> → shadow 시 inner type 이 outer use site 까지 침범 (false-negative).
+> "first-decl wins" 으로 변경 (only-set-if-not-present). tree-sitter
+> source-order 가 outermost 를 먼저 emit 하므로 outer 가 보존됨.
+> 완전한 byte-range scope-aware lookup 은 V2.0+ refactor.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

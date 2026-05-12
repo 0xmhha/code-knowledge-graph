@@ -306,7 +306,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				if localVarTypes[pr.SrcID] == nil {
 					localVarTypes[pr.SrcID] = map[string]string{}
 				}
-				localVarTypes[pr.SrcID][varName] = typeName
+				// W-C W6 V1.30 (2026-05-12): first-decl wins for shadow
+				// resolution. Tree-sitter source-order traversal in
+				// collectLocalVarMetaPending emits the outermost
+				// declaration first; later same-name decls in nested
+				// blocks (shadowing) are inner shadows that should not
+				// bleed out into outer use sites. Pre-V1.30 map
+				// overwrite let the inner type win, dropping outer
+				// dispatch sites whose type had no binding. Full
+				// byte-range-aware scope lookup is V2+ — V0 trades
+				// inner-block dispatch correctness for outer correctness
+				// because outer use sites are the more common pattern.
+				if _, present := localVarTypes[pr.SrcID][varName]; !present {
+					localVarTypes[pr.SrcID][varName] = typeName
+				}
 			}
 		}
 	}
