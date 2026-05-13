@@ -495,25 +495,36 @@ func (v *declVisitor) runModifierMeta() {
 	}
 }
 
-// runImportAliases — W-C W6 V1.28 (2026-05-12). Walks every
-// import_directive in the file and records (alias → originalName)
-// pairs into v.importAliases. Tree-sitter-solidity v1.2.13 exposes
-// the directive's `import_name` and `alias` as multiple-cardinality
-// identifier fields; we pair them positionally (alias[i] aliases
-// import_name[i]).
+// runImportAliases — W-C W6 V1.28 (2026-05-12) + V2.10 (2026-05-13).
+// Walks every import_directive in the file and records
+// (alias → originalName) pairs into v.importAliases. Tree-sitter-
+// solidity v1.2.13 exposes the directive's `import_name` and `alias`
+// as multiple-cardinality identifier fields.
 //
-// Shapes covered (V1.28 V0):
-//   - `import {SafeMath as SM} from "./util.sol"` — named import with
-//     alias. alias map: SM → SafeMath.
+// V2.10 fix: pairing is by source order, not by bucket index. The
+// V1.28 V0 approach bucketed `import_name` and `alias` separately
+// and zipped them at the end, which mis-paired heterogeneous
+// statements like `import {SafeMath, Address as A}`:
+//   buckets: importNames=[SafeMath, Address], aliases=[A]
+//   zip:     A ↔ SafeMath  (WRONG — A actually aliases Address)
+// The fix: walk identifier children in source order, keep the most
+// recent `import_name` in a one-slot buffer, and pair it with the
+// next `alias` when one appears. An `import_name` with no following
+// `alias` is bare and needs no alias mapping (the bare name already
+// resolves via the global byName index).
+//
+// Shapes covered:
+//   - `import {SafeMath as SM} from "./util.sol"` — single aliased.
+//     alias map: SM → SafeMath.
+//   - `import {SafeMath as SM, Address as A} from "./util.sol"` —
+//     all-aliased multi-entry.
 //   - `import {SafeMath, Address as A} from "./util.sol"` — mixed
-//     named (no alias) and aliased. Only aliased entries register;
-//     bare named imports already resolve via the global byName index.
-//
-// Not yet covered (V1.29+):
-//   - `import "./util.sol" as L` — whole-file alias. Would require
-//     extending dispatch to qualified-identifier lookups (L.SafeMath).
-//   - `import "./util.sol"` (bare) — same as ambient name access,
-//     already works through the global namespace approach.
+//     bare + aliased (V2.10 fix).
+//   - `import {SafeMath} from "./util.sol"` — bare-only; no mapping
+//     recorded, bare name resolves directly.
+//   - `import "./util.sol" as L` — whole-file alias (V1.29).
+//     Detected as alias-without-preceding-import_name, recorded in
+//     namespaceAliases.
 func (v *declVisitor) runImportAliases() {
 	if v.root == nil {
 		return
@@ -523,13 +534,12 @@ func (v *declVisitor) runImportAliases() {
 		if child == nil || child.Kind() != "import_directive" {
 			continue
 		}
-		// `import_name` and `alias` are both multiple-cardinality
-		// identifier fields. tree-sitter exposes positional pairing
-		// via FieldNameForChild(childIndex) so we walk every child
-		// (including anonymous tokens) and bucket identifiers by their
-		// field role.
-		var importNames []*sitter.Node
-		var aliases []*sitter.Node
+		// Single-pass walk in source order. `lastImportName` holds
+		// the most recently seen `import_name` (empty if none, or
+		// if already consumed by a paired `alias`). An `alias`
+		// encountered with `lastImportName == ""` is a whole-file
+		// namespace alias (V1.29), recorded separately.
+		var lastImportName string
 		for j := uint(0); j < uint(child.ChildCount()); j++ {
 			c := child.Child(j)
 			if c == nil || c.Kind() != "identifier" {
@@ -537,38 +547,20 @@ func (v *declVisitor) runImportAliases() {
 			}
 			switch child.FieldNameForChild(uint32(j)) {
 			case "import_name":
-				importNames = append(importNames, c)
+				lastImportName = c.Utf8Text(v.src)
 			case "alias":
-				aliases = append(aliases, c)
-			}
-		}
-		// Whole-file alias form (V1.29): `import "./util.sol" as L` —
-		// the directive has alias but no import_name. Aliases without
-		// a matched import_name partner are namespace prefixes, not
-		// library names. Register them in namespaceAliases so
-		// runUsingFor skips emitting PendingRefs for them when they
-		// appear as the leading identifier in a qualified type_alias
-		// (`using L.SafeMath for ...`).
-		if len(aliases) > 0 && len(importNames) == 0 {
-			for _, a := range aliases {
-				name := a.Utf8Text(v.src)
-				if name != "" {
-					v.namespaceAliases[name] = true
+				aliasName := c.Utf8Text(v.src)
+				if aliasName == "" {
+					continue
+				}
+				if lastImportName != "" {
+					v.importAliases[aliasName] = lastImportName
+					lastImportName = "" // consumed
+				} else {
+					// Whole-file namespace alias (V1.29).
+					v.namespaceAliases[aliasName] = true
 				}
 			}
-			continue
-		}
-		// Pair alias[i] ↔ import_name[i] up to the shorter length.
-		// Solidity grammar always emits matched pairs for aliased
-		// imports; the cap is a defensive guard.
-		n := min(len(aliases), len(importNames))
-		for k := 0; k < n; k++ {
-			alias := aliases[k].Utf8Text(v.src)
-			orig := importNames[k].Utf8Text(v.src)
-			if alias == "" || orig == "" {
-				continue
-			}
-			v.importAliases[alias] = orig
 		}
 	}
 }

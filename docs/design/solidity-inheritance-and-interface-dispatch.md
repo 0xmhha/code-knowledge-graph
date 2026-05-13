@@ -130,9 +130,20 @@
 >   - V2.6 library-qualified  → 1 edge  (V0 incidental capture)
 >   - V2.7 operator-form      → 0 edges (AST shape mismatch)
 >   - V2.9 bare free-function → 0 edges (no library target)
-> V2.9 carry-over (V2.10+): byte 정밀도 (column-based scope) /
-> module-import 추가 패턴 / Grammar-blocked items 의 grammar upgrade
-> 시 V0 query 확장 candidate.
+> V2.10 ✅ **mixed bare/aliased multi-import fix** — V1.28
+> `runImportAliases` 가 mixed-entry single import (`import
+> {SafeMath, Address as A} from ".../lib.sol";`) 에서 alias 를
+> 잘못 pair 했음. 원인: V1.28 V0 의 positional bucket zip
+> (`importNames=[SafeMath, Address]`, `aliases=[A]`, `zip[0] =
+> (A, SafeMath)`) 이 source 순서가 아닌 bucket index 로 짝지어
+> A → SafeMath 라는 잘못된 매핑 생성. Fix: single-pass source-
+> order walk 으로 `import_name` 직후의 `alias` 만 pair, bare
+> entry 는 lastImportName 을 overwrite. V1.28/V1.29 기존 케이스
+> 도 동일 로직으로 회귀 없이 처리. RED test 첫 시도 실패 →
+> empirical bug 노출 → fix → GREEN.
+> V2.10 carry-over (V2.11+): byte 정밀도 (column-based scope) /
+> Grammar-blocked items 의 grammar upgrade 시 V0 query 확장
+> candidate / `import "./lib.sol"` (bare path-only) 처리 패턴.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
