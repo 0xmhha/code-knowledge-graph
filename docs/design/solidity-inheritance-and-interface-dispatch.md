@@ -103,9 +103,19 @@
 > 매칭. V0 의 "Math.add brace shape ERROR" 가정이 v1.2.13 에서는
 > 부분 false. V1.0+ dispatch chain 도 정상 통과 (Vault.run →
 > Math.add EdgeCalls).
-> V2.6 carry-over (V2.7+): file-level using directives (still
-> excluded by queryUsingFor) / contract-scope operator-form / byte
-> 정밀도 / module-import 추가 / Grammar-blocked.
+> V2.7 ✅ **contract-scope operator-form limitation lock** —
+> V2.6 mirror question 검증. Sol 0.8.19+ `contract Calc {
+> using {Math.add as +} for uint256; }` (contract scope + operator
+> form) 은 V2.6 와 달리 0 EdgeUsesFor 발산. `as +` 가 alias-entry
+> 에 `user_definable_operator` 자식을 추가해 V0 의 `(type_alias
+> (identifier) @lib)` 패턴이 더 이상 매칭되지 않음.
+> 결과 매트릭스 (empirically locked):
+>   - V2.5 file-level   + operator-form  → 0 edges (scope 제외)
+>   - V2.6 contract-sc. + free-function  → 1 edge  (V0 incidental)
+>   - V2.7 contract-sc. + operator-form  → 0 edges (AST shape)
+> V2.7 carry-over (V2.8+): file-level free-function form (still
+> excluded by queryUsingFor) / byte 정밀도 / module-import 추가 /
+> Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
