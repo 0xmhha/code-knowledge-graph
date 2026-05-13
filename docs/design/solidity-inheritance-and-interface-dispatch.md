@@ -162,9 +162,19 @@
 > var dispatch 가 receiver call `balance.double()` 를 Math.double
 > 로 정상 해소. UDVT 가 primitive type / library type 과 동등하게
 > dispatch surface 에서 처리됨을 empirical 검증.
-> V2.12 carry-over (V2.13+): byte 정밀도 (column-based scope) /
-> diamond inheritance with conflicting using-for / interface body
-> using-for / Grammar-blocked items.
+> V2.13 ✅ **diamond inheritance + multi-parent binding union fix** —
+> V1.2 BFS inheritance propagation 의 hidden bug. `contract Child
+> is A, B` 에서 A 와 B 가 같은 type 에 다른 library binding 을
+> 가지면, child 가 양쪽 모두 inherit 해야 (V2.2 multi-binding
+> semantics extended across inheritance) 하지만, V1.2 V0 의
+> "if !exists" guard 가 첫 ancestor 의 binding 이 slot 을 차지한
+> 후 후속 ancestor 의 binding 을 silently drop. Fix: BFS 시작 전
+> child 의 LOCAL binding key 를 snapshot 으로 보존 → shadowing
+> 판단은 snapshot 으로만, ancestor-to-ancestor 는 de-duplicated
+> union (slices.Contains 로 중복 제거). V2.10 이후 두 번째 actual
+> bug fix V-cycle. RED on first run → fix → GREEN.
+> V2.13 carry-over (V2.14+): byte 정밀도 (column-based scope) /
+> interface body using-for / Grammar-blocked items.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

@@ -1,6 +1,7 @@
 package solidity
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -343,28 +344,52 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 
-	// W6 V1.2 (2026-05-12) — propagate inherited bindings down the
-	// inheritance graph so a child contract picks up its parent's
-	// `using` declarations. Solidity 0.8.13+ formalises this via
-	// `internal using`, but in practice solc treats child-visible
-	// using directives this way for backwards-compat; the grammar
-	// doesn't separate the `internal` keyword at the using_directive
-	// level, so V0 treats every contract-scope using as inherited.
+	// W6 V1.2 (2026-05-12) + V2.13 (2026-05-13) — propagate inherited
+	// bindings down the inheritance graph so a child contract picks
+	// up its parents' `using` declarations. Solidity 0.8.13+
+	// formalises this via `internal using`, but in practice solc
+	// treats child-visible using directives this way for backwards-
+	// compat; the grammar doesn't separate the `internal` keyword at
+	// the using_directive level, so V0 treats every contract-scope
+	// using as inherited.
 	//
 	// Algorithm: BFS over the inheritance graph (child → parents)
-	// merging each ancestor's bindings into the descendant. Child's
-	// own typeName entries are NEVER overwritten (per Solidity scoping
-	// — local declaration shadows inherited). Inheritance via
+	// merging each ancestor's bindings into the descendant.
+	//
+	// Shadowing vs union semantics (V2.13 fix):
+	//   - Child's OWN local binding for a type shadows ALL inherited
+	//     bindings on that type (per Solidity scoping). We snapshot
+	//     child's local binding keys BEFORE the BFS to distinguish
+	//     local from inherited.
+	//   - When the child has no local binding for a type, multiple
+	//     ancestors contributing bindings on that type union (V2.2
+	//     multi-binding semantics extended across inheritance).
+	//
+	// Pre-V2.13 bug: the BFS used a single `if !exists` guard to
+	// decide whether to copy an ancestor's binding into the child.
+	// Once the first ancestor visited had populated the slot, the
+	// guard then conflated "child's local binding" with "another
+	// ancestor's already-merged binding," silently dropping every
+	// subsequent ancestor's binding on the same type. V2.13 splits
+	// the guard: local check uses the pre-BFS snapshot; ancestor-to-
+	// ancestor merge appends de-duplicated libraries.
+	//
 	// EdgeImplements (contract → interface) is included because
-	// interfaces can in principle carry `using` directives too
-	// (rare, but legal); intersection with parent's contract subkind
-	// happens implicitly because interfaces with no using directives
-	// contribute no entries.
+	// interfaces can in principle carry `using` directives (rare but
+	// legal); contributes no entries when the interface itself has
+	// no using directives.
 	//
 	// Cycle defence: visited set per starting child prevents infinite
 	// loops on accidental inheritance cycles (Solidity forbids them
 	// but a partial parse could produce one).
 	for childID := range containerNameByID {
+		// Snapshot child's LOCAL binding keys before BFS so we can
+		// distinguish them from bindings merged in from ancestors.
+		localTypes := map[string]bool{}
+		for typeName := range bindings[childID] {
+			localTypes[typeName] = true
+		}
+
 		visited := map[string]bool{childID: true}
 		queue := append([]string(nil), parents[childID]...)
 		for len(queue) > 0 {
@@ -375,18 +400,25 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			}
 			visited[ancestorID] = true
 			for typeName, libNames := range bindings[ancestorID] {
+				// Shadowing: child's LOCAL binding wins, regardless
+				// of which ancestor offers an inherited variant.
+				if localTypes[typeName] {
+					continue
+				}
 				if bindings[childID] == nil {
 					bindings[childID] = map[string][]string{}
 				}
-				// Don't clobber a child-scope binding. V2.2 multi-value
-				// semantics: only propagate the inherited list when the
-				// child has no binding for this type at all.
-				if _, exists := bindings[childID][typeName]; !exists {
-					// Defensive clone so child / ancestor share no slice.
-					cloned := make([]string, len(libNames))
-					copy(cloned, libNames)
-					bindings[childID][typeName] = cloned
+				// Union: append libs that aren't already present
+				// (from a previously visited ancestor on the same
+				// type). De-duplication keeps the list compact and
+				// preserves the V2.2 multi-binding invariant.
+				existing := bindings[childID][typeName]
+				for _, lib := range libNames {
+					if !slices.Contains(existing, lib) {
+						existing = append(existing, lib)
+					}
 				}
+				bindings[childID][typeName] = existing
 			}
 			queue = append(queue, parents[ancestorID]...)
 		}
