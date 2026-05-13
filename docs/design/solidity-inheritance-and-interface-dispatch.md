@@ -118,12 +118,19 @@
 > 제외 — V2.5 와 동일 결과. 이로써 "scope" 가 dominant axis 임이
 > empirical 로 확정 (file-level → 항상 0 edges, alias-shape 영향
 > 무).
-> 결과 매트릭스 (empirically locked, v1.2.13):
->   - V2.5 file-level   + operator-form  → 0 edges (scope 제외)
->   - V2.6 contract-sc. + free-function  → 1 edge  (V0 incidental)
->   - V2.7 contract-sc. + operator-form  → 0 edges (AST shape)
->   - V2.8 file-level   + free-function  → 0 edges (scope 제외)
-> V2.8 carry-over (V2.9+): byte 정밀도 (column-based scope 정밀도) /
+> V2.9 ✅ **bare free-function alias limitation lock** —
+> contract-scope alias-shape axis 의 3rd variant. Sol 0.8.13+
+> `contract Calc { using {addPlusOne} for uint256; }` (qualifier
+> 없는 bare free function name) 은 0 EdgeUsesFor 발산. EdgeUsesFor
+> schema (Contract → Contract/library) 에는 bare 함수가 binding
+> target 으로 적합하지 않고, V0 query 가 capture 하더라도 byName
+> lookup 이 실패. V1.0+ dispatch chain 도 resolveBindingLib 의
+> `lib.method` qname 조회 candidate 가 없어 EdgeCalls 미발산.
+> Triplet (contract scope × alias entry shape):
+>   - V2.6 library-qualified  → 1 edge  (V0 incidental capture)
+>   - V2.7 operator-form      → 0 edges (AST shape mismatch)
+>   - V2.9 bare free-function → 0 edges (no library target)
+> V2.9 carry-over (V2.10+): byte 정밀도 (column-based scope) /
 > module-import 추가 패턴 / Grammar-blocked items 의 grammar upgrade
 > 시 V0 query 확장 candidate.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
