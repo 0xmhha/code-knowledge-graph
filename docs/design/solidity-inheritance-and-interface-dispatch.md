@@ -85,17 +85,15 @@
 > 해소, narrowest-scope-wins.
 > V2.1 interface receiver via using-for guard + multi-binding known
 > limitation lock.
-> V2.2 ✅ **multi-binding for same type** — V2.1 의 known limitation
-> 해소. bindings 를 `map[contractID]map[typeName][]libraryName` 으로
-> 확장 (single-value → multi-value). Pre-build sweep append. 신규
-> helper `resolveBindingLib` 가 multi-bound libs 중 method 존재
-> 라이브러리 첫 hit 선택 — Solidity 의 "directives apply in order,
-> first method match wins" semantics 정합. 10 lookup site (V1.0/V1.3-
-> V1.13) 의 binding+library lookup 코드를 helper 호출로 통일 (~50
-> LOC reduction). V2.1 multi-binding limitation test 가 정상 EdgeCalls
-> assert 로 promoted.
-> V2.2 carry-over (V2.3+): byte 정밀도 (V2.0 의 line-based fallback)
-> / module-import 추가 / Grammar-blocked.
+> V2.2 multi-binding for same type — bindings 가 multi-value 로 확장,
+> resolveBindingLib helper 도입 — V2.1 의 known limitation 해소.
+> V2.3 ✅ **library body using-for regression guard** — V0/V1.0
+> queryUsingFor 가 library_declaration body 를 uniform 매칭하고
+> containerIDByFuncID / bindings / lookupReceiverType 가 library
+> scope 에서도 정상 동작함을 fixture 로 잠금. real-world 패턴
+> (utility library 자체에서 다른 library binding 사용).
+> V2.3 carry-over (V2.4+): byte 정밀도 / module-import 추가 /
+> Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
