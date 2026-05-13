@@ -153,9 +153,18 @@
 >   - V1.29 namespace alias            (`"./lib" as L`)
 >   - V2.10 mixed bare + aliased       (`{LibA, LibB as L2}`)
 >   - V2.11 bare path-only             (`"./lib"`)
-> V2.11 carry-over (V2.12+): byte 정밀도 (column-based scope) /
-> Grammar-blocked items 의 grammar upgrade 시 V0 query 확장
-> candidate.
+> V2.12 ✅ **user-defined value type (UDVT) + using-for** —
+> Sol 0.8.8+ `type Amount is uint256;` 가 using-for receiver type
+> 으로 정상 작동함을 lock. V0 query `source: (_) @type` 가 UDVT
+> 를 wrapping 하는 type_name → user_defined_type 노드를
+> `extractTypeNameText` 로 정상 정규화 ("Amount" 식별자 추출),
+> bindings[Vault]["Amount"] = ["Math"] 로 binding 후 V1.0 state-
+> var dispatch 가 receiver call `balance.double()` 를 Math.double
+> 로 정상 해소. UDVT 가 primitive type / library type 과 동등하게
+> dispatch surface 에서 처리됨을 empirical 검증.
+> V2.12 carry-over (V2.13+): byte 정밀도 (column-based scope) /
+> diamond inheritance with conflicting using-for / interface body
+> using-for / Grammar-blocked items.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
