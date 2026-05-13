@@ -91,15 +91,21 @@
 > uniform matching robustness 검증.
 > V2.4 cross-file multi-binding regression guard — V2.2 multi-binding
 > cross-file 동작 확인.
-> V2.5 ✅ **operator-form using directive limitation lock** — Sol
-> 0.8.19+ `using {f as +} for T;` (user-defined operator binding) 는
-> tree-sitter v1.2.13 의 `using_alias` 노드 (V0 query 가 type_alias
-> 만 매칭, using_alias 미캡처). V2.5 가 (a) 0 EdgeUsesFor 발산, (b)
-> 주변 declaration (functions, contracts) 정상 indexing 을 fixture
-> 로 잠금. V3+ 에서 queryUsingFor 가 using_alias 도 매칭하거나
-> grammar 업그레이드 필요.
-> V2.5 carry-over (V2.6+): byte 정밀도 / module-import 추가 /
-> Grammar-blocked items.
+> V2.5 operator-form using directive limitation lock — Sol 0.8.19+
+> `using {f as +} for T global;` (file-level operator-form) 가 0
+> EdgeUsesFor 발산 lock.
+> V2.6 ✅ **free-function form rediscovery (contract scope)** —
+> V2.5 의 limitation 이 사실 file-level scope 제약 때문이었음을
+> empirical 검증. Sol 0.8.13+ `using {Math.add, Math.sub} for
+> uint256;` (contract-scoped free-function form) 은 V0 queryUsingFor
+> 가 incidental capture: type_alias / using_alias 노드 구분과 무관하게
+> `(using_directive ... (identifier) @lib)` 패턴이 `Math` 식별자를
+> 매칭. V0 의 "Math.add brace shape ERROR" 가정이 v1.2.13 에서는
+> 부분 false. V1.0+ dispatch chain 도 정상 통과 (Vault.run →
+> Math.add EdgeCalls).
+> V2.6 carry-over (V2.7+): file-level using directives (still
+> excluded by queryUsingFor) / contract-scope operator-form / byte
+> 정밀도 / module-import 추가 / Grammar-blocked.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
