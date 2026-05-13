@@ -141,9 +141,21 @@
 > entry 는 lastImportName 을 overwrite. V1.28/V1.29 기존 케이스
 > 도 동일 로직으로 회귀 없이 처리. RED test 첫 시도 실패 →
 > empirical bug 노출 → fix → GREEN.
-> V2.10 carry-over (V2.11+): byte 정밀도 (column-based scope) /
+> V2.11 ✅ **bare path-only import regression guard** —
+> Solidity default form `import "./lib.sol";` (curly-brace 없음,
+> alias 없음, namespace 없음) 의 cross-file 동작 lock. V1.14
+> cross-file dispatch infrastructure 의 global byName 인덱스가
+> 정상 처리: `using SafeMath for uint256;` → byName[NodeContract]
+> ["SafeMath"] 매칭 → Vault → SafeMath EdgeUsesFor (ConfInferred)
+> + Vault.compute → SafeMath.add EdgeCalls 모두 발산. 4 가지
+> import shape 모두 unified test surface 달성:
+>   - V1.28 single/multi named alias  (`{Lib as L}`)
+>   - V1.29 namespace alias            (`"./lib" as L`)
+>   - V2.10 mixed bare + aliased       (`{LibA, LibB as L2}`)
+>   - V2.11 bare path-only             (`"./lib"`)
+> V2.11 carry-over (V2.12+): byte 정밀도 (column-based scope) /
 > Grammar-blocked items 의 grammar upgrade 시 V0 query 확장
-> candidate / `import "./lib.sol"` (bare path-only) 처리 패턴.
+> candidate.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
