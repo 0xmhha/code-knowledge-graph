@@ -109,13 +109,23 @@
 > form) 은 V2.6 와 달리 0 EdgeUsesFor 발산. `as +` 가 alias-entry
 > 에 `user_definable_operator` 자식을 추가해 V0 의 `(type_alias
 > (identifier) @lib)` 패턴이 더 이상 매칭되지 않음.
-> 결과 매트릭스 (empirically locked):
+> V2.8 ✅ **file-level free-function form limitation lock** —
+> 2x2 (scope × alias-shape) 매트릭스의 마지막 사분면. Sol 0.8.13+
+> `using {Math.add} for uint256 global;` (file scope + free-function
+> form) 도 0 EdgeUsesFor 발산. queryUsingFor 의 3 top-level
+> alternative 가 모두 `contract_body` 안만 매칭하므로 source_file
+> 직속 using_directive 는 alias-entry shape 와 무관하게 scope
+> 제외 — V2.5 와 동일 결과. 이로써 "scope" 가 dominant axis 임이
+> empirical 로 확정 (file-level → 항상 0 edges, alias-shape 영향
+> 무).
+> 결과 매트릭스 (empirically locked, v1.2.13):
 >   - V2.5 file-level   + operator-form  → 0 edges (scope 제외)
 >   - V2.6 contract-sc. + free-function  → 1 edge  (V0 incidental)
 >   - V2.7 contract-sc. + operator-form  → 0 edges (AST shape)
-> V2.7 carry-over (V2.8+): file-level free-function form (still
-> excluded by queryUsingFor) / byte 정밀도 / module-import 추가 /
-> Grammar-blocked.
+>   - V2.8 file-level   + free-function  → 0 edges (scope 제외)
+> V2.8 carry-over (V2.9+): byte 정밀도 (column-based scope 정밀도) /
+> module-import 추가 패턴 / Grammar-blocked items 의 grammar upgrade
+> 시 V0 query 확장 candidate.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
