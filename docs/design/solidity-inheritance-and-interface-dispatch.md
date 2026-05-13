@@ -89,13 +89,17 @@
 > resolveBindingLib helper 도입 — V2.1 의 known limitation 해소.
 > V2.3 library body using-for regression guard — V0 query 의 3-container
 > uniform matching robustness 검증.
-> V2.4 ✅ **cross-file multi-binding regression guard** — V2.2 의
-> multi-binding (`using A for T; using B for T;`) 이 cross-file 에서도
-> 정상 동작함을 fixture 로 잠금 (V1.14 / V1.18 idiom 의 V2.2 적용).
-> LibA + LibB 한 파일, Vault 다른 파일. resolveBindingLib 가 multi-
-> bound libs 의 cross-file lookup 정상. ConfInferred 검증.
-> V2.4 carry-over (V2.5+): byte 정밀도 / module-import 추가 /
-> Grammar-blocked.
+> V2.4 cross-file multi-binding regression guard — V2.2 multi-binding
+> cross-file 동작 확인.
+> V2.5 ✅ **operator-form using directive limitation lock** — Sol
+> 0.8.19+ `using {f as +} for T;` (user-defined operator binding) 는
+> tree-sitter v1.2.13 의 `using_alias` 노드 (V0 query 가 type_alias
+> 만 매칭, using_alias 미캡처). V2.5 가 (a) 0 EdgeUsesFor 발산, (b)
+> 주변 declaration (functions, contracts) 정상 indexing 을 fixture
+> 로 잠금. V3+ 에서 queryUsingFor 가 using_alias 도 매칭하거나
+> grammar 업그레이드 필요.
+> V2.5 carry-over (V2.6+): byte 정밀도 / module-import 추가 /
+> Grammar-blocked items.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
