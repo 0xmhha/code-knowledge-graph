@@ -173,8 +173,33 @@
 > 판단은 snapshot 으로만, ancestor-to-ancestor 는 de-duplicated
 > union (slices.Contains 로 중복 제거). V2.10 이후 두 번째 actual
 > bug fix V-cycle. RED on first run → fix → GREEN.
-> V2.13 carry-over (V2.14+): byte 정밀도 (column-based scope) /
-> interface body using-for / Grammar-blocked items.
+> V2.14 ✅ **interface-body using-for variants lock** — V0 query
+> (queries.go §W6) nests `using_directive` under
+> `interface_declaration`, so interface bodies ARE walked. V2.14
+> probes all three `using` variants inside an interface body
+> (semantically nonsensical — interfaces have no state to bind
+> methods on) in one fixture:
+>   - `IBare` : `using SafeMath for uint256;`        → 1 EdgeUsesFor
+>     (V0 happy path matches type_alias).
+>   - `IFree` : `using {Math.add} for uint256;`      → 1 EdgeUsesFor
+>     (V2.6-style incidental @lib capture inside type_alias child).
+>   - `IOp`   : `using {Math.add as +} for uint256;` → 0 EdgeUsesFor
+>     (V2.7-style AST shape mismatch — `user_definable_operator`
+>     child breaks the type_alias match path).
+> All 3 predictions held on first run — clean GREEN, no resolver
+> fix. Phantom edges to libraries from interface declarations are
+> a known graph artifact (V0's query is shape-driven, scope-agnostic);
+> downstream consumers should treat interface-scope EdgeUsesFor as
+> structural noise rather than dispatch-relevant binding.
+> Contrast table extension (cf. V2.5/V2.6/V2.7/V2.9):
+>   - scope:file      × variant:operator-form → 0 edges (V2.5)
+>   - scope:contract  × variant:free-func     → 1 edge  (V2.6)
+>   - scope:contract  × variant:operator-form → 0 edges (V2.7)
+>   - scope:interface × variant:type-alias    → 1 edge  (V2.14 IBare)
+>   - scope:interface × variant:free-func     → 1 edge  (V2.14 IFree)
+>   - scope:interface × variant:operator-form → 0 edges (V2.14 IOp)
+> V2.14 carry-over (V2.15+): byte 정밀도 (column-based scope) /
+> Grammar-blocked items survey.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.
