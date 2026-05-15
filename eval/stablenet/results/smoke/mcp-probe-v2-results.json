@@ -1,0 +1,63 @@
+[
+  {
+    "label": "B1: trailing-period task_description",
+    "expectation": "Was: fts5 syntax error near '.'. Expected after fix: 200 OK.",
+    "ok": true,
+    "rpc_error": null,
+    "tool_isError": false,
+    "nodes": 0,
+    "edges": 0,
+    "first_node": null
+  },
+  {
+    "label": "B1: heavy-punctuation task_description",
+    "expectation": "Parens / `?` / `!` mixed in. Expected: 200 OK (trimmed at token boundary).",
+    "ok": false,
+    "rpc_error": {
+      "code": -32603,
+      "message": "fts search \"Where does (NewBlockChain) get called, and why? Show callers!\": SQL logic error: fts5: syntax error near \"does\" (1)"
+    },
+    "tool_isError": false,
+    "nodes": 0,
+    "edges": 0,
+    "first_node": null
+  },
+  {
+    "label": "B2a: full qname + exact=true",
+    "expectation": "Doc says exact=true matches qualified_name exactly. Expect \u22651 node.",
+    "ok": true,
+    "rpc_error": null,
+    "tool_isError": false,
+    "nodes": 1,
+    "edges": 0,
+    "first_node": {
+      "name": "NewBlockChain",
+      "qname": "core.NewBlockChain",
+      "type": "Function"
+    }
+  },
+  {
+    "label": "B2b: bare name + exact=false (suffix)",
+    "expectation": "Doc says exact=false treats input as suffix. Expect \u22651 node.",
+    "ok": true,
+    "rpc_error": null,
+    "tool_isError": false,
+    "nodes": 1,
+    "edges": 0,
+    "first_node": {
+      "name": "NewBlockChain",
+      "qname": "core.NewBlockChain",
+      "type": "Function"
+    }
+  },
+  {
+    "label": "B2c: bare name + exact=true (documented to false-empty)",
+    "expectation": "Doc warns this returns 0 \u2014 bare names need exact=false.",
+    "ok": true,
+    "rpc_error": null,
+    "tool_isError": false,
+    "nodes": 0,
+    "edges": 0,
+    "first_node": null
+  }
+]

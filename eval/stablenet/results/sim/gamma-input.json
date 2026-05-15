@@ -1,0 +1,77 @@
+{
+  "edges": [
+    {
+      "id": 128366,
+      "src": "6e011fafab2be04c",
+      "dst": "68e0478e3cb1a7c9",
+      "type": "calls",
+      "line": 2158,
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": 144411,
+      "src": "a72f89805e98df53",
+      "dst": "68e0478e3cb1a7c9",
+      "type": "calls",
+      "line": 227,
+      "count": 1,
+      "confidence": "EXTRACTED"
+    },
+    {
+      "id": 160317,
+      "src": "31768f18c8f6f11f",
+      "dst": "68e0478e3cb1a7c9",
+      "type": "calls",
+      "line": 152,
+      "count": 1,
+      "confidence": "EXTRACTED"
+    }
+  ],
+  "nodes": [
+    {
+      "confidence": "EXTRACTED",
+      "file": "core/blockchain.go",
+      "id": "68e0478e3cb1a7c9",
+      "line": 269,
+      "name": "NewBlockChain",
+      "qname": "core.NewBlockChain",
+      "signature": "func NewBlockChain(...) ...",
+      "type": "Function",
+      "usage_score": 3
+    },
+    {
+      "confidence": "EXTRACTED",
+      "file": "tests/block_test_util.go",
+      "id": "31768f18c8f6f11f",
+      "line": 112,
+      "name": "Run",
+      "qname": "tests.BlockTest.Run",
+      "signature": "func (BlockTest) Run(...) ...",
+      "type": "Method",
+      "usage_score": 1
+    },
+    {
+      "confidence": "EXTRACTED",
+      "file": "cmd/utils/flags.go",
+      "id": "6e011fafab2be04c",
+      "line": 2095,
+      "name": "MakeChain",
+      "qname": "utils.MakeChain",
+      "signature": "func MakeChain(...) ...",
+      "type": "Function",
+      "usage_score": 4
+    },
+    {
+      "confidence": "EXTRACTED",
+      "file": "eth/backend.go",
+      "id": "a72f89805e98df53",
+      "line": 110,
+      "name": "New",
+      "qname": "eth.New",
+      "signature": "func New(...) ...",
+      "type": "Function",
+      "usage_score": 0
+    }
+  ]
+}

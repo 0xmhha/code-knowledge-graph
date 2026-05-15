@@ -1,0 +1,13 @@
+task_id,baseline,input_tokens,output_tokens,cached_tokens,score,latency_ms,num_tool_calls,stale
+T01-newblockchain-callers,alpha,5,904,62972,0.0000,16363,0,false
+T01-newblockchain-callers,beta,7,733,113798,0.0000,16819,0,false
+T01-newblockchain-callers,gamma,7,863,171395,0.0000,24830,0,false
+T01-newblockchain-callers,delta,7,833,171483,0.0000,29764,0,false
+T02-wbft-prepare-validation,alpha,8,5335,271157,1.0000,70109,0,false
+T02-wbft-prepare-validation,beta,6,1787,56728,0.6000,33035,0,false
+T02-wbft-prepare-validation,gamma,10,3479,369659,0.4000,71135,0,false
+T02-wbft-prepare-validation,delta,12,6020,470819,0.6000,118505,0,false
+T03-systemcontracts-v2-upgrade,alpha,14,6333,420754,0.8000,111989,0,false
+T03-systemcontracts-v2-upgrade,beta,13,5724,237833,0.8000,66790,0,false
+T03-systemcontracts-v2-upgrade,gamma,14,5670,359201,0.8000,108459,0,false
+T03-systemcontracts-v2-upgrade,delta,14,7350,362170,0.8000,94720,0,false

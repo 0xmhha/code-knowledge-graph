@@ -1,0 +1,21 @@
+id: T03-systemcontracts-v2-upgrade
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/systemcontracts
+description: |
+  Describe the concrete steps required to ship a v2 version of the
+  GovStaking system contract that activates at a future hard fork
+  block. Identify the directory the new artifact JSON goes into, the
+  embed directive that picks it up, where the hard fork block number
+  is declared in params, the upgrade registration point in ethconfig,
+  and the InjectContracts integration point that installs the new
+  bytecode at genesis or fork activation
+expected_kind: rubric
+expected:
+  rubric:
+    - artifacts/v2 directory
+    - go:embed directive
+    - hard fork block number in params
+    - GovContractUpgrades or ethconfig registration
+    - InjectContracts call site
+scoring:
+  type: rubric

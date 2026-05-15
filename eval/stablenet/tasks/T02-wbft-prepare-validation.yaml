@@ -1,0 +1,20 @@
+id: T02-wbft-prepare-validation
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  Explain how a WBFT prepare message is validated when it arrives at a
+  node. Cover which signature checks run, how the validator set is
+  consulted, how the round number and sequence are matched against the
+  current consensus state, and what happens if the message does not
+  align with a known preprepare. Refer to specific function names where
+  relevant
+expected_kind: rubric
+expected:
+  rubric:
+    - signature verification
+    - validator set membership
+    - round number match
+    - sequence or height match
+    - preprepare alignment
+scoring:
+  type: rubric

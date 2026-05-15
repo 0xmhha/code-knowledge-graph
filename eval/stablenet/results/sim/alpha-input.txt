@@ -1,0 +1,544 @@
+
+=== asm/asm.go ===
+// Copyright 2017 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
+// Package asm provides support for dealing with EVM assembly instructions (e.g., disassembling them).
+package asm
+
+import (
+	"encoding/hex"
+	"fmt"
+
+	"github.com/ethereum/go-ethereum/core/vm"
+)
+
+// Iterator for disassembled EVM instructions
+type instructionIterator struct {
+	code    []byte
+	pc      uint64
+	arg     []byte
+	op      vm.OpCode
+	error   error
+	started bool
+}
+
+// NewInstructionIterator creates a new instruction iterator.
+func NewInstructionIterator(code []byte) *instructionIterator {
+	it := new(instructionIterator)
+	it.code = code
+	return it
+}
+
+// Next returns true if there is a next instruction and moves on.
+func (it *instructionIterator) Next() bool {
+	if it.error != nil || uint64(len(it.code)) <= it.pc {
+		// We previously reached an error or the end.
+		return false
+	}
+
+	if it.started {
+		// Since the iteration has been already started we move to the next instruction.
+		if it.arg != nil {
+			it.pc += uint64(len(it.arg))
+		}
+		it.pc++
+	} else {
+		// We start the iteration from the first instruction.
+		it.started = true
+	}
+
+	if uint64(len(it.code)) <= it.pc {
+		// We reached the end.
+		return false
+	}
+
+	it.op = vm.OpCode(it.code[it.pc])
+	if it.op.IsPush() {
+		a := uint64(it.op) - uint64(vm.PUSH1) + 1
+		u := it.pc + 1 + a
+		if uint64(len(it.code)) <= it.pc || uint64(len(it.code)) < u {
+			it.error = fmt.Errorf("incomplete push instruction at %v", it.pc)
+			return false
+		}
+		it.arg = it.code[it.pc+1 : u]
+	} else {
+		it.arg = nil
+	}
+	return true
+}
+
+// Error returns any error that may have been encountered.
+func (it *instructionIterator) Error() error {
+	return it.error
+}
+
+// PC returns the PC of the current instruction.
+func (it *instructionIterator) PC() uint64 {
+	return it.pc
+}
+
+// Op returns the opcode of the current instruction.
+func (it *instructionIterator) Op() vm.OpCode {
+	return it.op
+}
+
+// Arg returns the argument of the current instruction.
+func (it *instructionIterator) Arg() []byte {
+	return it.arg
+}
+
+// PrintDisassembled pretty-print all disassembled EVM instructions to stdout.
+func PrintDisassembled(code string) error {
+	script, err := hex.DecodeString(code)
+	if err != nil {
+		return err
+	}
+
+	it := NewInstructionIterator(script)
+	for it.Next() {
+		if it.Arg() != nil && 0 < len(it.Arg()) {
+			fmt.Printf("%05x: %v %#x\n", it.PC(), it.Op(), it.Arg())
+		} else {
+			fmt.Printf("%05x: %v\n", it.PC(), it.Op())
+		}
+	}
+	return it.Error()
+}
+
+// Disassemble returns all disassembled EVM instructions in human-readable format.
+func Disassemble(script []byte) ([]string, error) {
+	instrs := make([]string, 0)
+
+	it := NewInstructionIterator(script)
+	for it.Next() {
+		if it.Arg() != nil && 0 < len(it.Arg()) {
+			instrs = append(instrs, fmt.Sprintf("%05x: %v %#x\n", it.PC(), it.Op(), it.Arg()))
+		} else {
+			instrs = append(instrs, fmt.Sprintf("%05x: %v\n", it.PC(), it.Op()))
+		}
+	}
+	if err := it.Error(); err != nil {
+		return nil, err
+	}
+	return instrs, nil
+}
+
+
+=== asm/asm_test.go ===
+// Copyright 2017 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
+package asm
+
+import (
+	"testing"
+
+	"encoding/hex"
+)
+
+// Tests disassembling instructions
+func TestInstructionIterator(t *testing.T) {
+	for i, tc := range []struct {
+		want    int
+		code    string
+		wantErr string
+	}{
+		{2, "61000000", ""},                             // valid code
+		{0, "6100", "incomplete push instruction at 0"}, // invalid code
+		{2, "5900", ""},                                 // push0
+		{0, "", ""},                                     // empty
+
+	} {
+		var (
+			have    int
+			code, _ = hex.DecodeString(tc.code)
+			it      = NewInstructionIterator(code)
+		)
+		for it.Next() {
+			have++
+		}
+		var haveErr = ""
+		if it.Error() != nil {
+			haveErr = it.Error().Error()
+		}
+		if haveErr != tc.wantErr {
+			t.Errorf("test %d: encountered error: %q want %q", i, haveErr, tc.wantErr)
+			continue
+		}
+		if have != tc.want {
+			t.Errorf("wrong instruction count, have %d want %d", have, tc.want)
+		}
+	}
+}
+
+
+=== asm/compiler.go ===
+// Copyright 2017 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
+package asm
+
+import (
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math/big"
+	"os"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/vm"
+)
+
+// Compiler contains information about the parsed source
+// and holds the tokens for the program.
+type Compiler struct {
+	tokens []token
+	out    []byte
+
+	labels map[string]int
+
+	pc, pos int
+
+	debug bool
+}
+
+// NewCompiler returns a new allocated compiler.
+func NewCompiler(debug bool) *Compiler {
+	return &Compiler{
+		labels: make(map[string]int),
+		debug:  debug,
+	}
+}
+
+// Feed feeds tokens into ch and are interpreted by
+// the compiler.
+//
+// feed is the first pass in the compile stage as it collects the used labels in the
+// program and keeps a program counter which is used to determine the locations of the
+// jump dests. The labels can than be used in the second stage to push labels and
+// determine the right position.
+func (c *Compiler) Feed(ch <-chan token) {
+	var prev token
+	for i := range ch {
+		switch i.typ {
+		case number:
+			num := math.MustParseBig256(i.text).Bytes()
+			if len(num) == 0 {
+				num = []byte{0}
+			}
+			c.pc += len(num)
+		case stringValue:
+			c.pc += len(i.text) - 2
+		case element:
+			c.pc++
+		case labelDef:
+			c.labels[i.text] = c.pc
+			c.pc++
+		case label:
+			c.pc += 4
+			if prev.typ == element && isJump(prev.text) {
+				c.pc++
+			}
+		}
+		c.tokens = append(c.tokens, i)
+		prev = i
+	}
+	if c.debug {
+		fmt.Fprintln(os.Stderr, "found", len(c.labels), "labels")
+	}
+}
+
+// Compile compiles the current tokens and returns a binary string that can be interpreted
+// by the EVM and an error if it failed.
+//
+// compile is the second stage in the compile phase which compiles the tokens to EVM
+// instructions.
+func (c *Compiler) Compile() (string, []error) {
+	var errors []error
+	// continue looping over the tokens until
+	// the stack has been exhausted.
+	for c.pos < len(c.tokens) {
+		if err := c.compileLine(); err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	// turn the binary to hex
+	h := hex.EncodeToString(c.out)
+	return h, errors
+}
+
+// next returns the next token and increments the
+// position.
+func (c *Compiler) next() token {
+	token := c.tokens[c.pos]
+	c.pos++
+	return token
+}
+
+// compileLine compiles a single line instruction e.g.
+// "push 1", "jump @label".
+func (c *Compiler) compileLine() error {
+	n := c.next()
+	if n.typ != lineStart {
+		return compileErr(n, n.typ.String(), lineStart.String())
+	}
+
+	lvalue := c.next()
+	switch lvalue.typ {
+	case eof:
+		return nil
+	case element:
+		if err := c.compileElement(lvalue); err != nil {
+			return err
+		}
+	case labelDef:
+		c.compileLabel()
+	case lineEnd:
+		return nil
+	default:
+		return compileErr(lvalue, lvalue.text, fmt.Sprintf("%v or %v", labelDef, element))
+	}
+
+	if n := c.next(); n.typ != lineEnd {
+		return compileErr(n, n.text, lineEnd.String())
+	}
+
+	return nil
+}
+
+// parseNumber compiles the number to bytes
+func parseNumber(tok token) ([]byte, error) {
+	if tok.typ != number {
+		panic("parseNumber of non-number token")
+	}
+	num, ok := math.ParseBig256(tok.text)
+	if !ok {
+		return nil, errors.New("invalid number")
+	}
+	bytes := num.Bytes()
+	if len(bytes) == 0 {
+		bytes = []byte{0}
+	}
+	return bytes, nil
+}
+
+// compileEle
+
+=== asm/compiler_test.go ===
+// Copyright 2019 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
+package asm
+
+import (
+	"testing"
+)
+
+func TestCompiler(t *testing.T) {
+	tests := []struct {
+		input, output string
+	}{
+		{
+			input: `
+	GAS
+	label:
+	PUSH @label
+`,
+			output: "5a5b6300000001",
+		},
+		{
+			input: `
+	PUSH @label
+	label:
+`,
+			output: "63000000055b",
+		},
+		{
+			input: `
+	PUSH @label
+	JUMP
+	label:
+`,
+			output: "6300000006565b",
+		},
+		{
+			input: `
+	JUMP @label
+	label:
+`,
+			output: "6300000006565b",
+		},
+		{
+			input: `
+	JUMP @label
+label: ;; comment
+	ADD ;; comment
+`,
+			output: "6300000006565b01",
+		},
+	}
+	for _, test := range tests {
+		ch := Lex([]byte(test.input), false)
+		c := NewCompiler(false)
+		c.Feed(ch)
+		output, err := c.Compile()
+		if len(err) != 0 {
+			t.Errorf("compile error: %v\ninput: %s", err, test.input)
+			continue
+		}
+		if output != test.output {
+			t.Errorf("incorrect output\ninput: %sgot:  %s\nwant: %s\n", test.input, output, test.output)
+		}
+	}
+}
+
+
+=== asm/lex_test.go ===
+// Copyright 2017 The go-ethereum Authors
+// This file is part of the go-ethereum library.
+//
+// The go-ethereum library is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// The go-ethereum library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
+
+package asm
+
+import (
+	"reflect"
+	"testing"
+)
+
+func lexAll(src string) []token {
+	ch := Lex([]byte(src), false)
+
+	var tokens []token
+	for i := range ch {
+		tokens = append(tokens, i)
+	}
+	return tokens
+}
+
+func TestLexer(t *testing.T) {
+	tests := []struct {
+		input  string
+		tokens []token
+	}{
+		{
+			input:  ";; this is a comment",
+			tokens: []token{{typ: lineStart}, {typ: eof}},
+		},
+		{
+			input:  "0x12345678",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "0x12345678"}, {typ: eof}},
+		},
+		{
+			input:  "0x123ggg",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "0x123"}, {typ: element, text: "ggg"}, {typ: eof}},
+		},
+		{
+			input:  "12345678",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "12345678"}, {typ: eof}},
+		},
+		{
+			input:  "123abc",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "123"}, {typ: element, text: "abc"}, {typ: eof}},
+		},
+		{
+			input:  "0123abc",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "0123"}, {typ: element, text: "abc"}, {typ: eof}},
+		},
+		{
+			input:  "00123abc",
+			tokens: []token{{typ: lineStart}, {typ: number, text: "00123"}, {typ: element, text: "abc"}, {typ: eof}},
+		},
+		{
+			input:  "@foo",
+			tokens: []token{{typ: lineStart}, {typ: label, text: "foo"}, {typ: eof}},
+		},
+		{
+			input:  "@label123",
+			tokens: []token{{typ: lineStart}, {typ: label, text: "label123"}, {typ: eof}},
+		},
+		// Comment after label
+		{
+			input:  "@label123 ;; comment",
+			tokens: []token{{typ: lineStart}, {typ: label, text: "label123"}, {typ: eof}},
+		},
+		// Comment after instruction
+		{
+			input:  "push 3 ;; comment\nadd",
+			tokens: []token{{typ: lineStart}, {typ: element, text: "push"}, {typ: number, text: "3"}, {typ: lineEnd, text: "\n"}, {typ: lineStart, lineno: 1}, {typ: element, lineno: 1, text: "add"}, {typ: eof, lineno: 1}},
+		},
+	}
+
+	for _, test := range tests {
+		tokens := lexAll(test.input)
+		if !reflect.DeepEqual(tokens, test.tokens) {
+			t.Errorf("input %q\ngot:  %+v\nwant: %+v", test.input, tokens, test.tokens)
+		}
+	}
+}

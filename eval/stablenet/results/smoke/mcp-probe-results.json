@@ -1,0 +1,162 @@
+[
+  {
+    "label": "initialize",
+    "ok": true,
+    "hint": "MCP handshake",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 0,
+      "edge_count": 0,
+      "first_node": null,
+      "content_text_preview": null
+    }
+  },
+  {
+    "label": "tools/list",
+    "ok": true,
+    "hint": "discovered=8; names=['evidence_for_intent', 'find_callees', 'find_callers', 'find_symbol', 'get_context_for_task', 'get_subgraph', 'impact_of_change', 'search_text']",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 0,
+      "edge_count": 0,
+      "first_node": null,
+      "content_text_preview": null
+    }
+  },
+  {
+    "label": "find_symbol(NewBlockChain, suffix)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 1,
+      "edge_count": 0,
+      "first_node": {
+        "name": "NewBlockChain",
+        "qname": "core.NewBlockChain",
+        "type": "Function",
+        "file": "core/blockchain.go",
+        "line": 269
+      },
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "find_callers(core.NewBlockChain)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 4,
+      "edge_count": 3,
+      "first_node": {
+        "name": "NewBlockChain",
+        "qname": "core.NewBlockChain",
+        "type": "Function",
+        "file": "core/blockchain.go",
+        "line": 269
+      },
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "find_callees(core.NewBlockChain)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 46,
+      "edge_count": 79,
+      "first_node": {
+        "name": "NewBlockValidator",
+        "qname": "core.NewBlockValidator",
+        "type": "Function",
+        "file": "core/block_validator.go",
+        "line": 41
+      },
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "get_subgraph(core.NewBlockChain)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 198,
+      "edge_count": 233,
+      "first_node": {
+        "name": "IfStmt",
+        "qname": "core.NewBlockChain#IfStmt@15239",
+        "type": "IfStmt",
+        "file": "core/blockchain.go",
+        "line": 347
+      },
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "impact_of_change(core.NewBlockChain)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 0,
+      "edge_count": 8,
+      "first_node": null,
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "search_text('WBFT consensus')",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 5,
+      "edge_count": 0,
+      "first_node": {
+        "name": "ErrEmptyPrevPreparedSeals",
+        "qname": "wbftcommon.ErrEmptyPrevPreparedSeals",
+        "type": "Variable",
+        "file": "consensus/wbft/common/errors.go",
+        "line": 81
+      },
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "get_context_for_task(WBFT prepare)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 0,
+      "edge_count": 0,
+      "first_node": null,
+      "content_text_preview": ""
+    }
+  },
+  {
+    "label": "evidence_for_intent(...)",
+    "ok": true,
+    "hint": "",
+    "rpc_error": null,
+    "tool_isError": false,
+    "result_summary": {
+      "node_count": 0,
+      "edge_count": 0,
+      "first_node": null,
+      "content_text_preview": ""
+    }
+  }
+]

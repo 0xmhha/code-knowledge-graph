@@ -1,0 +1,62 @@
+{
+  "generated_at": "2026-05-11T04:46:41Z",
+  "graph_path": "/tmp/ckg-stablenet",
+  "build_timestamp": "2026-05-11T04:10:18Z",
+  "src_commit": "940e9f281edbdbc3df088a14e77a106908bfcb5d",
+  "iterations": 1,
+  "concurrency": 4,
+  "results": [
+    {
+      "endpoint": "find_symbol",
+      "n": 4,
+      "concurrency": 4,
+      "p50_ms": 0.379,
+      "p95_ms": 0.411,
+      "p99_ms": 0.411,
+      "mean_ms": 0.24575000000000002,
+      "min_ms": 0.086,
+      "max_ms": 0.411,
+      "error_count": 0,
+      "status_200_pct": 100
+    },
+    {
+      "endpoint": "search_text",
+      "n": 4,
+      "concurrency": 4,
+      "p50_ms": 1.347,
+      "p95_ms": 1.58,
+      "p99_ms": 1.58,
+      "mean_ms": 1.23725,
+      "min_ms": 0.715,
+      "max_ms": 1.58,
+      "error_count": 0,
+      "status_200_pct": 100
+    },
+    {
+      "endpoint": "get_context_for_task",
+      "n": 4,
+      "concurrency": 4,
+      "p50_ms": 6.955,
+      "p95_ms": 7.081,
+      "p99_ms": 7.081,
+      "mean_ms": 6.132499999999999,
+      "min_ms": 4.101,
+      "max_ms": 7.081,
+      "error_count": 0,
+      "status_200_pct": 100
+    },
+    {
+      "endpoint": "evidence_for_intent",
+      "n": 4,
+      "concurrency": 4,
+      "p50_ms": 70.994,
+      "p95_ms": 71.256,
+      "p99_ms": 71.256,
+      "mean_ms": 69.90950000000001,
+      "min_ms": 68.096,
+      "max_ms": 71.256,
+      "error_count": 0,
+      "status_200_pct": 100
+    }
+  ]
+}
