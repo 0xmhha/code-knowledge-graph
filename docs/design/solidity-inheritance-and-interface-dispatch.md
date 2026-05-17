@@ -232,6 +232,64 @@
 > leave it at default 0 and selectLocalDecl falls back to V2.0
 > behavior. No behavioral change for Go/TS/Proto callers.
 >
+> V2.18 ✅ **file-level using directive ERROR-tolerant walker** —
+> V2.16 row 1 closure (single-row scope, operator-form deferred per
+> V2.17 evidence). Sol 0.8.13+ file-level `using LibName for T
+> [global];` directives are grammar-blocked in vendored
+> tree-sitter-solidity v1.2.11: they parse into a single ERROR child
+> of `source_file` with `using` keyword misclassified as an identifier
+> inside a fake user_defined_type. V2.18 AST probe 2026-05-17
+> confirmed the inner shape is recoverable:
+>
+>   source_file
+>     ERROR "using SafeMath for uint256 [global];"
+>       type_name (user_defined_type (identifier "using"))   ← keyword
+>       identifier "SafeMath"                                ← lib name
+>       type_name (primitive_type "uint256")                 ← bound type
+>       [identifier "global"]                                ← optional
+>
+> `runFileLevelUsingFor` in using_for.go walks source_file's direct
+> ERROR children, gates on `strings.HasPrefix(text, "using ")`,
+> extracts library + bound type from named children, and emits the
+> same PendingRef pair runUsingFor uses for contract-body directives.
+> Per-container fan-out: one emit per contract/interface in v.nodes
+> (NodeContract with SubKind != "library" + NodeInterface) preserves
+> Sol semantics (file-level binding applies to all containers in
+> source). Library subkinds excluded to prevent self-binding phantom
+> edges (Math → Math) — empirically caught during walker bring-up.
+>
+> Two fixtures lock the behavior:
+>   - file_level_using_global.sol: single Vault contract + `using
+>     SafeMath for uint256 global;` → 1 EdgeUsesFor (Vault → SafeMath)
+>     + 1 EdgeCalls (Vault.compute → SafeMath.add via dispatch wiring).
+>   - file_level_using_multi_contract.sol: VaultA + VaultB + `using
+>     SafeMath for uint256;` (no global) → 2 EdgeUsesFor + 2 EdgeCalls,
+>     one per contract. Confirms fan-out is correct.
+>
+> Sharing infrastructure with runUsingFor was deliberate: same
+> dispatchKindUsingFor / dispatchKindUsingForTypeBind constants, same
+> alias normalisation (namespaceAliases / importAliases), so dispatch
+> resolution requires no changes. The walker is purely additive.
+>
+> Why operator-form deferred (V2.17 row 2 stays at category A): V2.18
+> AST probe confirmed V2.7's operator-form fixture parses with NO
+> using_directive node at all — the braced body becomes a
+> `state_variable_declaration` with `as` as the state-var name. A
+> recovery walker would need to discriminate true state-vars from this
+> misparse — too fragile for the value. Wait for grammar bump.
+>
+> Zero regression across 50+ Sol tests, golang/typescript/proto
+> parsers, go vet clean. V2.16 row 1 status flipped from "A still
+> blocked" to "A-recovered (V2.18)".
+>
+> V2.18 carry-over (V2.19+):
+>   - Upstream tree-sitter-solidity bump tracking — V2.18 walker retires
+>     when source_file using_directive parses natively.
+>   - W6 closure decision — only row 2 (operator-form, requires grammar
+>     bump) and row 3 (free-function partial recovery, post-bump
+>     re-verify) remain. Cost-benefit ratio for further V-cycles is
+>     thin; W7+ probably a better focus shift.
+>
 > V2.17 ✅ **operator-form grammar-block lock + V2.16 row 2
 > reclassification** — V2.16 carry-over closure changed direction
 > mid-cycle. Original plan: extend queryUsingFor with a `using_alias`
@@ -275,7 +333,7 @@
 >
 > | # | Item | Category | Evidence | Action |
 > |---|------|----------|----------|--------|
-> | 1 | File-level `using LibName for T global;` (0.8.13+ at source_file scope) | **A** still blocked | queries.go §"W6 V1.2 grammar limitation note" — parser wraps in ERROR nodes per AST dump 2026-05-12. V2.5 `using {mul as *} for uint256 global;` produced 0 edges (combined cause: grammar ERROR + queryUsingFor scope exclusion). | Wait for grammar bump OR add a custom source_file-level walker that tolerates ERROR siblings. |
+> | 1 | File-level `using LibName for T [global];` (0.8.13+ at source_file scope) | **A-recovered (V2.18)** | Grammar still blocks (parser wraps in ERROR per V1.2 / V2.18 dumps). V2.18 (2026-05-17) added `runFileLevelUsingFor` walker that pattern-matches `source_file > ERROR "using ..."` and extracts library name + bound type from named children. Per-container fan-out (one edge per contract/interface in the file, library subkinds excluded) preserves Sol semantics. V2.5 file-level *operator-form* stays at 0 — `{f as +}` body has no recoverable identifier shape (V2.17). | Recovery walker landed. Re-verify after upstream grammar bump (walker becomes redundant once `using_directive` parses at source_file scope natively). |
 > | 2 | Operator-form `using {f as +} for T;` (0.8.19+, any scope) | **A** grammar reject (V2.17 RECLASSIFIED from B) | Empirical AST dump 2026-05-17 on vendored grammar v1.2.11: braced operator-form body is misparsed as a `state_variable_declaration` wrapped in ERROR nodes; NO `using_directive` node emitted. `using_alias` referenced in V0/V2.5 spec comments does not exist as a valid node type. V2.5 / V2.7 / V2.14 IOp / V2.17 all lock 0 edges across file / contract / interface / library scopes. | Grammar bump required (query extension is impossible — there's nothing for a query to match). OR ERROR-tolerant custom walker, same shape as row 1. |
 > | 3 | Free-function form `using {Math.add, Math.sub} for T;` (0.8.13+, contract / interface body) | **A-partial** (degraded but recoverable) | V2.17 AST dump 2026-05-17: parses to a `using_directive` containing `ERROR`+`user_defined_type`+`type_alias`+`ERROR "}"` — i.e. the braces are ERROR but the inner qualified `Math.add` produces a fortuitous `type_alias` child whose identifier V0's existing query incidentally captures. V2.6 / V2.14 IFree lock the 1-edge result. NOT first-class grammar support — fragile partial-recovery artifact that could shift on grammar bump. | None for now (V2.6 lock holds). Re-verify post-grammar-bump that the partial recovery still produces the same shape, else flip locks. |
 > | 4 | Inline assembly / Yul (`assembly { let x := ... }`) | **C** out of scope | Sol parser doesn't descend into `assembly_statement` bodies. Yul has its own grammar / type system / dispatch model. | Separate workstream. Track in a Yul-specific spec; not part of W6. |
@@ -283,36 +341,42 @@
 > | 6 | Identifier-slot tuple destructuring (`(uint a, ) = foo();`) | **Captured (V1.16 family)** | V1.16-V1.18 multi-return tuple destructuring covers LHS explicit types; cross-file validated in V1.18. Anonymous slots (no name) silently skip per parser-required-fields. | None — V1.16 family already lands this. |
 > | 7 | Wildcard imports (`import * as Lib from "./lib"`) | **Captured (V1.28-V1.29 + V2.10-V2.11)** | V1.28 aliased imports / V1.29 whole-file alias / V2.10 mixed bare+aliased / V2.11 bare path-only. All four major shapes locked. | None — import surface complete. |
 >
-> Net summary (post-V2.17 reclassification):
->   - **2 grammar-blocked items remaining** (both category A):
->     - Row 1: file-level `using ... global;` directives.
->     - Row 2: operator-form `using {f as +} for T;` (V2.17 reclassified
->       from B → A based on empirical AST evidence).
->     Both require grammar upgrade. Query extensions cannot fix either —
->     the parser doesn't expose addressable nodes for them.
->   - **1 partial-recovery item** (row 3): free-function form works via
->     V0's existing query but only because the grammar's degraded parse
->     fortuitously preserves a `type_alias` slot. Re-verify post-bump.
+> Net summary (post-V2.18 row 1 recovery):
+>   - **1 grammar-blocked item remaining** (category A): row 2 operator-
+>     form `using {f as +} for T;`. V2.18 AST probe confirmed it has no
+>     recoverable shape (V2.7 case parses with NO using_directive node;
+>     braced body misclassified as `state_variable_declaration` with
+>     "as" misread as a state-var name). A recovery walker would have
+>     to discriminate true state-vars from this misparse — too fragile.
+>     Requires grammar bump.
+>   - **1 row recovered by walker** (V2.18, row 1): file-level using
+>     directive now produces 1 EdgeUsesFor per contract/interface in
+>     the file + downstream dispatch wiring. Library subkinds excluded
+>     from fan-out (no self-binding phantom edges).
+>   - **1 partial-recovery item** (row 3): free-function form still
+>     works via V0's existing query (fortuitous `type_alias` partial
+>     recovery). Re-verify post-grammar-bump.
 >   - **2 items out-of-scope** (rows 4-5) — Yul + deprecated `var`.
 >   - **2 items already complete** (rows 6-7) — tuple destructuring + imports.
 >
-> Action priority (V2.18+ candidates):
->   1. ERROR-tolerant custom walker (rows 1+2 share the shape — extract
->      identifier from ERROR-wrapped using_directive context). Single
->      walker can fix both gaps without grammar dependency. Medium lift.
->   2. Upstream grammar bump tracking — JoranHonig/tree-sitter-solidity
->      version that natively supports operator-form + file-level `global`.
->      If/when it lands, coordinate lock-flips across V2.5 / V2.7 / V2.14
->      IOp / V2.17. Re-probe row 3 to ensure partial-recovery didn't
->      regress.
+> Action priority (V2.19+ candidates):
+>   1. Upstream grammar bump tracking — JoranHonig/tree-sitter-solidity
+>      version that natively supports operator-form. Coordinate lock-flips
+>      across V2.5 / V2.7 / V2.14 IOp / V2.17 when it lands. Re-probe
+>      row 1 to confirm V2.18 walker can retire (becomes redundant once
+>      using_directive parses at source_file scope natively).
+>   2. Operator-form recovery walker spike (row 2) — only if grammar bump
+>      isn't on the horizon. Would need careful discrimination against
+>      real state-vars to avoid false positives. Lower confidence than
+>      V2.18's file-level walker which has a unique ERROR-text prefix.
 >   3. Yul dispatch (row 4) — separate workstream, large surface.
 >
-> V2.17 carry-over (V2.18+):
->   - ERROR-tolerant walker spike (above option 1) is the smallest-leverage
->     gap closure now that "extend the query" is off the table.
->   - W6 closure decision — given that the only remaining gaps require
->     either grammar work or an ERROR walker (neither trivial), consider
->     whether using-for surface is "done enough" to shift focus to W7+.
+> V2.18 carry-over (V2.19+):
+>   - W6 closure decision: 1 remaining grammar-block + 1 fragile partial
+>     recovery + walker maintenance burden. The cost-benefit ratio for
+>     further V-cycles in using-for keeps shrinking. Consider shifting
+>     focus to W7+ topics unless real-world Sol corpora surface operator-
+>     form heavy usage worth a fragile walker.
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

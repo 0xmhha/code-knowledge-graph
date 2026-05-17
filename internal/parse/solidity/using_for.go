@@ -1,6 +1,8 @@
 package solidity
 
 import (
+	"strings"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
@@ -143,6 +145,152 @@ func (v *declVisitor) runUsingFor() {
 			Line:         line,
 			DispatchKind: dispatchKindUsingForTypeBind,
 		})
+	}
+}
+
+// runFileLevelUsingFor — W-C W6 V2.18 (2026-05-17). ERROR-tolerant
+// recovery for file-level `using LibName for T [global];` directives
+// (V2.16 row 1 closure). Sol 0.8.13+ syntax is grammar-blocked in
+// vendored tree-sitter-solidity v1.2.11 — the directive parses into
+// a single ERROR child of source_file with the `using` keyword
+// misclassified as an identifier inside a fake user_defined_type.
+//
+// AST shape this walks (per V2.18 probe 2026-05-17):
+//
+//	source_file
+//	  ERROR "using SafeMath for uint256 [global];"
+//	    type_name
+//	      user_defined_type
+//	        identifier "using"          ← keyword misinterpreted
+//	    identifier "<LibName>"          ← library name (recoverable)
+//	    type_name
+//	      primitive_type / user_defined_type / mapping  ← bound type
+//	    [identifier "global"]           ← optional qualifier
+//
+// Recovery heuristic:
+//   - Only ERROR children of source_file (not nested ERRORs).
+//   - text must start with "using " (case-sensitive Sol keyword).
+//   - Library name = first identifier child whose text != "using".
+//   - Bound type = first type_name child (skips the fake one
+//     wrapping `using`) — extractTypeNameText handles all variants.
+//
+// Per-container fan-out: Sol file-level using semantics ("applies to
+// all contracts in this file", whether or not the `global` qualifier
+// is present) mean we emit one PendingRef pair per container node in
+// v.nodes (NodeContract / NodeLibrary / NodeInterface). Each emit
+// produces the same (dispatchKindUsingFor + dispatchKindUsingForTypeBind)
+// pair that runUsingFor produces for contract-body directives — so
+// downstream binding and dispatch resolution paths reuse the existing
+// infrastructure unchanged.
+//
+// Must run after runContractDecl / runLibraryDecl / runInterfaceDecl
+// so v.nodes is populated. visit() schedules it right after
+// runUsingFor.
+//
+// Skip silently when:
+//   - text doesn't start with "using " (some other ERROR).
+//   - no identifier (other than "using") found (malformed beyond
+//     recovery).
+//   - no type_name found (incomplete directive).
+//
+// Trade-offs:
+//   - `global` / non-global distinction is not preserved on the edge
+//     (Sol semantics make file-level binding apply to all contracts
+//     either way; the qualifier only matters for cross-file scope,
+//     which V0 cross-file resolution already handles via NodeFile).
+//   - This is a recovery walker, not a real parser. If the vendored
+//     grammar upgrades to support file-level using natively, the
+//     resulting using_directive nodes will be picked up by runUsingFor
+//     (whose 3-arm query covers contract / library / interface bodies
+//     but NOT source_file scope yet — a future query addition would
+//     pick them up there too). At that point this walker can be
+//     retired or hardened to a NOP guard.
+func (v *declVisitor) runFileLevelUsingFor() {
+	if v.root == nil {
+		return
+	}
+	// Collect every container ID emitted by prior runContractDecl /
+	// runLibraryDecl / runInterfaceDecl. File-level binding fans out
+	// to each per Sol semantics.
+	// Libraries are also NodeContract (SubKind="library" per W4 /
+	// abstract_library.go) but they shouldn't bind to themselves —
+	// filter them out so we don't get `Math → Math` phantom edges.
+	var containerIDs []string
+	for _, n := range v.nodes {
+		switch n.Type {
+		case types.NodeContract:
+			if n.SubKind != "library" {
+				containerIDs = append(containerIDs, n.ID)
+			}
+		case types.NodeInterface:
+			containerIDs = append(containerIDs, n.ID)
+		}
+	}
+	if len(containerIDs) == 0 {
+		return
+	}
+	for i := uint(0); i < v.root.NamedChildCount(); i++ {
+		child := v.root.NamedChild(i)
+		if child == nil || child.Kind() != "ERROR" {
+			continue
+		}
+		text := child.Utf8Text(v.src)
+		if !strings.HasPrefix(text, "using ") {
+			continue
+		}
+		var libName, typeName string
+		for j := uint(0); j < child.NamedChildCount(); j++ {
+			grand := child.NamedChild(j)
+			if grand == nil {
+				continue
+			}
+			switch grand.Kind() {
+			case "identifier":
+				t := grand.Utf8Text(v.src)
+				if t != "using" && libName == "" {
+					libName = t
+				}
+			case "type_name":
+				// Skip the fake type_name wrapping the `using` keyword.
+				// The recoverable bound type comes after the library
+				// identifier in source order.
+				if libName != "" && typeName == "" {
+					typeName = extractTypeNameText(grand, v.src)
+				}
+			}
+		}
+		if libName == "" || typeName == "" {
+			continue
+		}
+		// Apply the same alias normalisations runUsingFor does so
+		// downstream binding keys line up regardless of which walker
+		// recovered the directive.
+		if v.namespaceAliases[libName] {
+			continue
+		}
+		if orig, hit := v.importAliases[libName]; hit {
+			libName = orig
+		}
+		line := int(child.StartPosition().Row) + 1
+		byteOff := int(child.StartByte())
+		for _, srcID := range containerIDs {
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        srcID,
+				EdgeType:     types.EdgeUsesFor,
+				TargetQName:  libName,
+				Line:         line,
+				ByteOffset:   byteOff,
+				DispatchKind: dispatchKindUsingFor,
+			})
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        srcID,
+				EdgeType:     types.EdgeUsesFor, // routed by DispatchKind in Pass 2
+				TargetQName:  libName + "|" + typeName,
+				Line:         line,
+				ByteOffset:   byteOff,
+				DispatchKind: dispatchKindUsingForTypeBind,
+			})
+		}
 	}
 }
 

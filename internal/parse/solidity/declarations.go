@@ -131,6 +131,14 @@ func (v *declVisitor) visit() {
 	// per-contract binding map) and method-call PendingRefs (via the
 	// separate runUsingForCalls below).
 	v.runUsingFor()
+	// W6 V2.18 (2026-05-17): ERROR-tolerant recovery for file-level
+	// `using LibName for T [global];` directives (Sol 0.8.13+). Vendored
+	// grammar v1.2.11 misparses these into ERROR nodes at source_file
+	// scope; runFileLevelUsingFor walks the recoverable shape and emits
+	// the same PendingRef pair runUsingFor produces, fanned out per
+	// container in the file (file-level binding applies to all). Closes
+	// V2.16 row 1 grammar-block.
+	v.runFileLevelUsingFor()
 	// W6 V1.0 (2026-05-12): method-call dispatch detector. Walks every
 	// member_expression that fits `<identifier>.<identifier>(...)` and
 	// queues a PendingRef that Pass 2 resolves through the binding map.
