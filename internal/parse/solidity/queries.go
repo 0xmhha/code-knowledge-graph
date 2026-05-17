@@ -58,18 +58,34 @@ const (
 	// W6 (Sol using For) — `using LibName for TypeName;` directives inside
 	// a contract / library / interface body.
 	//
-	// tree-sitter-solidity v1.2.13 grammar:
+	// tree-sitter-solidity v1.2.11 grammar (vendored under ./binding):
 	//   using_directive
 	//     - `type_alias`     (legacy form: `using SafeMath for uint256`)
 	//        └── identifier  ← library name
-	//     - `using_alias`    (0.8.13+ free-function form `using {f} for T`)
 	//     - source field     (type_name OR any_source_type for `for *`)
 	//
 	// V0 captures only the legacy form's library identifier via type_alias.
 	// V1.0 (2026-05-12) adds an additional `@type` capture on the source
 	// field so the bound type can drive method-call dispatch resolution.
-	// The free-function form (using_alias child) is dropped per §4.6.6 V0
-	// limit.
+	//
+	// W-C W6 V2.17 (2026-05-17) survey correction: prior V0/V2.5 spec
+	// comments referenced a `using_alias` node type as the 0.8.13+ free-
+	// function form child. Empirical AST dump 2026-05-17 against the
+	// vendored grammar shows NO such node — `using_alias` is not a valid
+	// node type, and any query referencing it fails to compile. The
+	// operator-form variant `using {f as +} for T;` (Sol 0.8.19+) is
+	// further grammar-blocked: the parser misinterprets the alias body
+	// as a state_variable_declaration sequence wrapped in ERROR nodes.
+	// Conclusion: operator-form is category A (grammar reject), NOT
+	// category B (query gap) as V2.16 row 2 originally claimed.
+	// V2.5/V2.7/V2.14 IOp 0-edge locks are correct as-is — the gap is
+	// upstream of the query.
+	//
+	// V2.6's incidental capture of `using {Math.add, Math.sub} for T;`
+	// works because the grammar interprets the qualified `Math.add` as
+	// a type_alias-wrapped identifier (not a using_alias node). This
+	// is also why the V0 query's existing `type_alias (identifier)`
+	// pattern hits it.
 	//
 	// contract_body is the `body:` field of contract_declaration /
 	// library_declaration / interface_declaration; using_directive nests
