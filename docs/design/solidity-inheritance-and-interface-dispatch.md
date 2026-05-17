@@ -198,8 +198,43 @@
 >   - scope:interface × variant:type-alias    → 1 edge  (V2.14 IBare)
 >   - scope:interface × variant:free-func     → 1 edge  (V2.14 IFree)
 >   - scope:interface × variant:operator-form → 0 edges (V2.14 IOp)
-> V2.14 carry-over (V2.15+): byte 정밀도 (column-based scope) /
-> Grammar-blocked items survey.
+> V2.15 ✅ **same-line shadow byte-precision fix** — V2.0 carry-over
+> closure. When outer-scope decl + inner-block shadow + both use
+> sites all sit on a single physical line, V2.0's line-only filter
+> (`declLine ≤ useSiteLine ≤ scopeEndLine`) admits both decls for
+> either use site, and the strict-`>` `declLine > bestDeclLine`
+> tiebreak leaves the first-appended outer winning. Inner use
+> drops (= V1.30 V0 false-negative resurfacing, scoped to same-line
+> code).
+>
+> Fix:
+>   - `PendingRef.ByteOffset int` (parser.go) — Sol parser populates
+>     at every use-site emit (12 sites in using_for.go).
+>   - `localDecl.{declStartByte, scopeEndByte}` (resolve.go) — emit
+>     chain encodes via 5-part TargetQName
+>     `varName|typeName|scopeEndLine|declStartByte|scopeEndByte`.
+>   - `lookupReceiverType(..., useSiteByte int, ...)` — 4 callers
+>     pass pr.ByteOffset.
+>   - `selectLocalDecl`: byte-containment + max declStartByte
+>     tiebreak when `useSiteByte > 0 && allHaveBytes(decls)`. Falls
+>     back to V2.0 line-only when bytes are mixed/absent
+>     (defensive — partial parser upgrades stay correct).
+>
+> RED→GREEN cycle. Fixture compresses V2.0's shadow_inner_use.sol
+> function body to one line. V2.0 produced 1 edge (SafeMath.add
+> only, outer wins). V2.15 produces both (Other.tag + SafeMath.add)
+> via byte-offset containment. Zero regression across 45+ using-for
+> tests, golang/typescript/proto parsers, go vet clean.
+>
+> Architectural note: V2.15 closes V2.0's stated carry-over with
+> the smallest possible cross-parser surface — `ByteOffset int`
+> on PendingRef is read only by the Sol resolver; other parsers
+> leave it at default 0 and selectLocalDecl falls back to V2.0
+> behavior. No behavioral change for Go/TS/Proto callers.
+>
+> V2.15 carry-over (V2.16+): Grammar-blocked items survey —
+> enumerate Sol idioms current tree-sitter-solidity v1.2.13 can't
+> capture (ERROR nodes, missing node types).
 > Pre-declared identifier-slot tuple 은 modern Sol 에서 `var` keyword
 > deprecated (0.5.0+) 로 실용 사례 거의 없음 — V1.17 reassessment 결과
 > scope 에서 제외.

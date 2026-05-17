@@ -38,15 +38,20 @@ type paramTypeMap map[string]map[string]string
 type funcReturnTypeMap map[string]string
 type structFieldTypeMap map[string]map[string]string
 
-// localDecl carries one local-variable declaration's (declLine,
-// scopeEndLine, typeName) tuple. W-C W6 V2.0 (2026-05-12): scope
-// ranges drive narrowest-scope-wins lookup at the use site so
-// inner-block shadows resolve correctly while outer-scope uses
-// still see the outer declaration.
+// localDecl carries one local-variable declaration's scope range +
+// typeName. W-C W6 V2.0 (2026-05-12): line-range fields drive
+// narrowest-scope-wins lookup at the use site. W-C W6 V2.15
+// (2026-05-15): declStartByte / scopeEndByte added so same-line
+// shadows disambiguate via byte containment (line-only tied
+// `declLine > bestDeclLine` left first-appended outer winning).
+// Byte fields are zero when the parser omitted them (defensive
+// fallback to V2.0 line-only behavior).
 type localDecl struct {
-	declLine     int
-	scopeEndLine int
-	typeName     string
+	declLine      int
+	scopeEndLine  int
+	declStartByte int
+	scopeEndByte  int
+	typeName      string
 }
 
 // localVarTypeMap (V2.0): funcID → varName → []localDecl. Each
@@ -321,11 +326,14 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				structFieldTypes[structName][fieldName] = fieldType
 			case dispatchKindUsingForLocalVar:
-				// W-C W6 V2.0 (2026-05-12): TargetQName encoding from
-				// emitLocalVarBinding / emitTryReturnsBinding:
-				// `varName|typeName|scopeEndLine` (three parts).
-				parts := strings.SplitN(pr.TargetQName, "|", 3)
-				if len(parts) != 3 {
+				// W-C W6 V2.0 (2026-05-12) + V2.15 (2026-05-15):
+				// TargetQName encoding from emitLocalVarBinding /
+				// emitTryReturnsBinding —
+				//   `varName|typeName|scopeEndLine|declStartByte|scopeEndByte`
+				// (five parts). Byte fields default to 0 if absent
+				// (defensive — Pass 2 then falls back to line-only).
+				parts := strings.SplitN(pr.TargetQName, "|", 5)
+				if len(parts) < 3 {
 					continue
 				}
 				varName, typeName := parts[0], parts[1]
@@ -333,12 +341,27 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				if convErr != nil || varName == "" || typeName == "" {
 					continue
 				}
+				declStartByte, scopeEndByte := 0, 0
+				if len(parts) >= 5 {
+					if b, err := strconv.Atoi(parts[3]); err == nil {
+						declStartByte = b
+					}
+					if b, err := strconv.Atoi(parts[4]); err == nil {
+						scopeEndByte = b
+					}
+				}
 				if localVarTypes[pr.SrcID] == nil {
 					localVarTypes[pr.SrcID] = map[string][]localDecl{}
 				}
 				localVarTypes[pr.SrcID][varName] = append(
 					localVarTypes[pr.SrcID][varName],
-					localDecl{declLine: pr.Line, scopeEndLine: scopeEnd, typeName: typeName},
+					localDecl{
+						declLine:      pr.Line,
+						scopeEndLine:  scopeEnd,
+						declStartByte: declStartByte,
+						scopeEndByte:  scopeEndByte,
+						typeName:      typeName,
+					},
 				)
 			}
 		}
@@ -865,16 +888,23 @@ func resolveUsingForRef(
 // AND useSiteLine <= scopeEndLine). useSiteLine = 0 falls back to the
 // first-decl-wins behavior of V1.30 V0 (used by callers that don't
 // have a use-site line — e.g. binding declaration walks).
+//
+// W-C W6 V2.15 (2026-05-15): useSiteByte adds byte-precision scope
+// containment so same-line shadows disambiguate. When all of decl
+// and use-site bytes are non-zero, selection switches to byte-based
+// containment + max declStartByte tiebreak. Falls back to line-only
+// when bytes are absent — defensive against parsers that don't
+// populate ByteOffset.
 func lookupReceiverType(
 	name, contractID, funcID string,
-	useSiteLine int,
+	useSiteLine, useSiteByte int,
 	stateVarTypes stateVarTypeMap,
 	paramTypes paramTypeMap,
 	localVarTypes localVarTypeMap,
 ) string {
 	if localMap := localVarTypes[funcID]; localMap != nil {
 		if decls := localMap[name]; len(decls) > 0 {
-			if t := selectLocalDecl(decls, useSiteLine); t != "" {
+			if t := selectLocalDecl(decls, useSiteLine, useSiteByte); t != "" {
 				return t
 			}
 		}
@@ -922,19 +952,48 @@ func resolveBindingLib(
 }
 
 // selectLocalDecl picks the narrowest local declaration whose scope
-// range contains useSiteLine. When useSiteLine is 0 (caller has no
+// range contains the use site. When useSiteLine is 0 (caller has no
 // use-site context — e.g. emit walks), falls back to the first decl
 // in source order, matching V1.30 V0's first-decl-wins behavior.
 //
-// Selection rule: filter decls where declLine <= useSiteLine AND
-// useSiteLine <= scopeEndLine, then choose the one with the highest
-// declLine — that's the narrowest enclosing scope (deepest nested
-// block that's still in scope at the use site). When no decl is in
-// scope (e.g. use site after all decls expired), returns "".
-func selectLocalDecl(decls []localDecl, useSiteLine int) string {
+// V2.0 selection (line-based): filter decls where declLine <=
+// useSiteLine AND useSiteLine <= scopeEndLine, then choose the one
+// with the highest declLine — narrowest enclosing scope.
+//
+// V2.15 selection (byte-precision): when useSiteByte > 0 AND every
+// candidate decl has non-zero declStartByte / scopeEndByte, filter
+// by byte containment (declStartByte <= useSiteByte <= scopeEndByte)
+// and tiebreak on max declStartByte. This resolves same-line
+// shadow cases where V2.0's `declLine > bestDeclLine` strict-`>`
+// tiebreak left the first-appended outer winning. Falls back to
+// V2.0 line-only when bytes are absent.
+func selectLocalDecl(decls []localDecl, useSiteLine, useSiteByte int) string {
 	if useSiteLine == 0 {
 		// Defensive fallback — first-decl-wins (V1.30 V0 semantics).
 		return decls[0].typeName
+	}
+	// V2.15 byte-precision path: only when use-site AND every decl
+	// carries non-zero byte ranges. Mixed populations fall back to
+	// V2.0 line-only so partial parser upgrades don't misbehave.
+	if useSiteByte > 0 && allHaveBytes(decls) {
+		bestIdx := -1
+		for i, d := range decls {
+			if d.declStartByte > useSiteByte {
+				continue
+			}
+			if d.scopeEndByte < useSiteByte {
+				continue
+			}
+			if bestIdx < 0 || decls[i].declStartByte > decls[bestIdx].declStartByte {
+				bestIdx = i
+			}
+		}
+		if bestIdx >= 0 {
+			return decls[bestIdx].typeName
+		}
+		// No byte-containment match — fall through to line-based
+		// (handles edge cases like use site before any decl on the
+		// same line, where line filter is still permissive enough).
 	}
 	bestIdx := -1
 	for i, d := range decls {
@@ -952,6 +1011,20 @@ func selectLocalDecl(decls []localDecl, useSiteLine int) string {
 		return ""
 	}
 	return decls[bestIdx].typeName
+}
+
+// allHaveBytes — W-C W6 V2.15. Returns true iff every decl has both
+// declStartByte and scopeEndByte populated (>0). Used to gate the
+// byte-precision selection path: a mixed population (some bytes,
+// some zeros) would silently mis-rank decls without bytes, so we
+// only switch when the data is uniformly available.
+func allHaveBytes(decls []localDecl) bool {
+	for _, d := range decls {
+		if d.declStartByte == 0 || d.scopeEndByte == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveUsingForCallRef resolves one W6 V1.0/V1.1/V1.9/V1.15
@@ -1005,8 +1078,10 @@ func resolveUsingForCallRef(
 	// order shapes precedence but cannot mis-resolve in valid code.
 	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
 	// shadowed locals.
+	// V2.15: useSiteByte = pr.ByteOffset for byte-precision same-line
+	// shadow disambiguation in addition to V2.0 line-precision filter.
 	typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
-		pr.Line, stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
 	if typeName == "" {
 		return types.Edge{}, false
 	}
@@ -1685,8 +1760,10 @@ func resolveUsingForStructFieldCallRef(
 	// V1.15: state-var → param → local-var three-tier fallback.
 	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
 	// shadowed locals.
+	// V2.15: useSiteByte = pr.ByteOffset for byte-precision same-line
+	// shadow disambiguation in addition to V2.0 line-precision filter.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		pr.Line, stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1759,8 +1836,10 @@ func resolveUsingForNestedStructFieldCallRef(
 	// V1.15: state-var → param → local-var three-tier fallback.
 	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
 	// shadowed locals.
+	// V2.15: useSiteByte = pr.ByteOffset for byte-precision same-line
+	// shadow disambiguation in addition to V2.0 line-precision filter.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		pr.Line, stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}
@@ -1855,8 +1934,10 @@ func resolveUsingForGenericMemberChainCallRef(
 	// V1.15: state-var → param → local-var three-tier fallback.
 	// V2.0: useSiteLine = pr.Line drives narrowest-scope-wins for
 	// shadowed locals.
+	// V2.15: useSiteByte = pr.ByteOffset for byte-precision same-line
+	// shadow disambiguation in addition to V2.0 line-precision filter.
 	objType := lookupReceiverType(objName, callerContractID, pr.SrcID,
-		pr.Line, stateVarTypes, paramTypes, localVarTypes)
+		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
 	if objType == "" {
 		return types.Edge{}, false
 	}

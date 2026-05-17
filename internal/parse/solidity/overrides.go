@@ -25,6 +25,22 @@ func nearestEnclosingBlockEndLine(n *sitter.Node) int {
 	return 0
 }
 
+// nearestEnclosingBlockEndByte walks up from n to the nearest
+// enclosing `block_statement` or `function_body` and returns its
+// end byte offset. W-C W6 V2.15 (2026-05-15): mirrors
+// nearestEnclosingBlockEndLine but at byte precision so the
+// resolver can disambiguate same-line shadows. Returns 0 when no
+// enclosing block is found.
+func nearestEnclosingBlockEndByte(n *sitter.Node) int {
+	for cur := n.Parent(); cur != nil; cur = cur.Parent() {
+		switch cur.Kind() {
+		case "function_body", "block_statement":
+			return int(cur.EndByte())
+		}
+	}
+	return 0
+}
+
 // Sol W2 — virtual / override modifier detection and EdgeOverrides emit.
 //
 // Spec: docs/design/solidity-inheritance-and-interface-dispatch.md §3.3, §4.2
@@ -451,17 +467,19 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// shape). Each slot is bound for the duration of the success
 		// block (try_statement's `body` field). V2.0: scopeEndLine =
 		// success-block end so use sites outside the block don't
-		// pick up these names.
-		scopeEnd := 0
+		// pick up these names. V2.15: scopeEndByte mirrors at byte
+		// precision for same-line shadow disambiguation.
+		scopeEnd, scopeEndB := 0, 0
 		if body := n.ChildByFieldName("body"); body != nil {
 			scopeEnd = int(body.EndPosition().Row) + 1
+			scopeEndB = int(body.EndByte())
 		}
 		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 			child := n.NamedChild(i)
 			if child == nil || child.Kind() != "parameter" {
 				continue
 			}
-			emitTryReturnsBinding(v, funcID, child, scopeEnd)
+			emitTryReturnsBinding(v, funcID, child, scopeEnd, scopeEndB)
 		}
 		// Fall through to recurse — try_statement's body
 		// (block_statement) and catch_clause bodies still contain
@@ -472,17 +490,18 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 		// named parameter slots are exposed as direct `parameter`
 		// children of catch_clause (alongside an optional identifier
 		// for the catch type name like "Error" / "Panic"). V2.0:
-		// scopeEndLine = catch body end.
-		scopeEnd := 0
+		// scopeEndLine = catch body end. V2.15: scopeEndByte mirrors.
+		scopeEnd, scopeEndB := 0, 0
 		if body := n.ChildByFieldName("body"); body != nil {
 			scopeEnd = int(body.EndPosition().Row) + 1
+			scopeEndB = int(body.EndByte())
 		}
 		for i := uint(0); i < uint(n.NamedChildCount()); i++ {
 			child := n.NamedChild(i)
 			if child == nil || child.Kind() != "parameter" {
 				continue
 			}
-			emitTryReturnsBinding(v, funcID, child, scopeEnd)
+			emitTryReturnsBinding(v, funcID, child, scopeEnd, scopeEndB)
 		}
 		// Fall through to recurse — catch_clause body still contains
 		// statements that need visiting.
@@ -498,11 +517,17 @@ func collectLocalVarMetaPending(v *declVisitor, funcID string, n *sitter.Node) {
 // localVarTypes. Anonymous slot (no name field) skips silently —
 // nothing addressable.
 //
-// W-C W6 V2.0 (2026-05-12): scopeEndLine is encoded into TargetQName
+// W-C W6 V2.0 (2026-05-12): scopeEndLine encoded into TargetQName
 // as the third part so Pass 2 can build a per-decl line range for
-// scope-aware lookup. Callers must pass the end line of the binding's
+// scope-aware lookup. Callers pass the end line of the binding's
 // effective scope (try_statement.body or catch_clause.body end).
-func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node, scopeEndLine int) {
+//
+// W-C W6 V2.15 (2026-05-15): TargetQName extended to 5-part encoding
+// — `varName|typeName|scopeEndLine|declStartByte|scopeEndByte` — so
+// Pass 2 can byte-disambiguate same-line shadow scopes. PendingRef
+// .ByteOffset carries the decl's name-position byte; callers pass
+// scopeEndByte from the try/catch body's EndByte.
+func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node, scopeEndLine, scopeEndByte int) {
 	if p == nil {
 		return
 	}
@@ -519,11 +544,16 @@ func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node, scopeE
 	if varName == "" || typeName == "" {
 		return
 	}
+	declStartByte := int(nameNode.StartByte())
 	v.pending = append(v.pending, parse.PendingRef{
-		SrcID:        funcID,
-		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
-		TargetQName:  varName + "|" + typeName + "|" + strconv.Itoa(scopeEndLine),
+		SrcID:    funcID,
+		EdgeType: types.EdgeUsesFor, // unused — routed by DispatchKind
+		TargetQName: varName + "|" + typeName + "|" +
+			strconv.Itoa(scopeEndLine) + "|" +
+			strconv.Itoa(declStartByte) + "|" +
+			strconv.Itoa(scopeEndByte),
 		Line:         int(nameNode.StartPosition().Row) + 1,
+		ByteOffset:   declStartByte,
 		DispatchKind: dispatchKindUsingForLocalVar,
 	})
 }
@@ -538,6 +568,12 @@ func emitTryReturnsBinding(v *declVisitor, funcID string, p *sitter.Node, scopeE
 // block_statement / function_body and recorded in TargetQName's third
 // slot (encoded as decimal). Pass 2 uses (declLine, scopeEndLine) +
 // use-site line to do narrowest-scope-wins lookup.
+//
+// W-C W6 V2.15 (2026-05-15): byte-precision scope range added as the
+// 4th and 5th encoded slots (declStartByte, scopeEndByte). PendingRef
+// .ByteOffset carries the decl's name-position byte. Pass 2 falls back
+// to V2.0 line-only behavior when the byte slots are zero (defensive
+// — every valid local-var emit populates them via tree-sitter ranges).
 func emitLocalVarBinding(v *declVisitor, funcID string, decl *sitter.Node) {
 	if decl == nil {
 		return
@@ -553,11 +589,17 @@ func emitLocalVarBinding(v *declVisitor, funcID string, decl *sitter.Node) {
 		return
 	}
 	scopeEndLine := nearestEnclosingBlockEndLine(decl)
+	scopeEndByte := nearestEnclosingBlockEndByte(decl)
+	declStartByte := int(nameNode.StartByte())
 	v.pending = append(v.pending, parse.PendingRef{
-		SrcID:        funcID,
-		EdgeType:     types.EdgeUsesFor, // unused — routed by DispatchKind
-		TargetQName:  varName + "|" + typeName + "|" + strconv.Itoa(scopeEndLine),
+		SrcID:    funcID,
+		EdgeType: types.EdgeUsesFor, // unused — routed by DispatchKind
+		TargetQName: varName + "|" + typeName + "|" +
+			strconv.Itoa(scopeEndLine) + "|" +
+			strconv.Itoa(declStartByte) + "|" +
+			strconv.Itoa(scopeEndByte),
 		Line:         int(nameNode.StartPosition().Row) + 1,
+		ByteOffset:   declStartByte,
 		DispatchKind: dispatchKindUsingForLocalVar,
 	})
 }

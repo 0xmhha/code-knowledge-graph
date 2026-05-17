@@ -12,11 +12,19 @@ import (
 // final edge row preserves the dispatch classification decided at AST time
 // (when types.Info is still in scope).
 type PendingRef struct {
-	SrcID        string
-	EdgeType     types.EdgeType
-	TargetQName  string
-	HintFile     string
-	Line         int
+	SrcID       string
+	EdgeType    types.EdgeType
+	TargetQName string
+	HintFile    string
+	Line        int
+	// ByteOffset (W-C W6 V2.15, 2026-05-15): byte position of the
+	// referent in the source file. Used by the Solidity resolver to
+	// disambiguate same-line shadow scopes — when V2.0's line-only
+	// `declLine <= useSiteLine <= scopeEndLine` filter admits multiple
+	// decls, the byte offset breaks the tie via containment. Zero =
+	// unset (other parsers leave it default; Sol resolver falls back
+	// to V2.0 line-only behavior when bytes are missing).
+	ByteOffset   int
 	DispatchKind string
 }
 

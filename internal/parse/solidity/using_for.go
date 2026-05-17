@@ -221,6 +221,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  receiverName + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForCall,
 				})
 				continue
@@ -238,6 +239,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  stateVarName + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForCall,
 				})
 				continue
@@ -263,6 +265,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  encoded,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForThisNestedChainCall,
 				})
 				continue
@@ -282,6 +285,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  objName + "|" + fieldName + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForStructFieldCall,
 				})
 				continue
@@ -300,6 +304,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  objName + "|" + f1 + "|" + f2 + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForNestedStructFieldCall,
 				})
 				continue
@@ -322,6 +327,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  encoded,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForGenericMemberChainCall,
 				})
 				continue
@@ -340,6 +346,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  innerFnName + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForChainCall,
 				})
 				continue
@@ -359,6 +366,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  receiverObj + "|" + innerFnName + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForCrossChainCall,
 				})
 				continue
@@ -377,6 +385,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  innerFn1 + "|" + innerFn2 + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForDeepChainCall,
 				})
 				continue
@@ -397,6 +406,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  recvObj + "|" + innerFn1 + "|" + innerFn2 + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForDeepCrossChainCall,
 				})
 				continue
@@ -415,6 +425,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  innerFn1 + "|" + innerFn2 + "|" + innerFn3 + "|" + methodName,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForTripleChainCall,
 				})
 				continue
@@ -444,6 +455,7 @@ func (v *declVisitor) runUsingForCalls() {
 					EdgeType:     types.EdgeCalls,
 					TargetQName:  encoded,
 					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
 					DispatchKind: dispatchKindUsingForGenericChainCall,
 				})
 				continue
