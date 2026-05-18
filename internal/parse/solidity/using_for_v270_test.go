@@ -53,18 +53,21 @@ import (
 func TestUsingForV270_ContractScopeOperatorForm(t *testing.T) {
 	nodes, edges := parseResolveOneSol(t, "testdata/using_for_v270", "probe_operator_form.sol")
 
-	// (a) Lock: 0 EdgeUsesFor for contract-scope operator-form.
+	// (a) Lock (W6 V2.20 flip 2026-05-18): 1 EdgeUsesFor for
+	// contract-scope operator-form. V2.20 added a recovery walker
+	// that pattern-matches the misparsed `state_variable_declaration`
+	// shape and emits the binding pair runUsingFor produces.
 	edgeCount := 0
 	for _, e := range edges {
 		if e.Type == types.EdgeUsesFor {
 			edgeCount++
 		}
 	}
-	if edgeCount != 0 {
-		t.Errorf("expected 0 EdgeUsesFor for V2.7 operator-form (contract scope), got %d", edgeCount)
+	if edgeCount != 1 {
+		t.Errorf("expected 1 EdgeUsesFor for V2.7 operator-form (contract scope, post-V2.20 recovery), got %d", edgeCount)
 		for _, e := range edges {
 			if e.Type == types.EdgeUsesFor {
-				t.Logf("  unexpected edge: %+v", e)
+				t.Logf("  edge: %+v", e)
 			}
 		}
 	}

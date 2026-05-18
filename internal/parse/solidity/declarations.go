@@ -148,6 +148,12 @@ func (v *declVisitor) visit() {
 	// container in the file (file-level binding applies to all). Closes
 	// V2.16 row 1 grammar-block.
 	v.runFileLevelUsingFor()
+	// W6 V2.20 (2026-05-18): operator-form using directive ERROR
+	// recovery. `using {f as +} for T;` parses to a misclassified
+	// state_variable_declaration; pattern-match the shape and emit
+	// the same binding pair runUsingFor produces. Flips V2.7 /
+	// V2.14 IOp / V2.17 locks from 0 → 1.
+	v.runOperatorFormRecovery()
 	// W6 V1.0 (2026-05-12): method-call dispatch detector. Walks every
 	// member_expression that fits `<identifier>.<identifier>(...)` and
 	// queues a PendingRef that Pass 2 resolves through the binding map.

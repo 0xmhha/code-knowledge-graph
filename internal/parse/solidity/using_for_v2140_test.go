@@ -62,12 +62,15 @@ func TestUsingForV2140_InterfaceBodyVariants(t *testing.T) {
 		t.Errorf("V2.14 IFree (free-function): expected 1 EdgeUsesFor, got %d", got)
 	}
 
-	// (c) IOp — operator-form. Predicted: 0 (V2.7 mirror).
-	if got := counts["IOp"]; got != 0 {
-		t.Errorf("V2.14 IOp (operator-form): expected 0 EdgeUsesFor, got %d", got)
+	// (c) IOp — operator-form. Post-V2.20 (2026-05-18): 1 EdgeUsesFor.
+	// V2.20's operator-form recovery walker pattern-matches the
+	// misparsed `state_variable_declaration` shape and emits the
+	// binding pair, flipping this lock from 0 → 1.
+	if got := counts["IOp"]; got != 1 {
+		t.Errorf("V2.14 IOp (operator-form, post-V2.20 recovery): expected 1 EdgeUsesFor, got %d", got)
 		for _, e := range edges {
 			if e.Type == types.EdgeUsesFor && byID[e.Src].Name == "IOp" {
-				t.Logf("  unexpected IOp edge: %+v", e)
+				t.Logf("  IOp edge: %+v", e)
 			}
 		}
 	}

@@ -96,14 +96,15 @@ func TestUsingForV2170_LibraryScopeOperatorFormGrammarBlock(t *testing.T) {
 			got++
 		}
 	}
-	if got != 0 {
-		t.Errorf("V2.17 grammar-block lock: expected 0 EdgeUsesFor for OpHelpers (operator-form misparsed by grammar v1.2.11), got %d", got)
-		t.Log("If this test fails with got=1, the vendored grammar may have been")
-		t.Log("upgraded. Reclassify V2.16 row 2 (A → B) and coordinate lock-flips:")
-		t.Log("  - V2.5  (file-level)   may still be 0 due to row 1 grammar-block.")
-		t.Log("  - V2.7  (contract)     flip 0 → 1.")
-		t.Log("  - V2.14 IOp (interface) flip 0 → 1.")
-		t.Log("  - V2.17 (library, this test) flip 0 → 1.")
+	// Post-V2.20 (2026-05-18): operator-form recovery walker emits
+	// the binding pair after pattern-matching the misparsed
+	// state_variable_declaration shape. Library-scope flips 0 → 1
+	// alongside V2.7 (contract) and V2.14 IOp (interface). V2.5
+	// (file-level) keeps its 0 lock — the file-level misparse
+	// surfaces at source_file scope where the recovery walker can't
+	// extract a clean identifier.
+	if got != 1 {
+		t.Errorf("V2.17 library-scope operator-form (post-V2.20 recovery): expected 1 EdgeUsesFor for OpHelpers, got %d", got)
 		for _, e := range edges {
 			if e.Type == types.EdgeUsesFor {
 				t.Logf("  edge: src=%s dst=%s", byID[e.Src].QualifiedName, byID[e.Dst].QualifiedName)
