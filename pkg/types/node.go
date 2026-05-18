@@ -37,4 +37,19 @@ type Node struct {
 	// presence only; Yul-internal op detection (delegatecall, sstore,
 	// selfdestruct, …) and receiver resolution are deferred to V1+.
 	HasAssembly bool `json:"has_assembly,omitempty"`
+	// HasLowLevelCall (W-C W8 V1, 2026-05-18): true when a Solidity
+	// callable contains at least one `.call` / `.delegatecall` /
+	// `.staticcall` invocation, regardless of whether the receiver
+	// resolves to a concrete contract / interface. W7.1 V0 emits an
+	// EdgeInvokes only when the receiver is a state-var / parameter
+	// typed as Contract or Interface; this marker additionally surfaces
+	// dynamic-address receivers (e.g. `address(target).call(...)`)
+	// where no static target exists.
+	HasLowLevelCall bool `json:"has_low_level_call,omitempty"`
+	// HasValueTransfer (W-C W8 V1, 2026-05-18): true when a Solidity
+	// callable contains at least one `.send` or `.transfer` value-
+	// transfer. Distinct from low-level method calls — Sol semantics
+	// for send/transfer are ETH transfer with limited gas, not method
+	// dispatch. Security tooling commonly differentiates these.
+	HasValueTransfer bool `json:"has_value_transfer,omitempty"`
 }

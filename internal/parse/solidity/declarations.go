@@ -160,6 +160,11 @@ func (v *declVisitor) visit() {
 	// "low_level_call" + ConfAmbiguous. Receiver resolution chain
 	// re-uses W6 V1.0 lookupReceiverType (state-var / param / local-var).
 	v.runLowLevelCalls()
+	// W8 V1 (2026-05-18): mark HasLowLevelCall / HasValueTransfer on
+	// callables containing any .call / .delegatecall / .staticcall or
+	// .send / .transfer invocation, regardless of receiver resolvability.
+	// Superset signal complementing runLowLevelCalls's edge emission.
+	v.runLowLevelCallMarker()
 	// W10 V0 (2026-05-18): mark NodeFunction / NodeModifier with
 	// HasAssembly=true when the body contains `assembly { ... }`.
 	// Post-Pass-1 sweep — mutates v.nodes in place. Yul-internal op
