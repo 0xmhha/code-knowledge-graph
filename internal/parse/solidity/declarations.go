@@ -274,12 +274,37 @@ func (v *declVisitor) runStateVarDecl() {
 			if typeNode != nil {
 				signature = extractTypeNameText(typeNode, v.src)
 			}
+			// W-C W7.2 V0 (2026-05-17): state-var visibility / immutable
+			// encoded into SubKind. Grammar v1.2.11 only exposes these
+			// two keyword categories as named children; `constant` and
+			// parameter locations are AST-invisible (deferred to V1+).
+			// SubKind precedence: immutable > visibility > "" (default
+			// stays empty rather than synthesising "internal" so consumers
+			// can distinguish "explicitly internal" from "default/unknown").
+			subKind := ""
+			if !isMapping {
+				for i := uint(0); i < declNode.NamedChildCount(); i++ {
+					child := declNode.NamedChild(i)
+					if child == nil {
+						continue
+					}
+					switch child.Kind() {
+					case "immutable":
+						subKind = "immutable"
+					case "visibility":
+						if subKind == "" {
+							subKind = "storage_" + child.Utf8Text(v.src)
+						}
+					}
+				}
+			}
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: name, QualifiedName: qname,
 				FilePath: v.rel, StartLine: line, EndLine: line,
 				StartByte: startByte, EndByte: endByte,
 				Language: "sol", Confidence: types.ConfExtracted,
 				Signature: signature,
+				SubKind:   subKind,
 			})
 			v.edges = append(v.edges, types.Edge{
 				Src: v.fileID, Dst: id, Type: types.EdgeDefines,

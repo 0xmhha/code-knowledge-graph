@@ -86,7 +86,8 @@
       "out_degree": 0,
       "pagerank": 0,
       "usage_score": 0,
-      "confidence": "EXTRACTED"
+      "confidence": "EXTRACTED",
+      "sub_kind": "storage_public"
     },
     {
       "id": "acf8ee6269bbd426",
