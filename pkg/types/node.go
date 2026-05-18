@@ -52,4 +52,12 @@ type Node struct {
 	// for send/transfer are ETH transfer with limited gas, not method
 	// dispatch. Security tooling commonly differentiates these.
 	HasValueTransfer bool `json:"has_value_transfer,omitempty"`
+	// YulBuiltins (W-C W10 V1.1, 2026-05-18): security-relevant EVM
+	// opcodes that appear inside the callable's `assembly { ... }`
+	// blocks. Sorted, deduped, lower-case identifiers — the slice is
+	// the canonical set of Yul builtin names tree-sitter exposes
+	// under `yul_evm_builtin` (e.g. "delegatecall", "sstore", "sload",
+	// "selfdestruct", "call", "staticcall"). Empty for callables with
+	// no assembly or only non-critical Yul ops.
+	YulBuiltins []string `json:"yul_builtins,omitempty"`
 }

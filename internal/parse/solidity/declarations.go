@@ -167,9 +167,13 @@ func (v *declVisitor) visit() {
 	v.runLowLevelCallMarker()
 	// W10 V0 (2026-05-18): mark NodeFunction / NodeModifier with
 	// HasAssembly=true when the body contains `assembly { ... }`.
-	// Post-Pass-1 sweep — mutates v.nodes in place. Yul-internal op
-	// detection deferred to V1+.
+	// Post-Pass-1 sweep — mutates v.nodes in place.
 	v.runAssemblyMarker()
+	// W10 V1.1 (2026-05-18): enumerate security-relevant Yul EVM
+	// builtins (delegatecall, sstore, sload, selfdestruct, call,
+	// staticcall) per callable. Sorted, deduped slice on
+	// Node.YulBuiltins.
+	v.runYulBuiltins()
 	v.collectABI()
 }
 
