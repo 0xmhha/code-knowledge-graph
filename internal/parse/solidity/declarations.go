@@ -343,14 +343,34 @@ func (v *declVisitor) runStateVarDecl() {
 				slotIndex = slotPerContract[containerKey]
 				slotPerContract[containerKey] = slotIndex + 1
 			}
+			// W-C W8 V2 (2026-05-18): function-typed state-var marker.
+			// Detection: type_name contains `parameter` or `return_parameter`
+			// as a named child (Sol grammar emits these for function-type
+			// signatures instead of the usual primitive_type / user_defined_type
+			// / mapping shape). NodeMapping path keeps IsFunctionTyped false
+			// since mappings are a distinct grammar shape.
+			isFunctionTyped := false
+			if !isMapping && typeNode != nil {
+				for i := uint(0); i < typeNode.NamedChildCount(); i++ {
+					child := typeNode.NamedChild(i)
+					if child == nil {
+						continue
+					}
+					if child.Kind() == "parameter" || child.Kind() == "return_parameter" {
+						isFunctionTyped = true
+						break
+					}
+				}
+			}
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: name, QualifiedName: qname,
 				FilePath: v.rel, StartLine: line, EndLine: line,
 				StartByte: startByte, EndByte: endByte,
 				Language: "sol", Confidence: types.ConfExtracted,
-				Signature: signature,
-				SubKind:   subKind,
-				SlotIndex: slotIndex,
+				Signature:       signature,
+				SubKind:         subKind,
+				SlotIndex:       slotIndex,
+				IsFunctionTyped: isFunctionTyped,
 			})
 			v.edges = append(v.edges, types.Edge{
 				Src: v.fileID, Dst: id, Type: types.EdgeDefines,

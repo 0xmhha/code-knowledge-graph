@@ -60,4 +60,11 @@ type Node struct {
 	// "selfdestruct", "call", "staticcall"). Empty for callables with
 	// no assembly or only non-critical Yul ops.
 	YulBuiltins []string `json:"yul_builtins,omitempty"`
+	// IsFunctionTyped (W-C W8 V2, 2026-05-18): true when a NodeField
+	// is a Solidity state variable declared with a function type
+	// (e.g. `function(uint256) external returns (uint256) handler;`).
+	// V0 marker only — call-site resolution `stored(args)` against
+	// function-typed state vars is deferred. Empty for non-field
+	// nodes and for fields whose type is anything but a function.
+	IsFunctionTyped bool `json:"is_function_typed,omitempty"`
 }
