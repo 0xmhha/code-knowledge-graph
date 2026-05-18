@@ -265,6 +265,16 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// hits parents in the declared order.
 	parents := buildInheritanceIndex(out.Edges)
 
+	// W-C W9 V1 (2026-05-18) — inheritance offset on NodeField
+	// SlotIndex. V0 emitted per-contract local indices (each contract
+	// restarted at 0); V1 walks the parent adjacency and adds the
+	// cumulative ancestor slot count so the value reflects absolute
+	// EVM storage position in linear inheritance chains. Diamond
+	// inheritance with repeated ancestors falls back to a naive sum
+	// (no C3 linearization in V1 — known limitation, documented in
+	// docs/design/solidity-storage-slot-index.md §V1).
+	applyInheritanceSlotOffset(out.Nodes, parents)
+
 	// W6 V1.0 (2026-05-12) — pre-build the (contractID, typeName) →
 	// libraryName binding map by sweeping all dispatchKindUsingForTypeBind
 	// PendingRefs across results. Done before Pass 2b so the using-for-call
@@ -723,6 +733,113 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 	return out, nil
+}
+
+// applyInheritanceSlotOffset — W-C W9 V1 (2026-05-18). Adjusts every
+// NodeField's SlotIndex to include the cumulative ancestor slot count
+// from the parent adjacency built in buildInheritanceIndex.
+//
+// Algorithm:
+//
+//  1. Index contracts by Name (first occurrence wins for cross-file
+//     homonyms — same disambiguation idiom as W3 / W8).
+//
+//  2. Count slots per contract: the maximum SlotIndex + 1 across non-
+//     mapping NodeField rows whose qname prefix matches a contract.
+//     V0 already emits source-order indices, so the max-plus-one
+//     yields the count without re-walking the AST.
+//
+//  3. Compute cumulative inheritance offset per contract via DFS over
+//     the parent adjacency. Each ancestor contributes its own slot
+//     count plus its offset. Memoised so repeated subtrees don't
+//     re-walk; cycle defence (visited set) handles the degenerate
+//     `is`-clause loop that solc would reject but the grammar accepts.
+//
+//  4. Mutate every NodeField's SlotIndex by adding its enclosing
+//     contract's offset.
+//
+// V1 limitations:
+//
+//   - Diamond inheritance with repeated ancestors. The naive sum
+//     double-counts a shared ancestor (e.g. `D is Y, Z` where both
+//     extend X sums X's slots twice). Sol's C3 linearization would
+//     dedupe X; V1 does not. A V2+ pass can apply the linearization
+//     visit order before the count.
+//   - Library subkind contracts (SubKind="library") are included in
+//     the index. Libraries hold no state in practice, so the
+//     adjustment is a no-op for them; no explicit filter.
+//   - Cross-file homonymous contracts pick the first-occurrence ID.
+//     Same disambiguation rule used by every other byName-style
+//     resolver in the Sol pass.
+func applyInheritanceSlotOffset(nodes []types.Node, parents map[string][]string) {
+	contractIDByName := map[string]string{}
+	for _, n := range nodes {
+		if n.Type != types.NodeContract && n.Type != types.NodeInterface {
+			continue
+		}
+		if _, exists := contractIDByName[n.Name]; !exists {
+			contractIDByName[n.Name] = n.ID
+		}
+	}
+	if len(contractIDByName) == 0 {
+		return
+	}
+
+	slotCount := map[string]int{}
+	for _, n := range nodes {
+		if n.Type != types.NodeField {
+			continue
+		}
+		dot := strings.IndexByte(n.QualifiedName, '.')
+		if dot <= 0 {
+			continue
+		}
+		cid, ok := contractIDByName[n.QualifiedName[:dot]]
+		if !ok {
+			continue
+		}
+		if next := n.SlotIndex + 1; next > slotCount[cid] {
+			slotCount[cid] = next
+		}
+	}
+
+	offset := map[string]int{}
+	var dfs func(cid string, visited map[string]bool) int
+	dfs = func(cid string, visited map[string]bool) int {
+		if cached, ok := offset[cid]; ok {
+			return cached
+		}
+		if visited[cid] {
+			return 0
+		}
+		visited[cid] = true
+		total := 0
+		for _, pid := range parents[cid] {
+			total += dfs(pid, visited) + slotCount[pid]
+		}
+		offset[cid] = total
+		return total
+	}
+	for _, cid := range contractIDByName {
+		dfs(cid, map[string]bool{})
+	}
+
+	for i := range nodes {
+		if nodes[i].Type != types.NodeField {
+			continue
+		}
+		dot := strings.IndexByte(nodes[i].QualifiedName, '.')
+		if dot <= 0 {
+			continue
+		}
+		cid, ok := contractIDByName[nodes[i].QualifiedName[:dot]]
+		if !ok {
+			continue
+		}
+		if off := offset[cid]; off > 0 {
+			nodes[i].SlotIndex += off
+		}
+	}
 }
 
 // buildInheritanceIndex collects every EdgeExtends / EdgeImplements edge
