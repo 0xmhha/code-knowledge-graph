@@ -230,6 +230,12 @@ func (v *declVisitor) runStateVarDecl() {
 	defer cur.Close()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
+	// W-C W9 V0 (2026-05-18): per-contract slot counter. Keyed by the
+	// enclosing contract name (nearestContractName output) and
+	// incremented only for non-mapping NodeField emits. Mapping
+	// state-vars (NodeMapping path) skip the counter entirely since
+	// their slot is derived dynamically via keccak at runtime.
+	slotPerContract := map[string]int{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -307,6 +313,16 @@ func (v *declVisitor) runStateVarDecl() {
 					}
 				}
 			}
+			// W-C W9 V0 (2026-05-18): assign per-contract slot index for
+			// non-mapping state-vars. Counter keyed on the enclosing
+			// contract name; mapping path skips entirely (NodeMapping
+			// slot is dynamic per Sol spec §11.1).
+			slotIndex := 0
+			if !isMapping {
+				containerKey := nearestContractName(nameNode, v.src)
+				slotIndex = slotPerContract[containerKey]
+				slotPerContract[containerKey] = slotIndex + 1
+			}
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: name, QualifiedName: qname,
 				FilePath: v.rel, StartLine: line, EndLine: line,
@@ -314,6 +330,7 @@ func (v *declVisitor) runStateVarDecl() {
 				Language: "sol", Confidence: types.ConfExtracted,
 				Signature: signature,
 				SubKind:   subKind,
+				SlotIndex: slotIndex,
 			})
 			v.edges = append(v.edges, types.Edge{
 				Src: v.fileID, Dst: id, Type: types.EdgeDefines,

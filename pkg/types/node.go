@@ -22,4 +22,11 @@ type Node struct {
 	UsageScore    float64    `json:"usage_score"`
 	Confidence    Confidence `json:"confidence"     validate:"required"`
 	SubKind       string     `json:"sub_kind,omitempty"`
+	// SlotIndex (W-C W9 V0, 2026-05-18): EVM storage slot index for
+	// Solidity state variables (NodeField). V0 is per-contract
+	// declaration-order index (0, 1, 2, ...) — bit-packing and
+	// inheritance offsets are deferred to V1+. Omitted from JSON for
+	// non-state-var nodes and for NodeField rows where the value is
+	// the zero default.
+	SlotIndex int `json:"slot_index,omitempty"`
 }
