@@ -336,16 +336,19 @@ func (v *declVisitor) runStateVarDecl() {
 					}
 				}
 			}
-			// W-C W9 V2 (2026-05-18): assign packed slot index for
-			// non-mapping state-vars via type-size aware advancement.
-			// Mapping path reserves a full slot but emits no SlotIndex
-			// (V0 contract preserved for NodeMapping; V3 will index
-			// mappings).
+			// W-C W9 V2 / V3 (2026-05-18): assign packed slot index for
+			// every state-var, including mappings. V2 introduced type-
+			// size aware packing for non-mapping fields; V3 made
+			// advanceForMapping return the slot the mapping occupies
+			// so NodeMapping rows are addressable by declaration slot
+			// the same way NodeField rows are.
 			slotIndex := 0
 			containerKey := nearestContractName(nameNode, v.src)
 			state := slotPerContract[containerKey]
 			if isMapping {
-				slotPerContract[containerKey] = advanceForMapping(state)
+				slot, newState := advanceForMapping(state)
+				slotIndex = slot
+				slotPerContract[containerKey] = newState
 			} else {
 				size := solTypeSize(signature)
 				slot, newState := advanceForField(state, size)

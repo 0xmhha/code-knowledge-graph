@@ -56,14 +56,14 @@ func TestStorageSlot_PerContractIndex(t *testing.T) {
 		}
 	}
 
-	// Mappings (Layout.balances) must NOT carry a SlotIndex — they're
-	// NodeMapping, not NodeField, and even if accidentally indexed,
-	// V0 deliberately skips the slot path. The check here is implicit
-	// in the want map (no entry for balances).
+	// W9 V3 (2026-05-18): mappings now carry SlotIndex too. The Layout
+	// fixture has `mapping balances` between decimals (slot 1, packed
+	// with owner) and paused (slot 3), so balances occupies slot 2.
+	// Per-key data still lives at keccak256(key, slot=2) at runtime.
 	for _, n := range nodes {
 		if n.QualifiedName == "balances:mapping" || n.Name == "balances" {
-			if n.Type == types.NodeMapping && n.SlotIndex != 0 {
-				t.Errorf("W9 NodeMapping %q must not carry SlotIndex (got %d)",
+			if n.Type == types.NodeMapping && n.SlotIndex != 2 {
+				t.Errorf("W9 V3 NodeMapping %q SlotIndex: got %d, want 2",
 					n.QualifiedName, n.SlotIndex)
 			}
 		}

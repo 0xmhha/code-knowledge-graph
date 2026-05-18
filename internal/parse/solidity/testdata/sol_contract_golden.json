@@ -15,7 +15,8 @@
       "out_degree": 0,
       "pagerank": 0,
       "usage_score": 0,
-      "confidence": "EXTRACTED"
+      "confidence": "EXTRACTED",
+      "slot_index": 1
     },
     {
       "id": "3f04e5fdbbdf8539",

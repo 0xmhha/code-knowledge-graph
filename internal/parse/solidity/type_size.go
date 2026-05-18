@@ -118,13 +118,17 @@ func advanceForField(state slotState, size int) (int, slotState) {
 }
 
 // advanceForMapping consumes a full slot for a mapping state-var
-// without producing a SlotIndex (NodeMapping path keeps SlotIndex
-// at the zero default in V2; W9 V3 will index mappings separately).
-func advanceForMapping(state slotState) slotState {
+// and returns the slot the mapping occupies. W-C W9 V3 (2026-05-18)
+// extends the V2 advance to also produce a SlotIndex so NodeMapping
+// rows can be located by storage slot the same way NodeField rows
+// can. The per-key data still lives at keccak256(key, slot) at
+// runtime; this slot is just the declaration slot.
+func advanceForMapping(state slotState) (int, slotState) {
 	if state.used > 0 {
 		state.slot++
 		state.used = 0
 	}
+	slot := state.slot
 	state.slot++
-	return state
+	return slot, state
 }
