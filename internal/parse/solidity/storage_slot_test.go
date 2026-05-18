@@ -6,18 +6,21 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W-C W9 V0 — per-contract storage slot index for NodeField.
+// W-C W9 V0 / V2 — per-contract storage slot index for NodeField.
 //
-// V0 scope:
-//   - Sequential 0-indexed slot per state-var in declaration order.
-//   - Mapping state-vars (NodeMapping) skip slot assignment — they
-//     follow a separate emit path and their slot is derived via
-//     keccak at runtime.
-//   - No bit-packing (uint8 counts as a full slot in V0).
-//   - No inheritance offset (each contract restarts at slot 0).
+// V0 emitted one slot per state-var. V2 (2026-05-18) added type-size
+// aware packing so consecutive sub-32-byte primitives share a slot
+// per Sol §11.1 layout rules. The Layout fixture below mixes a
+// uint256, an address (20 bytes), a uint8 (1 byte), a mapping, and
+// a bool to exercise packing:
 //
-// V1+ (out of V0) will add: bit-packing, inheritance offset, mapping
-// slot derivation.
+//   uint256 totalSupply (slot 0, 32B full)
+//   address owner       (slot 1, 20B used)
+//   uint8   decimals    (slot 1, 21B used — packed with owner)
+//   mapping balances    (slot 2, full — mapping always one full slot)
+//   bool    paused      (slot 3, 1B used)
+//
+// Other contract still restarts at slot 0 (no inheritance).
 
 func TestStorageSlot_PerContractIndex(t *testing.T) {
 	nodes, _ := parseResolveOneSol(t, "testdata/storage_slot", "contract_layout.sol")
@@ -25,8 +28,8 @@ func TestStorageSlot_PerContractIndex(t *testing.T) {
 	want := map[string]int{
 		"Layout.totalSupply": 0,
 		"Layout.owner":       1,
-		"Layout.decimals":    2,
-		"Layout.paused":      3,
+		"Layout.decimals":    1, // V2: packs with owner (20 + 1 = 21 bytes)
+		"Layout.paused":      3, // mapping consumes slot 2
 		"Other.a":            0,
 		"Other.b":            1,
 	}

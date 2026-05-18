@@ -250,12 +250,15 @@ func (v *declVisitor) runStateVarDecl() {
 	defer cur.Close()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
-	// W-C W9 V0 (2026-05-18): per-contract slot counter. Keyed by the
-	// enclosing contract name (nearestContractName output) and
-	// incremented only for non-mapping NodeField emits. Mapping
-	// state-vars (NodeMapping path) skip the counter entirely since
-	// their slot is derived dynamically via keccak at runtime.
-	slotPerContract := map[string]int{}
+	// W-C W9 V0/V2 (2026-05-18): per-contract packing slot state.
+	// Each entry tracks the current slot index and bytes already used
+	// in it. V0 emitted one slot per field; V2 uses solTypeSize plus
+	// advanceForField to pack consecutive sub-32-byte primitives into
+	// shared slots (Sol §11.1 layout rules). Mapping state-vars run
+	// through advanceForMapping, which reserves a full slot without
+	// producing a SlotIndex (NodeMapping path stays at zero default
+	// in V2; W9 V3 will index mappings separately).
+	slotPerContract := map[string]slotState{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -333,15 +336,21 @@ func (v *declVisitor) runStateVarDecl() {
 					}
 				}
 			}
-			// W-C W9 V0 (2026-05-18): assign per-contract slot index for
-			// non-mapping state-vars. Counter keyed on the enclosing
-			// contract name; mapping path skips entirely (NodeMapping
-			// slot is dynamic per Sol spec §11.1).
+			// W-C W9 V2 (2026-05-18): assign packed slot index for
+			// non-mapping state-vars via type-size aware advancement.
+			// Mapping path reserves a full slot but emits no SlotIndex
+			// (V0 contract preserved for NodeMapping; V3 will index
+			// mappings).
 			slotIndex := 0
-			if !isMapping {
-				containerKey := nearestContractName(nameNode, v.src)
-				slotIndex = slotPerContract[containerKey]
-				slotPerContract[containerKey] = slotIndex + 1
+			containerKey := nearestContractName(nameNode, v.src)
+			state := slotPerContract[containerKey]
+			if isMapping {
+				slotPerContract[containerKey] = advanceForMapping(state)
+			} else {
+				size := solTypeSize(signature)
+				slot, newState := advanceForField(state, size)
+				slotIndex = slot
+				slotPerContract[containerKey] = newState
 			}
 			// W-C W8 V2 (2026-05-18): function-typed state-var marker.
 			// Detection: type_name contains `parameter` or `return_parameter`
