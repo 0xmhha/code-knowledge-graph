@@ -29,4 +29,12 @@ type Node struct {
 	// non-state-var nodes and for NodeField rows where the value is
 	// the zero default.
 	SlotIndex int `json:"slot_index,omitempty"`
+	// HasAssembly (W-C W10 V0, 2026-05-18): true when a Solidity
+	// callable (function / modifier / constructor / fallback) contains
+	// at least one `assembly { ... }` block in its body. Lets
+	// downstream consumers run a basic "show me all functions with
+	// inline assembly" query without re-parsing source. V0 detects
+	// presence only; Yul-internal op detection (delegatecall, sstore,
+	// selfdestruct, …) and receiver resolution are deferred to V1+.
+	HasAssembly bool `json:"has_assembly,omitempty"`
 }
