@@ -180,6 +180,11 @@ func (v *declVisitor) visit() {
 	// staticcall) per callable. Sorted, deduped slice on
 	// Node.YulBuiltins.
 	v.runYulBuiltins()
+	// W10 V2 (2026-05-18): resolve the target address argument of
+	// Yul delegatecall / call / staticcall to a Sol scope receiver.
+	// Re-uses W7.1's resolveLowLevelCallRef so Yul and Sol low-level
+	// calls produce identical edge shapes.
+	v.runYulLowLevelCalls()
 	v.collectABI()
 }
 
