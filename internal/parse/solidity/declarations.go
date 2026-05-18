@@ -125,6 +125,10 @@ func (v *declVisitor) visit() {
 	// resolved in Pass 2 (resolveInterfaceDispatch). Confidence is always
 	// ConfAmbiguous per §5.0 Q5 — see dispatch.go preamble.
 	v.runDispatch()
+	// W8 V0 (2026-05-18): contract-type cast sibling. Walks the same
+	// AST shape but resolves the leading type against byName[NodeContract]
+	// instead of NodeInterface. DispatchKind="contract_cast".
+	v.runContractCastDispatch()
 	// W-C W6 V1.28 (2026-05-12): walk import_directive nodes and fill
 	// v.importAliases per-file. Must run before runUsingFor so the
 	// using-for walker can resolve aliased library names.

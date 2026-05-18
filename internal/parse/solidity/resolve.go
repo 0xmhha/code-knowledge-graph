@@ -487,6 +487,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W8 contract-cast branch (2026-05-18) — resolves
+			// MyContract(addr).method() against the Contract index.
+			// Disjoint from W3 (Interface index) so no double-emit.
+			if pr.DispatchKind == dispatchKindContractCast {
+				if edge, ok := resolveContractCastRef(
+					pr, byName, funcByQName, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			// W6 using-for branch — resolves `using LibName for ...` to
 			// EdgeUsesFor (Container → Library). Library is emitted by W4
 			// as NodeContract + SubKind="library", so we use the same
@@ -2320,5 +2331,52 @@ func resolveInterfaceDispatchRef(
 	return types.Edge{
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeInvokes,
 		Line: pr.Line, Count: 1, Confidence: types.ConfAmbiguous,
+	}, true
+}
+
+// resolveContractCastRef — Sol W8 V0 (2026-05-18). Resolves one
+// contract-cast PendingRef (`MyContract(addr).method()`) to a single
+// EdgeInvokes edge by looking up the method on the named contract.
+//
+// Mirrors resolveInterfaceDispatchRef step-for-step except the type
+// lookup hits byName[NodeContract] and the emitted edge carries
+// DispatchKind="contract_cast". Library subkinds (NodeContract with
+// SubKind="library") are accepted at the byName layer — libraries
+// can be cast in some patterns, and filtering would add a
+// containerNameByID/subKind lookup without clear value at V0.
+//
+// Confidence is fixed at ConfAmbiguous: the cast resolves a typed
+// receiver but the runtime address determines the actual target,
+// just like W3 interface dispatch.
+func resolveContractCastRef(
+	pr parse.PendingRef,
+	byName map[types.NodeType]map[string][]string,
+	funcByQName map[string][]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	dot := strings.IndexByte(pr.TargetQName, '.')
+	if dot <= 0 || dot == len(pr.TargetQName)-1 {
+		return types.Edge{}, false
+	}
+	typeName := pr.TargetQName[:dot]
+	if ids := byName[types.NodeContract][typeName]; len(ids) == 0 {
+		return types.Edge{}, false
+	}
+	candidates := funcByQName[pr.TargetQName]
+	if len(candidates) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := candidates[0]
+	for _, fid := range candidates {
+		if nodeFile[fid] == srcFile {
+			dstID = fid
+			break
+		}
+	}
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeInvokes,
+		Line: pr.Line, Count: 1, Confidence: types.ConfAmbiguous,
+		DispatchKind: dispatchKindContractCast,
 	}, true
 }
