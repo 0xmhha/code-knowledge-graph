@@ -521,6 +521,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W7.1 (2026-05-17) low-level call branch — resolves
+			// `target.call/delegatecall/staticcall(...)` against
+			// Contract/Interface byName index. ConfAmbiguous always
+			// (runtime address determines real target). Receiver
+			// resolution chain mirrors W6 lookupReceiverType.
+			if pr.DispatchKind == dispatchKindLowLevelCall {
+				if edge, ok := resolveLowLevelCallRef(
+					pr, byName, stateVarTypes, paramTypes, localVarTypes,
+					containerIDByFuncID, nodeFile,
+				); ok {
+					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
 			// W6 V1.3 chained-call branch — resolves
 			// `<innerFn>().<method>(...)` to an EdgeCalls into the
 			// library function bound for the inner function's return
@@ -1099,6 +1113,75 @@ func resolveUsingForCallRef(
 	return types.Edge{
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
 		Line: pr.Line, Count: 1, Confidence: conf,
+	}, true
+}
+
+// resolveLowLevelCallRef — W-C W7.1 V0 (2026-05-17). Resolves one
+// low-level call PendingRef (`target.call/delegatecall/staticcall(...)`)
+// to a single EdgeInvokes edge.
+//
+// TargetQName encoding from runLowLevelCalls: `receiverName|methodName`.
+// methodName is unused for resolution (only the receiver type matters at
+// the AST layer — actual selector resolution requires runtime address).
+//
+// Three-step chain — any failure drops:
+//
+//  1. funcID → receiverName via lookupReceiverType (W6 V1.0-V1.15 chain:
+//     state-var → param → local-var). useSiteByte = pr.ByteOffset
+//     drives V2.15 byte-precision shadow disambiguation.
+//  2. typeName → byName[NodeContract] OR byName[NodeInterface] →
+//     candidate Dst IDs.
+//  3. Pick same-file candidate first if available (W3 disambiguation
+//     idiom).
+//
+// Confidence: ConfAmbiguous always — runtime address determines actual
+// dispatch target. Same rule as W3 interface dispatch (§5.0 Q5) since
+// the AST evidence is the same shape (typed receiver, runtime selector).
+//
+// DispatchKind preserved on the emitted edge so downstream consumers
+// (viewer, llmSafeStoreReader filter) can distinguish low-level calls
+// from regular interface dispatch.
+func resolveLowLevelCallRef(
+	pr parse.PendingRef,
+	byName map[types.NodeType]map[string][]string,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
+	containerIDByFuncID map[string]string,
+	nodeFile map[string]string,
+) (types.Edge, bool) {
+	sep := strings.IndexByte(pr.TargetQName, '|')
+	if sep < 0 {
+		return types.Edge{}, false
+	}
+	receiverName := pr.TargetQName[:sep]
+	// methodName := pr.TargetQName[sep+1:] // unused — AST evidence only
+
+	contractID, ok := containerIDByFuncID[pr.SrcID]
+	if !ok {
+		return types.Edge{}, false
+	}
+	typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
+		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
+	if typeName == "" {
+		return types.Edge{}, false
+	}
+	// Try Interface first then Contract — interface-typed receivers are
+	// the more common shape for low-level call patterns (proxies). Same
+	// byName candidate-pick rule as W3.
+	candidates := byName[types.NodeInterface][typeName]
+	if len(candidates) == 0 {
+		candidates = byName[types.NodeContract][typeName]
+	}
+	if len(candidates) == 0 {
+		return types.Edge{}, false
+	}
+	srcFile := nodeFile[pr.SrcID]
+	dstID := pickSameFileCandidate(candidates, srcFile, nodeFile)
+	return types.Edge{
+		Src: pr.SrcID, Dst: dstID, Type: types.EdgeInvokes,
+		Line: pr.Line, Count: 1, Confidence: types.ConfAmbiguous,
+		DispatchKind: dispatchKindLowLevelCall,
 	}, true
 }
 

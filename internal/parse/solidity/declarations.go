@@ -145,6 +145,12 @@ func (v *declVisitor) visit() {
 	// State-variable receivers only (Q9-2 (a) V0 limit); parameter
 	// receivers added in V1.1 via emitParameterMetaPending in overrides.go.
 	v.runUsingForCalls()
+	// W7.1 V0 (2026-05-17): low-level call dispatch detector. Walks
+	// member_expression nodes matching `target.call/delegatecall/
+	// staticcall(...)` and emits EdgeInvokes with DispatchKind=
+	// "low_level_call" + ConfAmbiguous. Receiver resolution chain
+	// re-uses W6 V1.0 lookupReceiverType (state-var / param / local-var).
+	v.runLowLevelCalls()
 	v.collectABI()
 }
 
