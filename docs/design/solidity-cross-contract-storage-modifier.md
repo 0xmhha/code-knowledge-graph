@@ -339,6 +339,76 @@ joins same code by NodeType check.
 
 ---
 
+## §5a. V1 carry-over deferral notes (2026-05-18)
+
+W-C carry-over batch landed (W6 V2.19, W8 V1, W9 V1, W10 V1.1). Five
+items intentionally deferred — each with a documented rationale below
+so the next pass can revisit with full context rather than re-deriving
+the trade-offs.
+
+### Deferred — W6 V2.x operator-form recovery walker
+
+V2.17's AST probe established that `using {f as +} for T;` parses
+with no `using_directive` node at all (the braced body becomes a
+malformed `state_variable_declaration`). A recovery walker would
+need to discriminate this misparse from real state-var declarations,
+which is fragile in practice. Defer until either the upstream
+tree-sitter-solidity grammar is bumped (cleanest fix) or a specific
+use case justifies the false-positive risk.
+
+### Deferred — W8 V2 function-pointer dispatch
+
+`stored = registry.handler; stored(args);` — Sol-supported but the
+parser currently has no function-type tracking on state vars or
+locals. Without that infrastructure, V0 recovery would only catch
+the trivial case of inline `(function(...)).call(...)` which is
+rare in practice. Worth one bigger session of infrastructure work
+when the use case lands.
+
+### Deferred — W9 V2 bit-packing
+
+Sol storage layout §11.1 packs sub-32-byte fields into shared slots
+when consecutive, but the rules entangle type size, fixed-array
+alignment, struct embedding, and dynamic-type-skip semantics. A
+primitive-only version (uint8 / uint16 / address / bool / bytes_N)
+is straightforward but is wrong for the array and struct cases
+that most production contracts care about. Either land the full
+algorithm or defer; W9 V1 explicitly does the latter.
+
+### Deferred — W9 V3 mapping slot derivation
+
+Mapping slot computation is `keccak256(key, slot)` at runtime — the
+slot the mapping declaration occupies is well-defined, but the
+per-key slot is dynamic. Either model the declaration slot only
+(largely covered by W9 V1 already, just with NodeMapping skipped)
+or surface key-encoding details for off-chain analysis. The
+incremental value over W9 V1 is small until a concrete consumer
+needs it.
+
+### Deferred — W10 V2 Yul receiver resolution
+
+V1.1 surfaces `delegatecall` / `call` / `staticcall` opcode names
+on each callable. V2 would resolve the second argument (target
+address) of these ops back to a Sol identifier via `yul_path` →
+Sol-scope mapping, then chase the identifier through
+lookupReceiverType (the W6 chain). Fragile because yul_path
+identifiers can shadow Sol identifiers, the binding direction
+isn't always recoverable, and the target is frequently a temporary
+loaded from storage. Wait for a concrete demand.
+
+### Deferred — W11 V1 real parser → persist → BuildPack integration
+
+W11 V0 (`TestBuildPack_SolGraphRegression`) used a Sol-shaped
+fakeStore. V1 would run the real parser on a synthetic git
+repository, persist via SQLite, then call BuildPack. The fixture
+cost is non-trivial (test-only git history with stable hashes,
+plus a small Sol+TS+Go corpus). Perf baseline and cross-language
+fixture regressions belong here too. NEXT-CANDIDATES-2026-05-10
+estimated this as Mid effort — defer until the regression matrix
+is genuinely sparse.
+
+---
+
 ## §6. Out of scope (W7 외부, 향후 spec 후보)
 
 - Yul / inline assembly dispatch — 별도 grammar context, 별도 spec.
