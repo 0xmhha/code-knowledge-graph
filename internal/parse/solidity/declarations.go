@@ -108,6 +108,11 @@ func (v *declVisitor) visit() {
 	v.runStateVarDecl()
 	v.runEmits()
 	v.runHasModifier()
+	// W-C W7.3 V0 (2026-05-18): detect `modifier m() override {}` and
+	// emit EdgeOverrides PendingRefs. Re-uses W2's resolveOverridesRef
+	// in Pass 2 (NodeType-agnostic — modifier qnames live in funcByQName
+	// alongside functions).
+	v.runModifierOverride()
 	v.runInheritance()
 	// W6 V1.10 (2026-05-12): struct field type metadata. Walks each
 	// struct_declaration's struct_body children and emits a side-channel
@@ -436,6 +441,8 @@ func (v *declVisitor) runHasModifier() {
 		var fnStart int
 		var fnOK bool
 		var line int
+		var stmtStart uint
+		var stmtParent *sitter.Node
 		for _, c := range m.Captures {
 			if names[c.Index] == "mod" {
 				node := c.Node
@@ -443,15 +450,39 @@ func (v *declVisitor) runHasModifier() {
 				fnQ, fnStart, fnOK = nearestFunctionQnameAndStart(&node, v.src)
 				line = int(node.StartPosition().Row) + 1
 			}
+			if names[c.Index] == "stmt" {
+				node := c.Node
+				stmtStart = node.StartByte()
+				stmtParent = node.Parent()
+			}
 		}
 		if mod == "" || !fnOK {
 			continue
+		}
+		// W-C W7.3 (2026-05-18): compute source-order index. Count
+		// modifier_invocation siblings whose StartByte precedes the
+		// current statement node. The grammar lists modifier_invocation
+		// children of function_definition / constructor_definition in
+		// source order, so the count equals the 0-indexed position.
+		order := 0
+		if stmtParent != nil {
+			for i := uint(0); i < stmtParent.NamedChildCount(); i++ {
+				sibling := stmtParent.NamedChild(i)
+				if sibling == nil || sibling.Kind() != "modifier_invocation" {
+					continue
+				}
+				if sibling.StartByte() >= stmtStart {
+					break
+				}
+				order++
+			}
 		}
 		v.pending = append(v.pending, parse.PendingRef{
 			SrcID:       parse.MakeID(fnQ, "sol", fnStart),
 			EdgeType:    types.EdgeHasModifier,
 			TargetQName: mod,
 			Line:        line,
+			Order:       order,
 		})
 	}
 }

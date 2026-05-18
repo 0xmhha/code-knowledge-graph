@@ -24,7 +24,11 @@ type PendingRef struct {
 	// decls, the byte offset breaks the tie via containment. Zero =
 	// unset (other parsers leave it default; Sol resolver falls back
 	// to V2.0 line-only behavior when bytes are missing).
-	ByteOffset   int
+	ByteOffset int
+	// Order (W-C W7.3, 2026-05-18): source-order index. Carried to the
+	// resolved Edge.Order field. Currently populated by Sol's
+	// runHasModifier walker; ignored elsewhere.
+	Order        int
 	DispatchKind string
 }
 

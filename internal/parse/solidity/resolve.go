@@ -156,6 +156,15 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				add(types.NodeEvent, n.Name, n.ID)
 			case types.NodeModifier:
 				add(types.NodeModifier, n.Name, n.ID)
+				// W-C W7.3 V0 (2026-05-18): also index modifiers by qname
+				// (`Container.modifier`) so resolveOverridesRef can find
+				// parent-modifier candidates the same way it finds parent-
+				// function candidates. Modifier qname is set by runDecl's
+				// NodeModifier path (declarations.go:192) and matches the
+				// NodeFunction shape.
+				if n.QualifiedName != "" && n.QualifiedName != n.Name {
+					funcByQName[n.QualifiedName] = append(funcByQName[n.QualifiedName], n.ID)
+				}
 			case types.NodeMapping:
 				add(types.NodeMapping, n.QualifiedName, n.ID)
 			// W1: index Contracts and Interfaces by Name so inheritance
@@ -698,6 +707,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			out.Edges = append(out.Edges, types.Edge{
 				Src: pr.SrcID, Dst: ids[0], Type: pr.EdgeType,
 				Line: pr.Line, Count: 1, Confidence: conf,
+				Order: pr.Order,
 			})
 		}
 	}

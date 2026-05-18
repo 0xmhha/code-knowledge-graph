@@ -26,4 +26,12 @@ type Edge struct {
 	Count        int        `json:"count"      validate:"min=1"`
 	Confidence   Confidence `json:"confidence" validate:"required"`
 	DispatchKind string     `json:"dispatch_kind,omitempty"`
+	// Order (W-C W7.3, 2026-05-18): source-order index for edges where
+	// position is part of the relationship. Currently used by
+	// EdgeHasModifier so multi-modifier functions preserve the
+	// application sequence (Solidity applies modifiers outer-to-inner
+	// in source order — `nonReentrant onlyOwner` wraps differently
+	// from `onlyOwner nonReentrant`). Zero is omitted from JSON so
+	// other edge types stay unaffected.
+	Order int `json:"order,omitempty"`
 }

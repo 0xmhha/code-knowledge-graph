@@ -214,6 +214,91 @@ func (v *declVisitor) runFunctionDecl() {
 	}
 }
 
+// runModifierOverride — W-C W7.3 V0 (2026-05-18). Walks modifier_definition
+// nodes and emits EdgeOverrides PendingRefs when the override_specifier
+// child is present. Mirrors the function-override emit path in
+// emitFunctionDeclWithOverride: bare `override` becomes a
+// dispatchKindOverride PendingRef (resolver walks the inheritance chain
+// for any parent that declares the same modifier name); explicit
+// `override(Parent1, Parent2)` becomes one dispatchKindOverrideExplicit
+// PendingRef per listed parent.
+//
+// Re-uses scanFunctionModifiers and collectOverrideParents — both are
+// AST-shape helpers that already work on any node with named-child
+// modifiers (function_definition, modifier_definition share the
+// override_specifier child shape per grammar v1.2.11 probe 2026-05-18).
+//
+// The Pass 2 W2 resolver (resolveOverridesRef) is NodeType-agnostic:
+// it indexes funcByQName with both NodeFunction and NodeModifier
+// (declarations.go assigns Modifier qnames the same `Container.name`
+// shape as Function), so modifier-pair lookups land without changes
+// to the resolver.
+func (v *declVisitor) runModifierOverride() {
+	const q = `(modifier_definition name: (identifier) @name) @decl`
+	query, qErr := sitter.NewQuery(v.lang, q)
+	if qErr != nil {
+		return
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		var declNode *sitter.Node
+		var nameNode *sitter.Node
+		for _, c := range m.Captures {
+			if names[c.Index] == "decl" {
+				n := c.Node
+				declNode = &n
+			}
+			if names[c.Index] == "name" {
+				n := c.Node
+				nameNode = &n
+			}
+		}
+		if declNode == nil || nameNode == nil {
+			continue
+		}
+		_, override := scanFunctionModifiers(declNode, v.src)
+		if !override.present {
+			continue
+		}
+		ident := nameNode.Utf8Text(v.src)
+		qname := ident
+		if cn := nearestContractName(nameNode, v.src); cn != "" {
+			qname = cn + "." + ident
+		}
+		startByte := int(nameNode.StartByte())
+		srcID := parse.MakeID(qname, "sol", startByte)
+		line := int(nameNode.StartPosition().Row) + 1
+
+		if len(override.explicitParents) == 0 {
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        srcID,
+				EdgeType:     types.EdgeOverrides,
+				TargetQName:  ident,
+				Line:         line,
+				DispatchKind: dispatchKindOverride,
+			})
+			continue
+		}
+		for _, parent := range override.explicitParents {
+			v.pending = append(v.pending, parse.PendingRef{
+				SrcID:        srcID,
+				EdgeType:     types.EdgeOverrides,
+				TargetQName:  parent + "." + ident,
+				Line:         line,
+				DispatchKind: dispatchKindOverrideExplicit,
+			})
+		}
+	}
+}
+
 // emitParameterMetaPending walks the named children of a function_definition
 // and queues one PendingRef per `parameter` node carrying the (paramName,
 // typeName) binding. Pass 2 indexes these into (funcID, paramName) →
