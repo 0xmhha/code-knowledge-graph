@@ -51,6 +51,50 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V11 — try/catch with fn-typed returns parameter
+// propagation. `try provider.getCallback() returns (function(...)
+// cb) { handler = cb; }` extracts a function pointer from a try-
+// block's returns clause and propagates it to a state variable.
+// V3 already marks HasFunctionTypedVar (the cb declaration goes
+// through emitTryReturnsBinding and the parameter node lives in
+// the function's body), and the V8 propagation walker catches
+// the `handler = cb` assignment. V11 audits the full
+// declaration -> propagation chain through the try-block scope.
+func TestFunctionTypedVar_TryCatchPropagation(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "try_catch_prop.sol")
+
+	want := map[string]struct {
+		typedVar, propagation, invocation bool
+	}{
+		"Caller.captureCallback": {typedVar: true, propagation: true, invocation: false},
+	}
+	got := map[string]struct {
+		typedVar, propagation, invocation bool
+	}{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = struct {
+				typedVar, propagation, invocation bool
+			}{n.HasFunctionTypedVar, n.HasFunctionPointerPropagation, n.HasFunctionPointerCall}
+		}
+	}
+	for qn, w := range want {
+		g := got[qn]
+		if g.typedVar != w.typedVar {
+			t.Errorf("%s HasFunctionTypedVar: got %v want %v", qn, g.typedVar, w.typedVar)
+		}
+		if g.propagation != w.propagation {
+			t.Errorf("%s HasFunctionPointerPropagation: got %v want %v", qn, g.propagation, w.propagation)
+		}
+		if g.invocation != w.invocation {
+			t.Errorf("%s HasFunctionPointerCall: got %v want %v", qn, g.invocation, w.invocation)
+		}
+	}
+}
+
 // W-C W8 V10 — emit-statement propagation. `emit Event(handler)`
 // logs the fn-typed value to chain — propagation surface that
 // the V8 assignment / argument and V9 return passes don't cover.
