@@ -1,0 +1,45 @@
+package solidity_test
+
+import (
+	"testing"
+
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
+)
+
+// W-C W8 V3 — function-typed parameter / local marker. Extends W8 V2
+// (state-var) to callables that own a function-typed parameter or
+// local variable. The marker is presence-only: V0 dispatch resolution
+// does not follow indirect calls through function pointers.
+func TestFunctionTypedVar_CallableMarker(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "dispatcher.sol")
+
+	want := map[string]bool{
+		"Dispatcher.runWithCallback": true,
+		"Dispatcher.pickAndRun":      true,
+		"Dispatcher.chooseFn":        true,
+		"Dispatcher.plain":           false,
+	}
+
+	got := map[string]bool{}
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; !ok {
+			continue
+		}
+		seen[n.QualifiedName] = true
+		got[n.QualifiedName] = n.HasFunctionTypedVar
+	}
+
+	for qn, w := range want {
+		if !seen[qn] {
+			t.Errorf("missing NodeFunction %q", qn)
+			continue
+		}
+		if got[qn] != w {
+			t.Errorf("NodeFunction %q HasFunctionTypedVar: got %v, want %v", qn, got[qn], w)
+		}
+	}
+}

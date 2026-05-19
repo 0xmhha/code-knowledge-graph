@@ -67,4 +67,14 @@ type Node struct {
 	// function-typed state vars is deferred. Empty for non-field
 	// nodes and for fields whose type is anything but a function.
 	IsFunctionTyped bool `json:"is_function_typed,omitempty"`
+	// HasFunctionTypedVar (W-C W8 V3, 2026-05-19): true when a
+	// Solidity callable (NodeFunction / NodeModifier) has at least
+	// one parameter or local variable declared with a function type.
+	// Indirect dispatch through function pointers is a control-flow
+	// integrity signal — security tooling commonly flags callables
+	// that load and invoke caller-supplied callbacks. The marker is
+	// presence-only; the V0 dispatch path does not resolve the
+	// concrete target since function-typed locals can be reassigned
+	// across paths.
+	HasFunctionTypedVar bool `json:"has_function_typed_var,omitempty"`
 }

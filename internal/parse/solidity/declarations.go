@@ -192,6 +192,11 @@ func (v *declVisitor) visit() {
 	// Re-uses W7.1's resolveLowLevelCallRef so Yul and Sol low-level
 	// calls produce identical edge shapes.
 	v.runYulLowLevelCalls()
+	// W8 V3 (2026-05-19): mark callables that own a function-typed
+	// parameter or local variable with HasFunctionTypedVar=true.
+	// Complements W8 V2's NodeField marker and surfaces indirect
+	// dispatch surfaces for security tooling.
+	v.runFunctionTypedVarMarker()
 	v.collectABI()
 }
 
