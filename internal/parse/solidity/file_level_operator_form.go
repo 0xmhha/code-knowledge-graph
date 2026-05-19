@@ -74,19 +74,24 @@ func (v *declVisitor) runFileLevelOperatorForm() {
 			continue
 		}
 		text := child.Utf8Text(v.src)
-		libNames, typeName, ok := parseFileLevelOperatorForm(text)
+		entries, typeName, ok := parseFileLevelOperatorForm(text)
 		if !ok {
 			continue
 		}
 		line := int(child.StartPosition().Row) + 1
 		byteOff := int(child.StartByte())
-		for _, libName := range libNames {
-			if v.namespaceAliases[libName] {
+		// Dedup on the *resolved* libName: a library-method form
+		// `{Math.add, Math.sub}` reduces both entries to libName=Math
+		// and should emit one binding pair, not two. Namespace-
+		// aliased forms `{M.add, M.sub}` resolve to distinct
+		// libNames (add, sub) and stay separate.
+		seenLib := map[string]bool{}
+		for _, entry := range entries {
+			libName, ok := v.resolveUsingBindingLeading(entry)
+			if !ok || seenLib[libName] {
 				continue
 			}
-			if orig, hit := v.importAliases[libName]; hit {
-				libName = orig
-			}
+			seenLib[libName] = true
 			for _, srcID := range containerIDs {
 				v.pending = append(v.pending, parse.PendingRef{
 					SrcID:        srcID,
@@ -109,13 +114,63 @@ func (v *declVisitor) runFileLevelOperatorForm() {
 	}
 }
 
-// parseFileLevelOperatorForm extracts (library/function names, bound
-// type) from the raw ERROR text of a misparsed file-level operator-
-// form using directive. Recognises both free-function shape and
-// library-method shape (the dotted prefix becomes the library name,
-// matching V2.20's reduction). Returns ok=false if any of the three
-// structural markers (`{`, `}`, ` for `) is missing.
-func parseFileLevelOperatorForm(text string) ([]string, string, bool) {
+// resolveUsingBindingLeading normalises a using-for binding entry's
+// leading identifier through importAliases / namespaceAliases. Three
+// cases:
+//
+//   - leading is a namespace alias (`import "..." as M`) — the
+//     intent is to reference a symbol in that module. The tail is
+//     the actual function name; return the tail as libName.
+//
+//   - leading is an import alias (`import {Orig as Alias}`) — the
+//     intent is to reference Orig under the alias. Return Orig.
+//
+//   - bare identifier — the intent is the library or free function
+//     of that name. Return leading unchanged.
+//
+// Returns ok=false when the leading is a namespace alias with no
+// tail (the entry was bare `M`, which can't bind to anything).
+func (v *declVisitor) resolveUsingBindingLeading(e usingBindingEntry) (string, bool) {
+	if v.namespaceAliases[e.leading] {
+		if e.tail == "" {
+			return "", false
+		}
+		// V0 only follows the immediate sub-name; deeper paths
+		// (`M.SubMod.fn`) fall back to the first segment after the
+		// namespace, matching the existing extractTypeNameText
+		// "trailing identifier" convention.
+		if dotIdx := strings.Index(e.tail, "."); dotIdx >= 0 {
+			return e.tail[:dotIdx], true
+		}
+		return e.tail, true
+	}
+	if orig, hit := v.importAliases[e.leading]; hit {
+		return orig, true
+	}
+	return e.leading, true
+}
+
+// usingBindingEntry captures one entry of a using-for directive's
+// braced body. `leading` is the first dot-separated segment (the
+// candidate library / namespace name); `tail` is the rest of the
+// dotted path (`""` when the entry was a bare identifier, otherwise
+// the method or sub-name following the first dot). The walker uses
+// these together to route through importAliases / namespaceAliases
+// before committing to a libName for the binding emit.
+type usingBindingEntry struct {
+	leading string
+	tail    string
+}
+
+// parseFileLevelOperatorForm extracts (entries, bound type) from
+// the raw ERROR text of a misparsed file-level operator-form using
+// directive. Each entry preserves both the leading identifier (the
+// candidate library / namespace) and the dotted tail (the method
+// name when the entry was qualified like `M.mul`), so the caller
+// can distinguish library-method form from namespace-aliased free-
+// function form. Returns ok=false if any structural marker is
+// missing.
+func parseFileLevelOperatorForm(text string) ([]usingBindingEntry, string, bool) {
 	if !strings.HasPrefix(text, "using ") {
 		return nil, "", false
 	}
@@ -126,23 +181,26 @@ func parseFileLevelOperatorForm(text string) ([]string, string, bool) {
 		return nil, "", false
 	}
 	body := text[braceOpen+1 : braceClose]
-	var libNames []string
+	var entries []usingBindingEntry
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(body, ",") {
 		entry := strings.TrimSpace(raw)
 		if asIdx := strings.Index(entry, " as "); asIdx >= 0 {
 			entry = strings.TrimSpace(entry[:asIdx])
 		}
+		leading := entry
+		tail := ""
 		if dotIdx := strings.Index(entry, "."); dotIdx >= 0 {
-			entry = entry[:dotIdx]
+			leading = entry[:dotIdx]
+			tail = entry[dotIdx+1:]
 		}
-		if entry == "" || seen[entry] {
+		if leading == "" || seen[entry] {
 			continue
 		}
 		seen[entry] = true
-		libNames = append(libNames, entry)
+		entries = append(entries, usingBindingEntry{leading: leading, tail: tail})
 	}
-	if len(libNames) == 0 {
+	if len(entries) == 0 {
 		return nil, "", false
 	}
 	rest := strings.TrimLeft(text[forIdx+len(" for "):], " \t")
@@ -160,5 +218,5 @@ func parseFileLevelOperatorForm(text string) ([]string, string, bool) {
 	if typeName == "" {
 		return nil, "", false
 	}
-	return libNames, typeName, true
+	return entries, typeName, true
 }
