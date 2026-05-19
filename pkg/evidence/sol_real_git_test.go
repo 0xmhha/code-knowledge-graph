@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	sol "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	"github.com/0xmhha/code-knowledge-graph/internal/temporal"
 	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
+	"github.com/0xmhha/code-knowledge-graph/pkg/hunkmodifies"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -171,7 +171,7 @@ func TestBuildPack_RealGitFixture(t *testing.T) {
 		}
 	}
 
-	edges = append(edges, buildpipe.BuildModifiesEdges(nodes)...)
+	edges = append(edges, hunkmodifies.BuildEdges(nodes)...)
 
 	store := &realParserFakeStore{nodes: nodes, edges: edges}
 	pack, err := evidence.BuildPack(store, evidence.Options{

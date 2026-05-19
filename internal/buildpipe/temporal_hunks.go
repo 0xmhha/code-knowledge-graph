@@ -33,6 +33,7 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/internal/graph"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	"github.com/0xmhha/code-knowledge-graph/internal/temporal"
+	"github.com/0xmhha/code-knowledge-graph/pkg/hunkmodifies"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -55,30 +56,12 @@ var hunkLanguageWhitelist = map[string]string{
 	".sol": "sol",
 }
 
-// modifiesNodeWhitelist is the H2 §4.2 "FunctionLike + TypeLike +
-// Field-ish" set: only nodes of these kinds receive `modifies` edges
-// when a hunk overlaps their byte range. Statement-level kinds
-// (CallSite, IfStmt, LoopStmt, ReturnStmt, SwitchStmt) are deliberately
-// excluded because they'd explode the edge count by ~10× without
-// improving the few-shot retrieval signal that motivates the edge.
-//
-// Future inclusions (e.g. Endpoint once handler declarations get richer)
-// are one-line additions per the design.
-var modifiesNodeWhitelist = map[types.NodeType]bool{
-	types.NodeFunction:    true,
-	types.NodeMethod:      true,
-	types.NodeConstructor: true,
-	types.NodeModifier:    true,
-	types.NodeStruct:      true,
-	types.NodeInterface:   true,
-	types.NodeClass:       true,
-	types.NodeTypeAlias:   true,
-	types.NodeEnum:        true,
-	types.NodeContract:    true,
-	types.NodeField:       true,
-	types.NodeConstant:    true,
-	types.NodeVariable:    true,
-}
+// modifiesNodeWhitelist re-exports pkg/hunkmodifies.NodeWhitelist
+// so historical references inside buildpipe (test code, future
+// helpers) keep working without rewriting every site. The single
+// source of truth lives in pkg/hunkmodifies so external consumers
+// can compose the H2 join without crossing the internal boundary.
+var modifiesNodeWhitelist = hunkmodifies.NodeWhitelist
 
 // isMetaNodeType reports whether t is a "meta" node — one that lives
 // outside the file-level cache (Commit, Hunk). Meta nodes:
@@ -493,75 +476,12 @@ func emitModifiesEdges(g *graph.Graph) {
 	}
 }
 
-// BuildModifiesEdges computes the H2 line-overlap modifies edges for
-// the given node set without mutating it. For every NodeHunk it
-// scans whitelisted CodeNodes (FunctionLike + TypeLike + Field-ish,
-// per §4.2) in the same file and emits an EdgeModifies whenever the
-// [StartLine, EndLine] intervals overlap. The returned slice can be
-// appended onto a graph.Graph's edges (the buildpipe internal path)
-// or staged alongside synthetic nodes for evidence-layer integration
-// tests — same algorithm in both consumers, so a parser-level
-// change can't drift between them.
-//
-// Edges inherit Confidence from the hunk node (EXTRACTED for HEAD-
-// reachable hunks, AMBIGUOUS for the unreachable-history track).
-// Per design §4.1, candidates iterate in their original parser-
-// emission order (file-path bucket preserves insertion); hunks
-// iterate in nodes-slice order, so consumers wanting deterministic
-// output should sort their hunk set up front (buildpipe sorts via
-// buildHunkNodes' stable ID sort).
+// BuildModifiesEdges retained as a buildpipe-internal alias for
+// historical callers and tests; the canonical implementation lives
+// in pkg/hunkmodifies so consumers outside this repository's
+// internal tree can compose the H2 join without crossing the
+// internal boundary. Both forms call the same underlying function.
 func BuildModifiesEdges(nodes []types.Node) []types.Edge {
-	byFile := make(map[string][]int, 64)
-	for i := range nodes {
-		n := &nodes[i]
-		if n.Type == types.NodeHunk {
-			continue
-		}
-		if !modifiesNodeWhitelist[n.Type] {
-			continue
-		}
-		if n.FilePath == "" {
-			continue
-		}
-		byFile[n.FilePath] = append(byFile[n.FilePath], i)
-	}
-	if len(byFile) == 0 {
-		return nil
-	}
-	var out []types.Edge
-	for i := range nodes {
-		hunk := &nodes[i]
-		if hunk.Type != types.NodeHunk {
-			continue
-		}
-		candidates, ok := byFile[hunk.FilePath]
-		if !ok {
-			continue
-		}
-		hStart, hEnd := hunk.StartLine, hunk.EndLine
-		if hEnd < hStart {
-			hEnd = hStart
-		}
-		for _, ci := range candidates {
-			cand := &nodes[ci]
-			cStart, cEnd := cand.StartLine, cand.EndLine
-			if cEnd < cStart {
-				cEnd = cStart
-			}
-			if hStart > cEnd || cStart > hEnd {
-				continue
-			}
-			out = append(out, types.Edge{
-				Src:        hunk.ID,
-				Dst:        cand.ID,
-				Type:       types.EdgeModifies,
-				FilePath:   hunk.FilePath,
-				Line:       hunk.StartLine,
-				Count:      1,
-				Confidence: hunk.Confidence,
-			})
-		}
-	}
-	return out
+	return hunkmodifies.BuildEdges(nodes)
 }
 
