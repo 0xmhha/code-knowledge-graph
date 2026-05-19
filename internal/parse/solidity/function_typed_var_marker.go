@@ -96,7 +96,11 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 	// lights up the marker.
 	stateVarByContract := v.collectFunctionTypedStateVars()
 	pointerCallers := v.findFunctionPointerCallers(fnByID, stateVarByContract)
-	if len(affected) == 0 && len(pointerCallers) == 0 {
+	// W-C W8 V8 (2026-05-19): callers that PROPAGATE a function-
+	// typed value (assign to state var or pass as argument) without
+	// invoking it. Distinct from V4/V5/V6/V7 invocation paths.
+	pointerPropagators := v.findFunctionPointerPropagators(fnByID, stateVarByContract)
+	if len(affected) == 0 && len(pointerCallers) == 0 && len(pointerPropagators) == 0 {
 		return
 	}
 	for i := range v.nodes {
@@ -106,7 +110,119 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 		if pointerCallers[v.nodes[i].ID] {
 			v.nodes[i].HasFunctionPointerCall = true
 		}
+		if pointerPropagators[v.nodes[i].ID] {
+			v.nodes[i].HasFunctionPointerPropagation = true
+		}
 	}
+}
+
+// findFunctionPointerPropagators — W-C W8 V8 (2026-05-19). Walks
+// every assignment_expression and call_expression in the file. For
+// assignments, checks whether the RHS is a bare identifier matching
+// a function-typed name in scope (fnByID for params/locals,
+// stateVarByContract for state vars on the enclosing contract).
+// For call_expressions, scans each call_argument for the same
+// pattern. Returns the set of callable IDs that have at least one
+// such propagation site.
+//
+// Invocations (`name(...)`) are NOT propagation — those are
+// handled by findFunctionPointerCallers. Pure read access without
+// assignment / pass-through (e.g. `(handler)` on its own) also
+// stays out of scope; only RHS-of-assignment and call-argument
+// positions count as propagation.
+func (v *declVisitor) findFunctionPointerPropagators(
+	fnByID map[string]map[string]bool,
+	stateVarByContract map[string]map[string]bool,
+) map[string]bool {
+	if len(fnByID) == 0 && len(stateVarByContract) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+
+	// Helper closure: given an identifier node + the call_expression
+	// node it sits inside, walk up to the enclosing function and
+	// mark if the identifier matches a fn-typed name in scope.
+	markIfFnTyped := func(idNode *sitter.Node) {
+		if idNode == nil || idNode.Kind() != "identifier" {
+			return
+		}
+		fnQ, fnStart, ok := nearestFunctionQnameAndStart(idNode, v.src)
+		if !ok {
+			return
+		}
+		fnID := parse.MakeID(fnQ, "sol", fnStart)
+		name := idNode.Utf8Text(v.src)
+		if pool, has := fnByID[fnID]; has && pool[name] {
+			out[fnID] = true
+			return
+		}
+		contract := nearestContractName(idNode, v.src)
+		if contract != "" {
+			if pool, has := stateVarByContract[contract]; has && pool[name] {
+				out[fnID] = true
+			}
+		}
+	}
+
+	// Pass 1: assignments. RHS bare identifier of fn-typed name.
+	const aq = `(assignment_expression) @assign`
+	if query, qErr := sitter.NewQuery(v.lang, aq); qErr == nil {
+		defer query.Close()
+		cur := sitter.NewQueryCursor()
+		defer cur.Close()
+		matches := cur.Matches(query, v.root, v.src)
+		names := query.CaptureNames()
+		for {
+			m := matches.Next()
+			if m == nil {
+				break
+			}
+			for _, c := range m.Captures {
+				if names[c.Index] != "assign" {
+					continue
+				}
+				assignNode := c.Node
+				right := assignNode.ChildByFieldName("right")
+				right = unwrapExpression(right)
+				markIfFnTyped(right)
+			}
+		}
+	}
+
+	// Pass 2: call arguments.
+	const cq = `(call_expression) @call`
+	query, qErr := sitter.NewQuery(v.lang, cq)
+	if qErr != nil {
+		return out
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		for _, c := range m.Captures {
+			if names[c.Index] != "call" {
+				continue
+			}
+			callNode := c.Node
+			// Iterate `call_argument` children — each is an
+			// expression wrapping the actual argument node.
+			for i := uint(0); i < callNode.NamedChildCount(); i++ {
+				child := callNode.NamedChild(i)
+				if child == nil || child.Kind() != "call_argument" {
+					continue
+				}
+				arg := unwrapExpression(child.NamedChild(0))
+				markIfFnTyped(arg)
+			}
+		}
+	}
+	return out
 }
 
 // collectFunctionTypedStateVars returns (contractName -> set of

@@ -6,6 +6,51 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W-C W8 V8 — function pointer propagation marker. fires when a
+// callable assigns a fn-typed value to a state var, or passes it
+// as an argument to another call, WITHOUT invoking it.
+// HasFunctionPointerCall covers invocation; V8 covers the
+// orthogonal propagation axis. assignTo / forwardArg / register
+// all propagate; invokeOnly invokes (so V8 marker stays false
+// there).
+func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "propagation.sol")
+
+	want := map[string]struct {
+		propagation bool
+		invocation  bool
+	}{
+		"Propagator.assignTo":   {propagation: true, invocation: false},
+		"Propagator.forwardArg": {propagation: true, invocation: false},
+		"Propagator.register":   {propagation: true, invocation: false},
+		"Propagator.invokeOnly": {propagation: false, invocation: true},
+	}
+	got := map[string]struct {
+		propagation bool
+		invocation  bool
+	}{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = struct {
+				propagation bool
+				invocation  bool
+			}{n.HasFunctionPointerPropagation, n.HasFunctionPointerCall}
+		}
+	}
+	for qn, w := range want {
+		g := got[qn]
+		if g.propagation != w.propagation {
+			t.Errorf("%s HasFunctionPointerPropagation: got %v want %v", qn, g.propagation, w.propagation)
+		}
+		if g.invocation != w.invocation {
+			t.Errorf("%s HasFunctionPointerCall: got %v want %v", qn, g.invocation, w.invocation)
+		}
+	}
+}
+
 // W-C W8 V7 — inherited function-typed state-var invocation.
 // Hub extends Base; Base declares `onAction`. Caller does
 // `h.onAction(x)` where h is Hub-typed. Pre-V7 the lookup missed

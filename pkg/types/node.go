@@ -103,4 +103,14 @@ type Node struct {
 	// but downstream tooling should surface the diagnostic so the
 	// developer notices the would-be-rejected hierarchy.
 	HasInheritanceMROFallback bool `json:"has_inheritance_mro_fallback,omitempty"`
+	// HasFunctionPointerPropagation (W-C W8 V8, 2026-05-19): true
+	// when a callable propagates a function-typed value without
+	// invoking it — assigning it to a state variable, passing it
+	// as an argument to another call, or both. Distinct from
+	// HasFunctionPointerCall (which marks invocation) and from
+	// HasFunctionTypedVar (which marks declaration). Security
+	// tooling tracking indirect-dispatch surfaces uses all three
+	// together: declaration + propagation + invocation = the full
+	// life-cycle of a function pointer through the contract.
+	HasFunctionPointerPropagation bool `json:"has_function_pointer_propagation,omitempty"`
 }
