@@ -184,6 +184,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				// function by its qualified name. Bare-override resolution
 				// uses the same index, scoped by parent contract name.
 				funcByQName[n.QualifiedName] = append(funcByQName[n.QualifiedName], n.ID)
+				// W-C W6 V3 (2026-05-19): index free functions (qname ==
+				// name, no enclosing container) under byName[NodeFunction]
+				// so resolveUsingForRef's NodeFunction fallback can join
+				// the operator-form / free-function recovery walkers'
+				// PendingRefs. Restricted to file-scope functions to
+				// avoid binding to a same-named contract method when the
+				// developer wrote `using {mul as *} for T` expecting the
+				// free function.
+				if n.QualifiedName == n.Name {
+					add(types.NodeFunction, n.Name, n.ID)
+				}
 			}
 		}
 	}
@@ -997,6 +1008,14 @@ func resolveUsingForRef(
 	nodeFile map[string]string,
 ) (types.Edge, bool) {
 	ids := byName[types.NodeContract][pr.TargetQName]
+	// W-C W6 V3 (2026-05-19): Sol 0.8.13+ `using {f as +} for T;`
+	// allows free-function targets (`f` resolves to a NodeFunction
+	// at file scope). When the NodeContract lookup misses, fall
+	// back to NodeFunction so the operator-form / free-function
+	// recovery walkers can produce the binding edge they emitted.
+	if len(ids) == 0 {
+		ids = byName[types.NodeFunction][pr.TargetQName]
+	}
 	if len(ids) == 0 {
 		return types.Edge{}, false
 	}

@@ -6,66 +6,52 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W-C W6 V2.5 — operator-form using directive grammar exploration.
+// W-C W6 V2.5 / V3 — operator-form using directive with free-function
+// target.
 //
-// Solidity 0.8.13+ allows file-level `using {f1, f2} for T;` (function-
-// alias form), and 0.8.19+ extends this with user-defined operator
-// bindings: `using {add as +, sub as -} for uint256;`. Tree-sitter
-// v1.2.13 has a `using_alias` node type that includes
-// `user_definable_operator` children for the operator-form variant.
-//
-// V0 query (`(type_alias (identifier) @lib)`) matches only the
-// type-alias variant (the legacy `using SafeMath for ...` form). The
-// using_alias variant is ignored — V0 documented this as grammar /
-// scope limitation. V2.5 explores empirically what happens when this
-// grammar piece IS in source: does the file parse cleanly, are
-// surrounding declarations still indexed, are there phantom edges?
-//
-// V2.5 locks the V0/V1/V2 behavior: operator-form directives produce
-// 0 EdgeUsesFor (V0 query misses them) but the rest of the file
-// (functions, contracts) still indexes normally. V3+ would need to
-// either upgrade the grammar or extend queryUsingFor to match
-// `using_alias` children.
+// V2.5 added the file-level operator-form recovery walker, which
+// parses the braced body of `using {mul as *} for uint256 global;`
+// from raw ERROR text and emits PendingRefs. The original V2.5 lock
+// asserted those refs drop at resolution because resolveUsingForRef
+// only looked up byName[NodeContract]. W6 V3 adds a NodeFunction
+// fallback so the free-function form resolves to the free function
+// itself, flipping the historic 0-edge lock to one EdgeUsesFor per
+// non-library container.
 
-// TestUsingForV250_OperatorFormLimitation — Operator-form `using
-// {mul as *} for uint256 global;` doesn't emit EdgeUsesFor under
-// V0 query. Caller `Calc.compute` uses operator `*` (which would
-// dispatch to `mul` in Sol 0.8.19+ semantics) but our graph doesn't
-// surface that linkage. Locks the known limitation.
-func TestUsingForV250_OperatorFormLimitation(t *testing.T) {
+// TestUsingForV250_OperatorFormFreeFunctionResolves — `using {mul
+// as *} for uint256 global;` at file scope now resolves through to
+// the free function `mul` (NodeFunction). Calc is the only non-
+// library container in the file and gets the binding edge.
+func TestUsingForV250_OperatorFormFreeFunctionResolves(t *testing.T) {
 	nodes, edges := parseResolveOneSol(t, "testdata/using_for_v250", "operator_form.sol")
 
-	// (a) No EdgeUsesFor from this file — operator-form directive
-	// alone is the only `using` here, and V0 query misses it.
-	for _, e := range edges {
-		if e.Type == types.EdgeUsesFor {
-			t.Errorf("unexpected EdgeUsesFor in operator-form fixture (V2.5 limitation lock): %+v", e)
-		}
+	byID := map[string]types.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
 	}
 
-	// (b) The function `mul` and contract `Calc` should still index
-	// — the using directive's parsing state shouldn't cascade to
-	// surrounding declarations.
-	seenMul := false
-	seenCalc := false
-	seenCompute := false
-	for _, n := range nodes {
-		switch n.QualifiedName {
-		case "mul":
-			seenMul = true
-		case "Calc":
-			seenCalc = true
-		case "Calc.compute":
-			seenCompute = true
+	type uf struct{ src, dst string }
+	var got []uf
+	for _, e := range edges {
+		if e.Type != types.EdgeUsesFor {
+			continue
 		}
+		got = append(got, uf{src: byID[e.Src].Name, dst: byID[e.Dst].Name})
 	}
-	if !seenMul {
-		t.Errorf("free function `mul` not indexed (V2.5 surround-safety)")
+
+	want := uf{src: "Calc", dst: "mul"}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("expected one EdgeUsesFor %+v, got %v", want, got)
 	}
-	if !seenCalc {
-		t.Errorf("contract `Calc` not indexed (V2.5 surround-safety)")
+
+	wantNodes := []string{"mul", "Calc", "Calc.compute"}
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		seen[n.QualifiedName] = true
 	}
-	if !seenCompute {
-		t.Errorf("function `Calc.compute` not indexed (V2.5 surround-safety)")
+	for _, qn := range wantNodes {
+		if !seen[qn] {
+			t.Errorf("surround-safety: %q not indexed", qn)
+		}
 	}
 }

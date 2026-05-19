@@ -6,71 +6,45 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// W-C W6 V2.9 — contract-scope bare free-function alias probe.
+// W-C W6 V2.9 — contract-scope bare free-function alias.
 //
-// Completes the alias-shape axis at contract scope. V2.6 / V2.7 /
-// V2.9 form a triplet:
+// Alias-shape axis at contract scope after the W6 V3 NodeFunction
+// fallback in resolveUsingForRef:
 //
 //   alias-entry shape              | example                | result
 //   -------------------------------+------------------------+--------
 //   library-qualified (Lib.member) | {Math.add, Math.sub}   | V2.6: 1
-//   operator-form (Lib.m as +)     | {Math.add as +}        | V2.7: 0
-//   bare (free-fn name only)       | {addPlusOne}           | V2.9: ?
+//   operator-form (Lib.m as +)     | {Math.add as +}        | V2.20: 1
+//   bare (free-fn name only)       | {addPlusOne}           | V2.9:  1 (V3)
 //
-// V0 query `(using_directive (type_alias (identifier) @lib) ...)` was
-// shown by V2.6 to incidentally match library-qualified entries —
-// tree-sitter v1.2.13 wraps `Lib.member` such that `Lib` is captured
-// as the `@lib` identifier. V2.7 showed the operator suffix breaks
-// that match by changing the alias-entry node shape.
-//
-// V2.9 asks whether the bare form (no qualifier, no operator)
-// matches V0. The fixture predicts 0 EdgeUsesFor under both
-// hypotheses:
-//   - If V0 captures `addPlusOne` as @lib, the byName lookup
-//     (expects a Contract / library) fails → PendingRef stays
-//     unresolved.
-//   - If V0 doesn't capture at all, no PendingRef is emitted in
-//     the first place.
-//
-// Either way, the bare alias form has no library to bind to, so
-// the using-for binding can't surface as an EdgeUsesFor in the
-// current schema (EdgeUsesFor is Contract → Contract/library).
+// V0 query `(using_directive (type_alias (identifier) @lib) ...)`
+// captures `addPlusOne` as the @lib identifier. Pre-V3, the
+// resolveUsingForRef lookup against byName[NodeContract] missed
+// (free functions are NodeFunction). The V3 fallback to
+// byName[NodeFunction] now resolves to the free function, lifting
+// the historic 0-edge lock to one EdgeUsesFor per container.
 
 // TestUsingForV290_ContractScopeBareFunctionAlias — `contract Calc
-// { using {addPlusOne} for uint256; }`. Locks empirical V0/V1/V2
-// behavior for the bare free-function alias form.
-//
-// First run on 2026-05-13 (tree-sitter-solidity v1.2.13):
-//   - 0 EdgeUsesFor — bare alias entry can't produce a valid
-//     EdgeUsesFor (no library to point to).
-//   - 0 EdgeCalls via using-for path — V1.0+ dispatch chain has
-//     no `lib.method` resolution candidate for a bare alias.
-//
-// Surround-safety: free function `addPlusOne` (qname identical to
-// its name since it lives at file scope), contract `Calc`, and
-// function `Calc.compute` should all still index.
-//
-// Triplet result at contract scope (empirically locked):
-//   V2.6 library-qualified  → 1 EdgeUsesFor (V0 incidental)
-//   V2.7 operator-form      → 0 EdgeUsesFor (AST shape)
-//   V2.9 bare free-function → 0 EdgeUsesFor (no library target)
+// { using {addPlusOne} for uint256; }` now resolves to the free
+// function `addPlusOne`.
 func TestUsingForV290_ContractScopeBareFunctionAlias(t *testing.T) {
 	nodes, edges := parseResolveOneSol(t, "testdata/using_for_v290", "probe_bare_function_alias.sol")
 
-	// (a) Lock: 0 EdgeUsesFor for bare free-function alias.
-	edgeCount := 0
+	// (a) Lock: 1 EdgeUsesFor (Calc → addPlusOne) after W6 V3.
+	byID := map[string]types.Node{}
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
+	type uf struct{ src, dst string }
+	var got []uf
 	for _, e := range edges {
 		if e.Type == types.EdgeUsesFor {
-			edgeCount++
+			got = append(got, uf{src: byID[e.Src].Name, dst: byID[e.Dst].Name})
 		}
 	}
-	if edgeCount != 0 {
-		t.Errorf("expected 0 EdgeUsesFor for V2.9 bare alias, got %d", edgeCount)
-		for _, e := range edges {
-			if e.Type == types.EdgeUsesFor {
-				t.Logf("  unexpected edge: %+v", e)
-			}
-		}
+	want := uf{src: "Calc", dst: "addPlusOne"}
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("expected one EdgeUsesFor %+v, got %v", want, got)
 	}
 
 	// (b) Lock: 0 EdgeCalls via using-for path. The bare alias
