@@ -92,11 +92,21 @@ func (v *declVisitor) runFileLevelOperatorForm() {
 				continue
 			}
 			seenLib[libName] = true
+			// W-C W6 V5 (2026-05-19): when the entry's leading
+			// identifier is a namespace alias with a recorded source
+			// path, attach the path to the binding PendingRef as a
+			// homonym disambiguation hint. resolveUsingForRef
+			// prefers candidates whose file path matches the hint
+			// before falling back to pickSameFileCandidate.
+			target := libName
+			if path, has := v.namespacePaths[entry.leading]; has {
+				target = libName + "||" + path
+			}
 			for _, srcID := range containerIDs {
 				v.pending = append(v.pending, parse.PendingRef{
 					SrcID:        srcID,
 					EdgeType:     types.EdgeUsesFor,
-					TargetQName:  libName,
+					TargetQName:  target,
 					Line:         line,
 					ByteOffset:   byteOff,
 					DispatchKind: dispatchKindUsingFor,

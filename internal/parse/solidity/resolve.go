@@ -1050,20 +1050,37 @@ func resolveUsingForRef(
 	byName map[types.NodeType]map[string][]string,
 	nodeFile map[string]string,
 ) (types.Edge, bool) {
-	ids := byName[types.NodeContract][pr.TargetQName]
+	// W-C W6 V5 (2026-05-19): the file-level operator-form walker
+	// can attach a "||<importPath>" disambiguation hint to the
+	// PendingRef's TargetQName when the entry came from a
+	// namespace alias. Split here so the rest of the lookup uses
+	// the bare library / free-function name.
+	target := pr.TargetQName
+	pathHint := ""
+	if idx := strings.Index(target, "||"); idx >= 0 {
+		pathHint = target[idx+2:]
+		target = target[:idx]
+	}
+	ids := byName[types.NodeContract][target]
 	// W-C W6 V3 (2026-05-19): Sol 0.8.13+ `using {f as +} for T;`
 	// allows free-function targets (`f` resolves to a NodeFunction
 	// at file scope). When the NodeContract lookup misses, fall
 	// back to NodeFunction so the operator-form / free-function
 	// recovery walkers can produce the binding edge they emitted.
 	if len(ids) == 0 {
-		ids = byName[types.NodeFunction][pr.TargetQName]
+		ids = byName[types.NodeFunction][target]
 	}
 	if len(ids) == 0 {
 		return types.Edge{}, false
 	}
 	srcFile := nodeFile[pr.SrcID]
-	dstID := pickSameFileCandidate(ids, srcFile, nodeFile)
+	dstID := ""
+	if pathHint != "" {
+		dstID = pickByPathHint(ids, pathHint, nodeFile)
+	}
+	if dstID == "" {
+		dstID = pickSameFileCandidate(ids, srcFile, nodeFile)
+	}
 	conf := types.ConfExtracted
 	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
 		conf = types.ConfInferred
@@ -1072,6 +1089,29 @@ func resolveUsingForRef(
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeUsesFor,
 		Line: pr.Line, Count: 1, Confidence: conf,
 	}, true
+}
+
+// pickByPathHint returns the candidate ID whose file path matches
+// the hint (exact match preferred, suffix match accepted). Used by
+// W6 V5 to disambiguate free-function homonyms when the using
+// directive came from a namespace alias whose source path is known.
+// Returns "" when no candidate matches the hint, signalling the
+// caller to fall back to pickSameFileCandidate.
+func pickByPathHint(ids []string, pathHint string, nodeFile map[string]string) string {
+	// Strip a leading `./` from the hint so a recorded path of
+	// `./math.sol` matches a nodeFile of `math.sol`.
+	hint := strings.TrimPrefix(pathHint, "./")
+	for _, id := range ids {
+		if nodeFile[id] == hint {
+			return id
+		}
+	}
+	for _, id := range ids {
+		if strings.HasSuffix(nodeFile[id], "/"+hint) || strings.HasSuffix(nodeFile[id], hint) {
+			return id
+		}
+	}
+	return ""
 }
 
 // lookupReceiverType resolves a receiver identifier to its declared type.

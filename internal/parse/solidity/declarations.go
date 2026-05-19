@@ -35,6 +35,13 @@ type declVisitor struct {
 	// is skipped (otherwise Pass 2 byName[NodeContract] would emit a
 	// false-positive EdgeUsesFor against any unrelated contract named L).
 	namespaceAliases map[string]bool
+	// W-C W6 V5 (2026-05-19): namespace alias -> source path text
+	// captured from `import "./path.sol" as Alias;`. Used during
+	// using-for resolution to disambiguate free-function homonyms:
+	// when `using {M.mul as +}` reaches Pass 2 with multiple `mul`
+	// candidates across files, the resolver prefers a candidate
+	// whose file path matches M's recorded source path.
+	namespacePaths map[string]string
 	// W-C W9 V5 (2026-05-19): per-file struct → byte footprint when
 	// declared as a storage state variable. Populated by
 	// computeStructSizes (called once before runStateVarDecl) by
@@ -59,6 +66,7 @@ func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.
 		abi:              map[string][]ABISig{},
 		importAliases:    map[string]string{},
 		namespaceAliases: map[string]bool{},
+		namespacePaths:   map[string]string{},
 		structSizes:      map[string]int{},
 	}
 	fileQ := "file:" + rel
@@ -728,6 +736,19 @@ func (v *declVisitor) runImportAliases() {
 		if child == nil || child.Kind() != "import_directive" {
 			continue
 		}
+		// W-C W6 V5 (2026-05-19): capture the directive's source path
+		// (string node) for namespace-alias correlation. The walk
+		// below records the leading `string` child once and pairs it
+		// with any `alias` that turns out to be a namespace alias
+		// (whole-file form, no preceding `import_name`).
+		sourcePath := ""
+		for j := uint(0); j < uint(child.ChildCount()); j++ {
+			c := child.Child(j)
+			if c != nil && c.Kind() == "string" {
+				sourcePath = trimStringQuotes(c.Utf8Text(v.src))
+				break
+			}
+		}
 		// Single-pass walk in source order. `lastImportName` holds
 		// the most recently seen `import_name` (empty if none, or
 		// if already consumed by a paired `alias`). An `alias`
@@ -753,10 +774,28 @@ func (v *declVisitor) runImportAliases() {
 				} else {
 					// Whole-file namespace alias (V1.29).
 					v.namespaceAliases[aliasName] = true
+					if sourcePath != "" {
+						v.namespacePaths[aliasName] = sourcePath
+					}
 				}
 			}
 		}
 	}
+}
+
+// trimStringQuotes strips a single layer of surrounding single or
+// double quotes from a Sol string literal text. Defensive against
+// the rare case where tree-sitter exposes the literal with or
+// without quote characters depending on grammar revision.
+func trimStringQuotes(s string) string {
+	if len(s) >= 2 {
+		first := s[0]
+		last := s[len(s)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 // runConstructorDecl — W-C W6 V1.23 (2026-05-12). Emits one
