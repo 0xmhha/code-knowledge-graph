@@ -6,6 +6,43 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W-C W10 V8 — self-reference cast routes to HasSelfReentrantCall
+// instead of HasExternalCall. `payable(this).call(...)` and
+// `address(this).call(...)` re-enter the same contract — the
+// security signal is reentrancy, not arbitrary-address dispatch.
+// Arbitrary-address cast keeps the V5 HasExternalCall behaviour.
+func TestExternalCallCast_SelfReferenceMarker(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/yul_receiver", "sol_self_cast.sol")
+
+	type pair struct {
+		external, selfReentrant bool
+	}
+	want := map[string]pair{
+		"SelfCaster.reentrant":      {external: false, selfReentrant: true},
+		"SelfCaster.addressSelf":    {external: false, selfReentrant: true},
+		"SelfCaster.externalRelay":  {external: true, selfReentrant: false},
+		"SelfCaster.noop":           {external: false, selfReentrant: false},
+	}
+	got := map[string]pair{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = pair{
+				external:      n.HasExternalCall,
+				selfReentrant: n.HasSelfReentrantCall,
+			}
+		}
+	}
+	for qn, w := range want {
+		g := got[qn]
+		if g != w {
+			t.Errorf("%s markers: got %+v want %+v", qn, g, w)
+		}
+	}
+}
+
 // W-C W10 V5 — cast / wrapper shapes (`address(x).call(...)` and
 // `payable(x).call(...)`) light up HasExternalCall on the enclosing
 // callable. The cast itself is sufficient evidence of arbitrary-

@@ -33,6 +33,7 @@ type nodeAttrs struct {
 	HasExternalCall               bool     `json:"has_external_call,omitempty"`
 	HasInheritanceMROFallback     bool     `json:"has_inheritance_mro_fallback,omitempty"`
 	HasFunctionPointerPropagation bool     `json:"has_function_pointer_propagation,omitempty"`
+	HasSelfReentrantCall          bool     `json:"has_self_reentrant_call,omitempty"`
 }
 
 // marshalNodeAttrs serialises a Node's marker surface into the
@@ -52,6 +53,7 @@ func marshalNodeAttrs(n *types.Node) string {
 		HasExternalCall:               n.HasExternalCall,
 		HasInheritanceMROFallback:     n.HasInheritanceMROFallback,
 		HasFunctionPointerPropagation: n.HasFunctionPointerPropagation,
+		HasSelfReentrantCall:          n.HasSelfReentrantCall,
 	}
 	if isZeroAttrs(a) {
 		return ""
@@ -85,6 +87,7 @@ func unmarshalNodeAttrs(blob string, n *types.Node) {
 	n.HasExternalCall = a.HasExternalCall
 	n.HasInheritanceMROFallback = a.HasInheritanceMROFallback
 	n.HasFunctionPointerPropagation = a.HasFunctionPointerPropagation
+	n.HasSelfReentrantCall = a.HasSelfReentrantCall
 }
 
 func isZeroAttrs(a nodeAttrs) bool {
@@ -98,5 +101,6 @@ func isZeroAttrs(a nodeAttrs) bool {
 		!a.HasFunctionPointerCall &&
 		!a.HasExternalCall &&
 		!a.HasInheritanceMROFallback &&
-		!a.HasFunctionPointerPropagation
+		!a.HasFunctionPointerPropagation &&
+		!a.HasSelfReentrantCall
 }

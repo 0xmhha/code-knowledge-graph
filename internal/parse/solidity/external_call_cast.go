@@ -52,6 +52,10 @@ func (v *declVisitor) runExternalCallCastMarker() {
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	affected := map[string]bool{}
+	// W-C W10 V8 (2026-05-19): track self-reference casts
+	// separately so HasSelfReentrantCall takes precedence over
+	// HasExternalCall when the cast argument is `this`.
+	selfAffected := map[string]bool{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -85,17 +89,54 @@ func (v *declVisitor) runExternalCallCastMarker() {
 			if !ok {
 				continue
 			}
-			affected[parse.MakeID(fnQ, "sol", fnStart)] = true
+			id := parse.MakeID(fnQ, "sol", fnStart)
+			if isSelfCast(inner, v.src) {
+				selfAffected[id] = true
+			} else {
+				affected[id] = true
+			}
 		}
 	}
-	if len(affected) == 0 {
+	if len(affected) == 0 && len(selfAffected) == 0 {
 		return
 	}
 	for i := range v.nodes {
 		if affected[v.nodes[i].ID] {
 			v.nodes[i].HasExternalCall = true
 		}
+		if selfAffected[v.nodes[i].ID] {
+			v.nodes[i].HasSelfReentrantCall = true
+		}
 	}
+}
+
+// isSelfCast reports whether a cast wrapper's argument is the
+// `this` keyword (a bare identifier or wrapped expression
+// resolving to `this`). The cast `payable(this).call(...)` /
+// `address(this).call(...)` re-enters the same contract, so the
+// security signal is reentrancy (HasSelfReentrantCall) rather
+// than arbitrary-address dispatch (HasExternalCall).
+func isSelfCast(castNode *sitter.Node, src []byte) bool {
+	if castNode == nil {
+		return false
+	}
+	// Find the cast's single call_argument child.
+	for i := uint(0); i < castNode.NamedChildCount(); i++ {
+		child := castNode.NamedChild(i)
+		if child == nil || child.Kind() != "call_argument" {
+			continue
+		}
+		arg := unwrapExpression(child.NamedChild(0))
+		if arg == nil {
+			return false
+		}
+		// Sol's `this` is exposed as identifier "this" in the AST.
+		if arg.Kind() == "identifier" && arg.Utf8Text(src) == "this" {
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // isAddressCastCall reports whether n is one of Sol's address-cast

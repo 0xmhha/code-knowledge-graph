@@ -113,4 +113,13 @@ type Node struct {
 	// together: declaration + propagation + invocation = the full
 	// life-cycle of a function pointer through the contract.
 	HasFunctionPointerPropagation bool `json:"has_function_pointer_propagation,omitempty"`
+	// HasSelfReentrantCall (W-C W10 V8, 2026-05-19): true when a
+	// callable performs a low-level call whose receiver is a self
+	// cast — `payable(this).call(...)` or `address(this).call(...)`.
+	// The receiver is the same contract, so this isn't arbitrary-
+	// address dispatch (HasExternalCall would mislead); it IS a
+	// reentrancy surface because the call re-enters the contract's
+	// fallback() / receive() path. Security tooling that scans for
+	// the two surfaces separately consumes both markers.
+	HasSelfReentrantCall bool `json:"has_self_reentrant_call,omitempty"`
 }
