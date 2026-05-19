@@ -1,9 +1,12 @@
 package solidity
 
 import (
+	"strings"
+
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // Sol W-C W8 V3 (2026-05-19) — function-typed parameter / local marker.
@@ -87,7 +90,12 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 			}
 		}
 	}
-	pointerCallers := v.findFunctionPointerCallers(fnByID)
+	// W-C W8 V5 (2026-05-19): collect contract-scope function-typed
+	// state variables so a call_expression whose callee resolves to
+	// a state-var name (`handler(x)` inside the same contract) also
+	// lights up the marker.
+	stateVarByContract := v.collectFunctionTypedStateVars()
+	pointerCallers := v.findFunctionPointerCallers(fnByID, stateVarByContract)
 	if len(affected) == 0 && len(pointerCallers) == 0 {
 		return
 	}
@@ -101,19 +109,51 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 	}
 }
 
-// findFunctionPointerCallers — W-C W8 V4. Walks every call_expression
-// whose callee unwraps to a bare identifier and checks whether the
-// identifier matches a function-typed parameter or local declared in
-// the enclosing callable. Returns the set of callable IDs that
-// perform at least one function-pointer invocation.
+// collectFunctionTypedStateVars returns (contractName -> set of
+// state-var names declared with a function type), built from the
+// IsFunctionTyped flag W8 V2 stamps on NodeField rows. Used by the
+// W8 V5 caller walk to recognise `someStateVar(args)` invocations
+// inside contract methods as function-pointer calls.
+func (v *declVisitor) collectFunctionTypedStateVars() map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	for _, n := range v.nodes {
+		if n.Type != types.NodeField || !n.IsFunctionTyped {
+			continue
+		}
+		dot := strings.IndexByte(n.QualifiedName, '.')
+		if dot <= 0 || dot == len(n.QualifiedName)-1 {
+			continue
+		}
+		contract := n.QualifiedName[:dot]
+		name := n.QualifiedName[dot+1:]
+		if out[contract] == nil {
+			out[contract] = map[string]bool{}
+		}
+		out[contract][name] = true
+	}
+	return out
+}
+
+// findFunctionPointerCallers — W-C W8 V4/V5. Walks every
+// call_expression whose callee unwraps to a bare identifier and
+// checks whether the identifier matches:
 //
-// The walker uses the per-function index built in the V3 marker pass
-// (fnByID), so a fresh AST walk is enough — no Pass 2 type-map join
-// required. State-variable function pointers are out of scope for
-// V4: their dispatch goes through a member_expression receiver shape
-// rather than a bare-identifier call_expression callee.
-func (v *declVisitor) findFunctionPointerCallers(fnByID map[string]map[string]bool) map[string]bool {
-	if len(fnByID) == 0 {
+//   - a function-typed parameter or local declared in the enclosing
+//     callable (V4 — per-function fnByID set), OR
+//   - a function-typed state variable declared on the enclosing
+//     contract (V5 — per-contract stateVarByContract set).
+//
+// Returns the set of callable IDs that perform at least one
+// function-pointer invocation. Bare-identifier callees only —
+// state-var dispatch through `obj.field(args)` is still out of
+// scope (no member_expression handling) since IsFunctionTyped at
+// contract scope means the variable is addressable as a bare name
+// from any method on that contract.
+func (v *declVisitor) findFunctionPointerCallers(
+	fnByID map[string]map[string]bool,
+	stateVarByContract map[string]map[string]bool,
+) map[string]bool {
+	if len(fnByID) == 0 && len(stateVarByContract) == 0 {
 		return nil
 	}
 	const q = `(call_expression) @call`
@@ -146,12 +186,16 @@ func (v *declVisitor) findFunctionPointerCallers(fnByID map[string]map[string]bo
 				continue
 			}
 			fnID := parse.MakeID(fnQ, "sol", fnStart)
-			pool, has := fnByID[fnID]
-			if !has {
+			name := ident.Utf8Text(v.src)
+			if pool, has := fnByID[fnID]; has && pool[name] {
+				out[fnID] = true
 				continue
 			}
-			if pool[ident.Utf8Text(v.src)] {
-				out[fnID] = true
+			contract := nearestContractName(&callNode, v.src)
+			if contract != "" {
+				if pool, has := stateVarByContract[contract]; has && pool[name] {
+					out[fnID] = true
+				}
 			}
 		}
 	}
