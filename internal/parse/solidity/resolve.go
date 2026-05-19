@@ -498,13 +498,15 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// care about arbitrary-address dispatch surfaces specifically.
 	externalCallSrcs := map[string]bool{}
 
-	// W-C W8 V6 (2026-05-19): collect callable IDs that invoked a
-	// cross-contract function-pointer (receiver typed as another
-	// contract whose method is a function-typed state variable) so
-	// we can mark HasFunctionPointerCall after Pass 2b completes.
+	// W-C W8 V6 (2026-05-19) / V7 (2026-05-19): collect callable IDs
+	// that invoked a cross-contract function-pointer (receiver typed
+	// as another contract whose method — or an inherited method — is
+	// a function-typed state variable) so we can mark
+	// HasFunctionPointerCall after Pass 2b completes.
 	fnPointerCallSrcs := map[string]bool{}
-	// Index function-typed NodeField rows by (contractName, fieldName)
-	// for O(1) lookup during cross-contract dispatch resolution.
+	// Index function-typed NodeField rows by (contractName,
+	// fieldName) for O(1) lookup during cross-contract dispatch
+	// resolution.
 	fnTypedFields := map[string]map[string]bool{}
 	for _, n := range out.Nodes {
 		if n.Type != types.NodeField || !n.IsFunctionTyped {
@@ -521,6 +523,12 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 		fnTypedFields[contract][field] = true
 	}
+	// W-C W8 V7 (2026-05-19): the C3 MRO is reused here to walk
+	// inherited function-typed fields. Computed once for the entire
+	// resolve pass — applyInheritanceSlotOffset above also calls
+	// computeC3Linearization, but caching the result here avoids a
+	// second pass over the parents map for V7's lookup branch.
+	mroByContractID := computeC3Linearization(parents)
 
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
@@ -660,7 +668,31 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				if typeName == "" {
 					continue
 				}
+				// V6: direct contract hit.
 				if fields, has := fnTypedFields[typeName]; has && fields[methodName] {
+					fnPointerCallSrcs[pr.SrcID] = true
+					continue
+				}
+				// V7: walk the receiver type's C3 MRO so an
+				// inherited function-typed state-var also lights
+				// up the marker.
+				matched := false
+				for _, cid := range byName[types.NodeContract][typeName] {
+					for _, ancestorID := range mroByContractID[cid] {
+						ancestorName := containerNameByID[ancestorID]
+						if ancestorName == "" || ancestorName == typeName {
+							continue
+						}
+						if fields, has := fnTypedFields[ancestorName]; has && fields[methodName] {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						break
+					}
+				}
+				if matched {
 					fnPointerCallSrcs[pr.SrcID] = true
 				}
 				continue

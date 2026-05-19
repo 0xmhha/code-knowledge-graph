@@ -6,6 +6,26 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W-C W8 V7 — inherited function-typed state-var invocation.
+// Hub extends Base; Base declares `onAction`. Caller does
+// `h.onAction(x)` where h is Hub-typed. Pre-V7 the lookup missed
+// because fnTypedFields only had Base, not Hub. V7 walks Hub's
+// C3 MRO so the marker fires.
+func TestFunctionTypedVar_InheritedCrossContractCall(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "inherited_cross_contract.sol")
+
+	var got bool
+	for _, n := range nodes {
+		if n.QualifiedName == "Caller.trigger" && n.Type == types.NodeFunction {
+			got = n.HasFunctionPointerCall
+			break
+		}
+	}
+	if !got {
+		t.Errorf("HasFunctionPointerCall on Caller.trigger: got false, want true (inherited fn-typed state-var)")
+	}
+}
+
 // W-C W8 V6 — HasFunctionPointerCall fires on cross-contract
 // function-pointer invocations: `h.onAction(x)` where `h` is a
 // state-var of type Hub and Hub.onAction is a function-typed
