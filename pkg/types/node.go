@@ -77,4 +77,13 @@ type Node struct {
 	// concrete target since function-typed locals can be reassigned
 	// across paths.
 	HasFunctionTypedVar bool `json:"has_function_typed_var,omitempty"`
+	// HasFunctionPointerCall (W-C W8 V4, 2026-05-19): true when a
+	// callable invokes a function pointer — a call_expression whose
+	// callee identifier resolves to a function-typed parameter or
+	// local variable in the same callable. Complements
+	// HasFunctionTypedVar: a function may declare a function-typed
+	// var without invoking it, or invoke a function-typed pointer
+	// passed from another scope. Together the two markers locate
+	// every callable involved in indirect dispatch.
+	HasFunctionPointerCall bool `json:"has_function_pointer_call,omitempty"`
 }

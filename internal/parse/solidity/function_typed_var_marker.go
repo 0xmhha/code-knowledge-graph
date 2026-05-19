@@ -49,6 +49,11 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 	defer cur.Close()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
+	// fnByID: enclosing function/modifier ID → set of identifier
+	// names this callable declares as function-typed (param or local).
+	// Used in the second pass to mark HasFunctionPointerCall on the
+	// same callable when a call_expression invokes one of these names.
+	fnByID := map[string]map[string]bool{}
 	affected := map[string]bool{}
 	for {
 		m := matches.Next()
@@ -71,17 +76,113 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 			if !ok {
 				continue
 			}
-			affected[parse.MakeID(fnQ, "sol", fnStart)] = true
+			fnID := parse.MakeID(fnQ, "sol", fnStart)
+			affected[fnID] = true
+			nameNode := node.ChildByFieldName("name")
+			if nameNode != nil {
+				if fnByID[fnID] == nil {
+					fnByID[fnID] = map[string]bool{}
+				}
+				fnByID[fnID][nameNode.Utf8Text(v.src)] = true
+			}
 		}
 	}
-	if len(affected) == 0 {
+	pointerCallers := v.findFunctionPointerCallers(fnByID)
+	if len(affected) == 0 && len(pointerCallers) == 0 {
 		return
 	}
 	for i := range v.nodes {
 		if affected[v.nodes[i].ID] {
 			v.nodes[i].HasFunctionTypedVar = true
 		}
+		if pointerCallers[v.nodes[i].ID] {
+			v.nodes[i].HasFunctionPointerCall = true
+		}
 	}
+}
+
+// findFunctionPointerCallers — W-C W8 V4. Walks every call_expression
+// whose callee unwraps to a bare identifier and checks whether the
+// identifier matches a function-typed parameter or local declared in
+// the enclosing callable. Returns the set of callable IDs that
+// perform at least one function-pointer invocation.
+//
+// The walker uses the per-function index built in the V3 marker pass
+// (fnByID), so a fresh AST walk is enough — no Pass 2 type-map join
+// required. State-variable function pointers are out of scope for
+// V4: their dispatch goes through a member_expression receiver shape
+// rather than a bare-identifier call_expression callee.
+func (v *declVisitor) findFunctionPointerCallers(fnByID map[string]map[string]bool) map[string]bool {
+	if len(fnByID) == 0 {
+		return nil
+	}
+	const q = `(call_expression) @call`
+	query, qErr := sitter.NewQuery(v.lang, q)
+	if qErr != nil {
+		return nil
+	}
+	defer query.Close()
+	cur := sitter.NewQueryCursor()
+	defer cur.Close()
+	matches := cur.Matches(query, v.root, v.src)
+	names := query.CaptureNames()
+	out := map[string]bool{}
+	for {
+		m := matches.Next()
+		if m == nil {
+			break
+		}
+		for _, c := range m.Captures {
+			if names[c.Index] != "call" {
+				continue
+			}
+			callNode := c.Node
+			ident := bareIdentifierCallee(&callNode)
+			if ident == nil {
+				continue
+			}
+			fnQ, fnStart, ok := nearestFunctionQnameAndStart(&callNode, v.src)
+			if !ok {
+				continue
+			}
+			fnID := parse.MakeID(fnQ, "sol", fnStart)
+			pool, has := fnByID[fnID]
+			if !has {
+				continue
+			}
+			if pool[ident.Utf8Text(v.src)] {
+				out[fnID] = true
+			}
+		}
+	}
+	return out
+}
+
+// bareIdentifierCallee returns the callee identifier of a
+// call_expression when the callee is a bare identifier (the
+// function-pointer invocation shape `local(args)`). Returns nil for
+// member_expression callees (`obj.method(args)`), parenthesised /
+// chained shapes, and type-cast wrappers — those are out of scope
+// for V4 since they don't directly target a function-typed param /
+// local declared in the same callable.
+func bareIdentifierCallee(callNode *sitter.Node) *sitter.Node {
+	if callNode == nil {
+		return nil
+	}
+	callee := callNode.ChildByFieldName("function")
+	if callee == nil {
+		return nil
+	}
+	for callee != nil && callee.Kind() == "expression" {
+		if callee.NamedChildCount() == 0 {
+			return nil
+		}
+		callee = callee.NamedChild(0)
+	}
+	if callee != nil && callee.Kind() == "identifier" {
+		return callee
+	}
+	return nil
 }
 
 // typeNameIsFunctionTyped checks whether a type_name AST node carries
