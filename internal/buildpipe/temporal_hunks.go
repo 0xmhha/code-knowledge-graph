@@ -487,11 +487,33 @@ func gzipPatch(b []byte) ([]byte, error) {
 // ≈ 35K comparisons, < 50 ms. Real go-stablenet (~9K hunks × ~190
 // candidates) ~1.7M ops — still sub-second.
 func emitModifiesEdges(g *graph.Graph) {
-	// Bucket whitelisted CodeNodes by file_path. Hunks aren't candidates
-	// for self-modifies even though they have a FilePath set.
+	newEdges := BuildModifiesEdges(g.Nodes)
+	if len(newEdges) > 0 {
+		g.Edges = append(g.Edges, newEdges...)
+	}
+}
+
+// BuildModifiesEdges computes the H2 line-overlap modifies edges for
+// the given node set without mutating it. For every NodeHunk it
+// scans whitelisted CodeNodes (FunctionLike + TypeLike + Field-ish,
+// per §4.2) in the same file and emits an EdgeModifies whenever the
+// [StartLine, EndLine] intervals overlap. The returned slice can be
+// appended onto a graph.Graph's edges (the buildpipe internal path)
+// or staged alongside synthetic nodes for evidence-layer integration
+// tests — same algorithm in both consumers, so a parser-level
+// change can't drift between them.
+//
+// Edges inherit Confidence from the hunk node (EXTRACTED for HEAD-
+// reachable hunks, AMBIGUOUS for the unreachable-history track).
+// Per design §4.1, candidates iterate in their original parser-
+// emission order (file-path bucket preserves insertion); hunks
+// iterate in nodes-slice order, so consumers wanting deterministic
+// output should sort their hunk set up front (buildpipe sorts via
+// buildHunkNodes' stable ID sort).
+func BuildModifiesEdges(nodes []types.Node) []types.Edge {
 	byFile := make(map[string][]int, 64)
-	for i := range g.Nodes {
-		n := &g.Nodes[i]
+	for i := range nodes {
+		n := &nodes[i]
 		if n.Type == types.NodeHunk {
 			continue
 		}
@@ -504,12 +526,11 @@ func emitModifiesEdges(g *graph.Graph) {
 		byFile[n.FilePath] = append(byFile[n.FilePath], i)
 	}
 	if len(byFile) == 0 {
-		return
+		return nil
 	}
-	// Walk hunks and emit overlapping `modifies` edges.
-	var newEdges []types.Edge
-	for i := range g.Nodes {
-		hunk := &g.Nodes[i]
+	var out []types.Edge
+	for i := range nodes {
+		hunk := &nodes[i]
 		if hunk.Type != types.NodeHunk {
 			continue
 		}
@@ -522,17 +543,15 @@ func emitModifiesEdges(g *graph.Graph) {
 			hEnd = hStart
 		}
 		for _, ci := range candidates {
-			cand := &g.Nodes[ci]
+			cand := &nodes[ci]
 			cStart, cEnd := cand.StartLine, cand.EndLine
 			if cEnd < cStart {
 				cEnd = cStart
 			}
-			// Standard inclusive interval-overlap test:
-			//   a.start <= b.end && b.start <= a.end
 			if hStart > cEnd || cStart > hEnd {
 				continue
 			}
-			newEdges = append(newEdges, types.Edge{
+			out = append(out, types.Edge{
 				Src:        hunk.ID,
 				Dst:        cand.ID,
 				Type:       types.EdgeModifies,
@@ -543,8 +562,6 @@ func emitModifiesEdges(g *graph.Graph) {
 			})
 		}
 	}
-	if len(newEdges) > 0 {
-		g.Edges = append(g.Edges, newEdges...)
-	}
+	return out
 }
 

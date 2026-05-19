@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/0xmhha/code-knowledge-graph/internal/buildpipe"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
 	sol "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	"github.com/0xmhha/code-knowledge-graph/internal/temporal"
@@ -170,7 +171,7 @@ func TestBuildPack_RealGitFixture(t *testing.T) {
 		}
 	}
 
-	edges = append(edges, computeModifies(nodes)...)
+	edges = append(edges, buildpipe.BuildModifiesEdges(nodes)...)
 
 	store := &realParserFakeStore{nodes: nodes, edges: edges}
 	pack, err := evidence.BuildPack(store, evidence.Options{
@@ -194,48 +195,3 @@ func TestBuildPack_RealGitFixture(t *testing.T) {
 	}
 }
 
-// computeModifies mirrors the H2 line-overlap algorithm buildpipe runs
-// in production. For each NodeHunk it walks code nodes in the same file
-// and emits an EdgeModifies whenever the [StartLine, EndLine] intervals
-// overlap. Confidence inherits from the hunk node.
-func computeModifies(nodes []types.Node) []types.Edge {
-	byFile := map[string][]int{}
-	for i := range nodes {
-		n := nodes[i]
-		if n.Type == types.NodeHunk || n.FilePath == "" {
-			continue
-		}
-		byFile[n.FilePath] = append(byFile[n.FilePath], i)
-	}
-	var out []types.Edge
-	for i := range nodes {
-		hunk := nodes[i]
-		if hunk.Type != types.NodeHunk {
-			continue
-		}
-		cands, ok := byFile[hunk.FilePath]
-		if !ok {
-			continue
-		}
-		hStart, hEnd := hunk.StartLine, hunk.EndLine
-		if hEnd < hStart {
-			hEnd = hStart
-		}
-		for _, ci := range cands {
-			c := nodes[ci]
-			cStart, cEnd := c.StartLine, c.EndLine
-			if cEnd < cStart {
-				cEnd = cStart
-			}
-			if hStart > cEnd || cStart > hEnd {
-				continue
-			}
-			out = append(out, types.Edge{
-				Src: hunk.ID, Dst: c.ID, Type: types.EdgeModifies,
-				FilePath: hunk.FilePath, Line: hunk.StartLine,
-				Count: 1, Confidence: hunk.Confidence,
-			})
-		}
-	}
-	return out
-}
