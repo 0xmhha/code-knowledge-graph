@@ -48,6 +48,13 @@ type declVisitor struct {
 	// form. resolveUsingForRef consults both maps when resolving a
 	// using-for binding's leading identifier.
 	importPaths map[string]string
+	// W-C W9 V14 (2026-05-19): per-file enum name → byte footprint.
+	// Sol enums with ≤256 variants compile to uint8 (1 byte), ≤65k
+	// to uint16 (2 bytes), and so on. runStateVarDecl consults
+	// this map before falling back to the conservative full-slot
+	// path so enum-typed state vars pack with adjacent small
+	// primitives.
+	enumSizes map[string]int
 	// W-C W9 V5 (2026-05-19): per-file struct → byte footprint when
 	// declared as a storage state variable. Populated by
 	// computeStructSizes (called once before runStateVarDecl) by
@@ -74,6 +81,7 @@ func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.
 		namespaceAliases: map[string]bool{},
 		namespacePaths:   map[string]string{},
 		importPaths:      map[string]string{},
+		enumSizes:        map[string]int{},
 		structSizes:      map[string]int{},
 	}
 	fileQ := "file:" + rel
@@ -130,6 +138,11 @@ func (v *declVisitor) visit() {
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)
 	v.runDecl(queryEnum, types.NodeEnum)
+	// W-C W9 V14 (2026-05-19): count enum variants per name so
+	// runStateVarDecl can size enum-typed state-vars at 1 / 2 / 4
+	// bytes (uint8/16/32) instead of the conservative full-slot
+	// fallback. Sol enums with ≤256 variants compile to uint8.
+	v.computeEnumSizes()
 	// W-C W9 V5 (2026-05-19): compute per-struct byte footprint so
 	// runStateVarDecl can size NodeField rows whose user_defined_type
 	// is a known struct. Must run before runStateVarDecl.
@@ -437,6 +450,15 @@ func (v *declVisitor) runStateVarDecl() {
 					// ceil(sum_of_field_bytes / 32) slots, with
 					// pre/post slot alignment same as arrays.
 					slot, newState := advanceForArrayField(state, structBytes)
+					slotIndex = slot
+					slotPerContract[containerKey] = newState
+				} else if enumBytes, ok := v.enumSizes[signature]; ok {
+					// W-C W9 V14: enum-typed state-var packs
+					// like the underlying uintN (1 byte for the
+					// typical ≤256-variant case). Goes through
+					// advanceForField so adjacent small
+					// primitives share the slot.
+					slot, newState := advanceForField(state, enumBytes)
 					slotIndex = slot
 					slotPerContract[containerKey] = newState
 				} else {
