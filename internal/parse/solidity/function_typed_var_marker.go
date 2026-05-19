@@ -191,34 +191,67 @@ func (v *declVisitor) findFunctionPointerPropagators(
 
 	// Pass 2: call arguments.
 	const cq = `(call_expression) @call`
-	query, qErr := sitter.NewQuery(v.lang, cq)
-	if qErr != nil {
-		return out
-	}
-	defer query.Close()
-	cur := sitter.NewQueryCursor()
-	defer cur.Close()
-	matches := cur.Matches(query, v.root, v.src)
-	names := query.CaptureNames()
-	for {
-		m := matches.Next()
-		if m == nil {
-			break
-		}
-		for _, c := range m.Captures {
-			if names[c.Index] != "call" {
-				continue
+	if query, qErr := sitter.NewQuery(v.lang, cq); qErr == nil {
+		defer query.Close()
+		cur := sitter.NewQueryCursor()
+		defer cur.Close()
+		matches := cur.Matches(query, v.root, v.src)
+		names := query.CaptureNames()
+		for {
+			m := matches.Next()
+			if m == nil {
+				break
 			}
-			callNode := c.Node
-			// Iterate `call_argument` children — each is an
-			// expression wrapping the actual argument node.
-			for i := uint(0); i < callNode.NamedChildCount(); i++ {
-				child := callNode.NamedChild(i)
-				if child == nil || child.Kind() != "call_argument" {
+			for _, c := range m.Captures {
+				if names[c.Index] != "call" {
 					continue
 				}
-				arg := unwrapExpression(child.NamedChild(0))
-				markIfFnTyped(arg)
+				callNode := c.Node
+				// Iterate `call_argument` children — each is an
+				// expression wrapping the actual argument node.
+				for i := uint(0); i < callNode.NamedChildCount(); i++ {
+					child := callNode.NamedChild(i)
+					if child == nil || child.Kind() != "call_argument" {
+						continue
+					}
+					arg := unwrapExpression(child.NamedChild(0))
+					markIfFnTyped(arg)
+				}
+			}
+		}
+	}
+
+	// W-C W8 V9 (2026-05-19) — Pass 3: return-position propagation.
+	// `return cb;` where cb is a fn-typed param/local/state-var
+	// propagates the function pointer to the caller.
+	const rq = `(return_statement) @ret`
+	if query, qErr := sitter.NewQuery(v.lang, rq); qErr == nil {
+		defer query.Close()
+		cur := sitter.NewQueryCursor()
+		defer cur.Close()
+		matches := cur.Matches(query, v.root, v.src)
+		names := query.CaptureNames()
+		for {
+			m := matches.Next()
+			if m == nil {
+				break
+			}
+			for _, c := range m.Captures {
+				if names[c.Index] != "ret" {
+					continue
+				}
+				retNode := c.Node
+				// return_statement may wrap the expression in
+				// expression / variable_declaration_tuple etc.;
+				// scan all named children for a bare identifier.
+				for i := uint(0); i < retNode.NamedChildCount(); i++ {
+					child := retNode.NamedChild(i)
+					if child == nil {
+						continue
+					}
+					expr := unwrapExpression(child)
+					markIfFnTyped(expr)
+				}
 			}
 		}
 	}
