@@ -34,6 +34,11 @@ import (
 
 const dispatchKindChainedExternalCall = "chained_external_call"
 
+// dispatchKindDeepChainedExternalCall (W-C W10 V7, 2026-05-19)
+// tags depth-2 chained shape `a().b().call(...)` — TargetQName
+// encodes `<innerFn1>|<innerFn2>|<method>`.
+const dispatchKindDeepChainedExternalCall = "deep_chained_external_call"
+
 func (v *declVisitor) runChainedExternalCall() {
 	const query = `(member_expression) @member`
 	q, qErr := sitter.NewQuery(v.lang, query)
@@ -55,6 +60,30 @@ func (v *declVisitor) runChainedExternalCall() {
 				continue
 			}
 			memberNode := c.Node
+			// V7: try depth-2 (`a().b().call(...)`) first because
+			// V6's single-level predicate would otherwise reject
+			// the outer member (its `object` is a call_expression
+			// whose function is a member_expression, not an
+			// identifier — so single-level already drops).
+			if fn1, fn2, methodName, ok := matchDeepChainedMethodCall(&memberNode, v.src); ok {
+				if !isLowLevelMethod(methodName) {
+					continue
+				}
+				fnQ, fnStart, fnOK := nearestFunctionQnameAndStart(&memberNode, v.src)
+				if !fnOK {
+					continue
+				}
+				v.pending = append(v.pending, parse.PendingRef{
+					SrcID:        parse.MakeID(fnQ, "sol", fnStart),
+					EdgeType:     types.EdgeInvokes,
+					TargetQName:  fn1 + "|" + fn2 + "|" + methodName,
+					Line:         int(memberNode.StartPosition().Row) + 1,
+					ByteOffset:   int(memberNode.StartByte()),
+					DispatchKind: dispatchKindDeepChainedExternalCall,
+				})
+				continue
+			}
+			// V6: single-level chained shape.
 			innerFnName, methodName, ok := matchChainedMethodCall(&memberNode, v.src)
 			if !ok {
 				continue

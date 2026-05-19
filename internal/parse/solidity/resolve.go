@@ -617,6 +617,55 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W-C W10 V7 (2026-05-19) — depth-2 chained shape
+			// `a().b().call(data)`. Resolve a's first return type
+			// to a contract, then b within that contract, then b's
+			// first return type. Mark when the final return type
+			// is address-like.
+			if pr.DispatchKind == dispatchKindDeepChainedExternalCall {
+				parts := strings.SplitN(pr.TargetQName, "|", 3)
+				if len(parts) != 3 {
+					continue
+				}
+				fn1Name, fn2Name, methodName := parts[0], parts[1], parts[2]
+				if !isLowLevelMethod(methodName) {
+					continue
+				}
+				containerName := containerNameByID[containerIDByFuncID[pr.SrcID]]
+				var fn1ID string
+				if containerName != "" {
+					if ids := funcByQName[containerName+"."+fn1Name]; len(ids) > 0 {
+						fn1ID = pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+					}
+				}
+				if fn1ID == "" {
+					if ids := funcByQName[fn1Name]; len(ids) > 0 {
+						fn1ID = pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+					}
+				}
+				if fn1ID == "" {
+					continue
+				}
+				rt1 := funcReturnTypes[fn1ID]
+				if rt1 == "" {
+					continue
+				}
+				// rt1 should be a contract name. Look up
+				// rt1.fn2Name to find the second function.
+				ids := funcByQName[rt1+"."+fn2Name]
+				if len(ids) == 0 {
+					continue
+				}
+				fn2ID := pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+				if fn2ID == "" {
+					continue
+				}
+				rt2 := funcReturnTypes[fn2ID]
+				if rt2 == "address" || rt2 == "address payable" {
+					externalCallSrcs[pr.SrcID] = true
+				}
+				continue
+			}
 			// W-C W10 V6 (2026-05-19) — chained-call shape for
 			// HasExternalCall. `getTarget().call(data)` resolves
 			// the inner function's first return type via
