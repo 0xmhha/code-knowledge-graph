@@ -276,6 +276,20 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// hits parents in the declared order.
 	parents := buildInheritanceIndex(out.Edges)
 
+	// W-C W9 V6 (2026-05-19) — re-pack state-var SlotIndex with the
+	// cross-file struct size table merged from every parsed file's
+	// Pass 1 (Parser.structSizes guarded by structMu). A state var
+	// typed as a foreign struct now sizes correctly; runs before
+	// inheritance offset accumulation so the contract-local fix
+	// applies first.
+	p.structMu.Lock()
+	globalStructSizes := make(map[string]int, len(p.structSizes))
+	for k, v := range p.structSizes {
+		globalStructSizes[k] = v
+	}
+	p.structMu.Unlock()
+	applyCrossFileStructSizes(out.Nodes, globalStructSizes)
+
 	// W-C W9 V1 (2026-05-18) — inheritance offset on NodeField
 	// SlotIndex. V0 emitted per-contract local indices (each contract
 	// restarted at 0); V1 walks the parent adjacency and adds the
