@@ -86,4 +86,13 @@ type Node struct {
 	// passed from another scope. Together the two markers locate
 	// every callable involved in indirect dispatch.
 	HasFunctionPointerCall bool `json:"has_function_pointer_call,omitempty"`
+	// HasExternalCall (W-C W10 V4, 2026-05-19): true when a callable
+	// performs at least one low-level call (Sol .call /
+	// .delegatecall / .staticcall or the Yul equivalents) whose
+	// receiver resolves to an address-typed Sol scope variable
+	// rather than a Contract / Interface. Distinguishes "arbitrary-
+	// address dispatch" from the resolved-receiver shape that lands
+	// as a concrete EdgeInvokes, which security tooling commonly
+	// flags for re-entrancy / external-call risk analysis.
+	HasExternalCall bool `json:"has_external_call,omitempty"`
 }

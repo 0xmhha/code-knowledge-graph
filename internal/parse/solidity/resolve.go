@@ -477,6 +477,13 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		}
 	}
 
+	// W-C W10 V4 (2026-05-19): collect callable IDs that performed a
+	// low-level call to an address-typed receiver so we can mark
+	// HasExternalCall after Pass 2b completes. Distinct from
+	// HasLowLevelCall (any low-level call) because consumers often
+	// care about arbitrary-address dispatch surfaces specifically.
+	externalCallSrcs := map[string]bool{}
+
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
 	// rely on the `parents` index built between the two sub-passes.
@@ -567,12 +574,22 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 			// Contract/Interface byName index. ConfAmbiguous always
 			// (runtime address determines real target). Receiver
 			// resolution chain mirrors W6 lookupReceiverType.
+			//
+			// W-C W10 V4 (2026-05-19): when the receiver resolves
+			// to an address-typed Sol scope variable but no
+			// Contract / Interface candidate is found, mark
+			// HasExternalCall on the source callable so security
+			// tooling can flag arbitrary-address dispatch
+			// surfaces without a concrete edge.
 			if pr.DispatchKind == dispatchKindLowLevelCall {
-				if edge, ok := resolveLowLevelCallRef(
+				edge, addressTyped, ok := resolveLowLevelCallRefExt(
 					pr, byName, stateVarTypes, paramTypes, localVarTypes,
 					containerIDByFuncID, nodeFile,
-				); ok {
+				)
+				if ok {
 					out.Edges = append(out.Edges, edge)
+				} else if addressTyped {
+					externalCallSrcs[pr.SrcID] = true
 				}
 				continue
 			}
@@ -741,6 +758,18 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				Line: pr.Line, Count: 1, Confidence: conf,
 				Order: pr.Order,
 			})
+		}
+	}
+	// W-C W10 V4 (2026-05-19): apply HasExternalCall to every callable
+	// node that the Pass 2b loop flagged with an address-typed low-
+	// level call receiver. The marker complements HasLowLevelCall (set
+	// in Pass 1) by isolating the arbitrary-address dispatch surface
+	// specifically.
+	if len(externalCallSrcs) > 0 {
+		for i := range out.Nodes {
+			if externalCallSrcs[out.Nodes[i].ID] {
+				out.Nodes[i].HasExternalCall = true
+			}
 		}
 	}
 	return out, nil
@@ -1307,22 +1336,41 @@ func resolveLowLevelCallRef(
 	containerIDByFuncID map[string]string,
 	nodeFile map[string]string,
 ) (types.Edge, bool) {
+	edge, _, ok := resolveLowLevelCallRefExt(pr, byName, stateVarTypes, paramTypes, localVarTypes, containerIDByFuncID, nodeFile)
+	return edge, ok
+}
+
+// resolveLowLevelCallRefExt is the W-C W10 V4 (2026-05-19) extension
+// of resolveLowLevelCallRef that additionally reports whether the
+// receiver resolved to an address-typed Sol scope variable. The flag
+// drives HasExternalCall marking on the source callable when no
+// concrete Contract / Interface target was found.
+func resolveLowLevelCallRefExt(
+	pr parse.PendingRef,
+	byName map[types.NodeType]map[string][]string,
+	stateVarTypes stateVarTypeMap,
+	paramTypes paramTypeMap,
+	localVarTypes localVarTypeMap,
+	containerIDByFuncID map[string]string,
+	nodeFile map[string]string,
+) (types.Edge, bool, bool) {
 	sep := strings.IndexByte(pr.TargetQName, '|')
 	if sep < 0 {
-		return types.Edge{}, false
+		return types.Edge{}, false, false
 	}
 	receiverName := pr.TargetQName[:sep]
 	// methodName := pr.TargetQName[sep+1:] // unused — AST evidence only
 
 	contractID, ok := containerIDByFuncID[pr.SrcID]
 	if !ok {
-		return types.Edge{}, false
+		return types.Edge{}, false, false
 	}
 	typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
 		pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
 	if typeName == "" {
-		return types.Edge{}, false
+		return types.Edge{}, false, false
 	}
+	isAddress := typeName == "address" || typeName == "address payable"
 	// Try Interface first then Contract — interface-typed receivers are
 	// the more common shape for low-level call patterns (proxies). Same
 	// byName candidate-pick rule as W3.
@@ -1331,7 +1379,7 @@ func resolveLowLevelCallRef(
 		candidates = byName[types.NodeContract][typeName]
 	}
 	if len(candidates) == 0 {
-		return types.Edge{}, false
+		return types.Edge{}, isAddress, false
 	}
 	srcFile := nodeFile[pr.SrcID]
 	dstID := pickSameFileCandidate(candidates, srcFile, nodeFile)
@@ -1339,7 +1387,7 @@ func resolveLowLevelCallRef(
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeInvokes,
 		Line: pr.Line, Count: 1, Confidence: types.ConfAmbiguous,
 		DispatchKind: dispatchKindLowLevelCall,
-	}, true
+	}, false, true
 }
 
 // resolveUsingForChainCallRef — W6 V1.3 (2026-05-12). Resolves a chained
