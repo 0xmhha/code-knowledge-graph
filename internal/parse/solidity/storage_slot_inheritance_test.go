@@ -56,6 +56,40 @@ func TestStorageSlot_InheritanceOffset(t *testing.T) {
 	}
 }
 
+// TestStorageSlot_InconsistentMROFallback — W-C W9 V8. When the
+// inheritance graph has no consistent C3 linearization (A's MRO
+// puts X before Y, B's MRO puts Y before X, Z inherits A and B),
+// solc would reject the hierarchy. The parser falls back to
+// depth-first ancestry and stamps HasInheritanceMROFallback on
+// the offending node so downstream tooling surfaces the
+// diagnostic.
+func TestStorageSlot_InconsistentMROFallback(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/storage_slot_inheritance", "inconsistent_mro.sol")
+
+	want := map[string]bool{
+		"Z":     true,  // diamond with conflicting order -> fallback
+		"A":     false, // consistent X,Y order
+		"B":     false, // consistent Y,X order (still self-consistent)
+		"X":     false,
+		"Y":     false,
+		"Plain": false, // single-parent inheritance, fine
+	}
+	got := map[string]bool{}
+	for _, n := range nodes {
+		if n.Type != types.NodeContract {
+			continue
+		}
+		if _, ok := want[n.Name]; ok {
+			got[n.Name] = n.HasInheritanceMROFallback
+		}
+	}
+	for name, w := range want {
+		if got[name] != w {
+			t.Errorf("HasInheritanceMROFallback on %q: got %v want %v", name, got[name], w)
+		}
+	}
+}
+
 // TestStorageSlot_DiamondC3Linearization — W-C W9 V7. Verifies that
 // diamond inheritance (D extends B, C where both extend Base) does
 // not double-count Base's slot. The C3 MRO for D is

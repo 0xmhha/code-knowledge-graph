@@ -33,7 +33,19 @@ package solidity
 // `parents`. The returned slice is owned by the caller; mutation
 // is allowed but unnecessary.
 func computeC3Linearization(parents map[string][]string) map[string][]string {
+	mro, _ := computeC3LinearizationWithFallbacks(parents)
+	return mro
+}
+
+// computeC3LinearizationWithFallbacks is the W-C W9 V8 (2026-05-19)
+// variant that additionally returns the set of contract IDs whose
+// hierarchy had no consistent C3 linearization and degraded to the
+// depth-first fallback. Downstream tooling can flag those nodes
+// (HasInheritanceMROFallback) so the would-be-rejected hierarchy
+// is visible without re-running solc.
+func computeC3LinearizationWithFallbacks(parents map[string][]string) (map[string][]string, map[string]bool) {
 	out := make(map[string][]string, len(parents))
+	fallback := map[string]bool{}
 	visiting := map[string]bool{}
 	var lin func(id string) []string
 	lin = func(id string) []string {
@@ -66,8 +78,9 @@ func computeC3Linearization(parents map[string][]string) map[string][]string {
 		if merged == nil {
 			// Inconsistent hierarchy. Fall back to the V1 depth-
 			// first walk (self + every reachable ancestor in
-			// source order, no dedup).
+			// source order, no dedup) and flag the diagnostic.
 			merged = depthFirstAncestors(id, parents)
+			fallback[id] = true
 		}
 		res := append([]string{id}, merged...)
 		out[id] = res
@@ -76,11 +89,7 @@ func computeC3Linearization(parents map[string][]string) map[string][]string {
 	for id := range parents {
 		lin(id)
 	}
-	// Include leaf contracts that never appear as a parents-map
-	// key (no recorded children) but might be reached from other
-	// hierarchies. They have no parents → linearization is just
-	// themselves; the caller looks them up by id.
-	return out
+	return out, fallback
 }
 
 // mergeC3 runs the C3 merge step over a list of candidate lists.

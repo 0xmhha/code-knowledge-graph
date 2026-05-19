@@ -525,10 +525,12 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	}
 	// W-C W8 V7 (2026-05-19): the C3 MRO is reused here to walk
 	// inherited function-typed fields. Computed once for the entire
-	// resolve pass — applyInheritanceSlotOffset above also calls
-	// computeC3Linearization, but caching the result here avoids a
-	// second pass over the parents map for V7's lookup branch.
-	mroByContractID := computeC3Linearization(parents)
+	// resolve pass.
+	//
+	// W-C W9 V8 (2026-05-19): the variant call also surfaces the
+	// set of contracts whose hierarchy required the C3 fallback so
+	// we can stamp HasInheritanceMROFallback after Pass 2b.
+	mroByContractID, mroFallbackIDs := computeC3LinearizationWithFallbacks(parents)
 
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
@@ -908,6 +910,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		for i := range out.Nodes {
 			if fnPointerCallSrcs[out.Nodes[i].ID] {
 				out.Nodes[i].HasFunctionPointerCall = true
+			}
+		}
+	}
+	// W-C W9 V8 (2026-05-19): stamp HasInheritanceMROFallback on
+	// every NodeContract / NodeInterface whose C3 linearization
+	// required the depth-first fallback. solc would reject those
+	// hierarchies; downstream tooling surfaces the diagnostic.
+	if len(mroFallbackIDs) > 0 {
+		for i := range out.Nodes {
+			if mroFallbackIDs[out.Nodes[i].ID] {
+				out.Nodes[i].HasInheritanceMROFallback = true
 			}
 		}
 	}

@@ -95,4 +95,12 @@ type Node struct {
 	// as a concrete EdgeInvokes, which security tooling commonly
 	// flags for re-entrancy / external-call risk analysis.
 	HasExternalCall bool `json:"has_external_call,omitempty"`
+	// HasInheritanceMROFallback (W-C W9 V8, 2026-05-19): true when
+	// a NodeContract / NodeInterface declared an inheritance graph
+	// that has no consistent C3 linearization. Sol's reference
+	// compiler rejects such hierarchies; the parser falls back to a
+	// deterministic depth-first walk so layout stays computable,
+	// but downstream tooling should surface the diagnostic so the
+	// developer notices the would-be-rejected hierarchy.
+	HasInheritanceMROFallback bool `json:"has_inheritance_mro_fallback,omitempty"`
 }
