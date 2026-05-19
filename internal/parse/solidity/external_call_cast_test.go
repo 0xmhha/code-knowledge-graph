@@ -6,6 +6,41 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W-C W10 V9 — self-delegatecall additionally lights up
+// HasSelfDelegatecallDead. delegatecall against the contract
+// itself re-runs the same bytecode against the same storage and
+// is essentially a no-op / bug. Other self-call methods (call /
+// staticcall) only set HasSelfReentrantCall.
+func TestExternalCallCast_SelfDelegatecallDeadMarker(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/yul_receiver", "sol_self_delegate.sol")
+
+	type pair struct {
+		reentrant, dead bool
+	}
+	want := map[string]pair{
+		"SelfDelegate.deadDelegate":    {reentrant: true, dead: true},
+		"SelfDelegate.reentrantStatic": {reentrant: true, dead: false},
+	}
+	got := map[string]pair{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = pair{
+				reentrant: n.HasSelfReentrantCall,
+				dead:      n.HasSelfDelegatecallDead,
+			}
+		}
+	}
+	for qn, w := range want {
+		g := got[qn]
+		if g != w {
+			t.Errorf("%s markers: got %+v want %+v", qn, g, w)
+		}
+	}
+}
+
 // W-C W10 V8 — self-reference cast routes to HasSelfReentrantCall
 // instead of HasExternalCall. `payable(this).call(...)` and
 // `address(this).call(...)` re-enter the same contract — the

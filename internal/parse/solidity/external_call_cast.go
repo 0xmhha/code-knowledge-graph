@@ -55,7 +55,11 @@ func (v *declVisitor) runExternalCallCastMarker() {
 	// W-C W10 V8 (2026-05-19): track self-reference casts
 	// separately so HasSelfReentrantCall takes precedence over
 	// HasExternalCall when the cast argument is `this`.
+	// W-C W10 V9 (2026-05-19): additionally track self casts whose
+	// method is `delegatecall` — `address(this).delegatecall(...)`
+	// is effectively dead code and warrants a separate marker.
 	selfAffected := map[string]bool{}
+	selfDelegatecallDead := map[string]bool{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -70,7 +74,8 @@ func (v *declVisitor) runExternalCallCastMarker() {
 			if property == nil || property.Kind() != "identifier" {
 				continue
 			}
-			if !isLowLevelMethod(property.Utf8Text(v.src)) {
+			methodName := property.Utf8Text(v.src)
+			if !isLowLevelMethod(methodName) {
 				continue
 			}
 			parent := member.Parent()
@@ -92,6 +97,9 @@ func (v *declVisitor) runExternalCallCastMarker() {
 			id := parse.MakeID(fnQ, "sol", fnStart)
 			if isSelfCast(inner, v.src) {
 				selfAffected[id] = true
+				if methodName == "delegatecall" {
+					selfDelegatecallDead[id] = true
+				}
 			} else {
 				affected[id] = true
 			}
@@ -106,6 +114,9 @@ func (v *declVisitor) runExternalCallCastMarker() {
 		}
 		if selfAffected[v.nodes[i].ID] {
 			v.nodes[i].HasSelfReentrantCall = true
+		}
+		if selfDelegatecallDead[v.nodes[i].ID] {
+			v.nodes[i].HasSelfDelegatecallDead = true
 		}
 	}
 }

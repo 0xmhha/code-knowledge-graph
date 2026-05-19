@@ -122,4 +122,16 @@ type Node struct {
 	// fallback() / receive() path. Security tooling that scans for
 	// the two surfaces separately consumes both markers.
 	HasSelfReentrantCall bool `json:"has_self_reentrant_call,omitempty"`
+	// HasSelfDelegatecallDead (W-C W10 V9, 2026-05-19): true when a
+	// callable performs `address(this).delegatecall(...)` or
+	// `payable(this).delegatecall(...)`. Sol semantics make this
+	// effectively dead — delegatecall executes the target's code
+	// against the caller's storage, and the target IS the caller,
+	// so the operation reduces to re-running the contract's own
+	// dispatch with the same calldata. Almost always a bug or a
+	// confused re-implementation of an internal call. The marker
+	// rides alongside HasSelfReentrantCall (the cast still re-
+	// enters fallback / receive on certain edge paths) so security
+	// tooling can pick either signal.
+	HasSelfDelegatecallDead bool `json:"has_self_delegatecall_dead,omitempty"`
 }
