@@ -67,6 +67,10 @@ func (v *declVisitor) runYulLowLevelCalls() {
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	hasLowLevel := map[string]bool{}
+	// W-C W10 V10 (2026-05-19): Yul `delegatecall(gas(), address(),
+	// …)` self-delegate sites map to the enclosing callable so we
+	// can mark HasSelfDelegatecallDead alongside HasLowLevelCall.
+	yulSelfDelegateDead := map[string]bool{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -105,6 +109,15 @@ func (v *declVisitor) runYulLowLevelCalls() {
 			if targetArg == nil {
 				continue
 			}
+			// W-C W10 V10 (2026-05-19): Yul-level self-delegatecall.
+			// `delegatecall(gas(), address(), …)` invokes the
+			// contract's own bytecode against its own storage —
+			// dead-weight, parallel to the Sol-level address(this)
+			// delegatecall caught by W10 V9. Mark
+			// HasSelfDelegatecallDead on the enclosing callable.
+			if opName == "delegatecall" && isYulSelfAddress(targetArg, v.src) {
+				yulSelfDelegateDead[fnID] = true
+			}
 			receiverName := extractYulReceiverName(targetArg, v.src)
 			if receiverName == "" {
 				continue
@@ -127,14 +140,41 @@ func (v *declVisitor) runYulLowLevelCalls() {
 			})
 		}
 	}
-	if len(hasLowLevel) == 0 {
+	if len(hasLowLevel) == 0 && len(yulSelfDelegateDead) == 0 {
 		return
 	}
 	for i := range v.nodes {
 		if hasLowLevel[v.nodes[i].ID] {
 			v.nodes[i].HasLowLevelCall = true
 		}
+		if yulSelfDelegateDead[v.nodes[i].ID] {
+			v.nodes[i].HasSelfDelegatecallDead = true
+		}
 	}
+}
+
+// isYulSelfAddress reports whether a Yul argument node is the
+// builtin `address()` call (no arguments) — Yul's way to fetch
+// the executing contract's own address. Used by W10 V10 to flag
+// `delegatecall(gas, address(), …)` as a dead-weight self-
+// delegatecall.
+func isYulSelfAddress(n *sitter.Node, src []byte) bool {
+	if n == nil || n.Kind() != "yul_function_call" {
+		return false
+	}
+	builtin := n.NamedChild(0)
+	if builtin == nil || builtin.Kind() != "yul_evm_builtin" {
+		return false
+	}
+	if builtin.Utf8Text(src) != "address" {
+		return false
+	}
+	// `address()` takes no arguments — the call has exactly one
+	// named child (the builtin itself). Defensive check rejects
+	// shapes like `address(x)` which the Yul grammar would parse
+	// differently anyway but matters if a future grammar revision
+	// admits args.
+	return n.NamedChildCount() == 1
 }
 
 // yulLetBindingsInScope walks the parent chain of a yul node up to
