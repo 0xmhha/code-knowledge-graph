@@ -851,42 +851,43 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	return out, nil
 }
 
-// applyInheritanceSlotOffset — W-C W9 V1 (2026-05-18). Adjusts every
-// NodeField's SlotIndex to include the cumulative ancestor slot count
-// from the parent adjacency built in buildInheritanceIndex.
+// applyInheritanceSlotOffset — W-C W9 V1 (2026-05-18) / V7
+// (2026-05-19). Adjusts every NodeField's SlotIndex to include the
+// cumulative ancestor slot count using the C3 linearization MRO
+// (Method Resolution Order) Sol's reference compiler applies to
+// storage layout. Each contract's offset is the sum of slotCount
+// over every ancestor in its C3 linearization — diamond inheritance
+// no longer double-counts a shared grandparent.
 //
 // Algorithm:
 //
 //  1. Index contracts by Name (first occurrence wins for cross-file
 //     homonyms — same disambiguation idiom as W3 / W8).
 //
-//  2. Count slots per contract: the maximum SlotIndex + 1 across non-
-//     mapping NodeField rows whose qname prefix matches a contract.
-//     V0 already emits source-order indices, so the max-plus-one
-//     yields the count without re-walking the AST.
+//  2. Count slots per contract: the maximum SlotIndex + 1 across
+//     non-mapping NodeField rows whose qname prefix matches a
+//     contract.
 //
-//  3. Compute cumulative inheritance offset per contract via DFS over
-//     the parent adjacency. Each ancestor contributes its own slot
-//     count plus its offset. Memoised so repeated subtrees don't
-//     re-walk; cycle defence (visited set) handles the degenerate
-//     `is`-clause loop that solc would reject but the grammar accepts.
+//  3. Compute the C3 linearization for every contract via
+//     computeC3Linearization. The MRO list is (self, base1, base2,
+//     …) — derived first, base last.
 //
-//  4. Mutate every NodeField's SlotIndex by adding its enclosing
-//     contract's offset.
+//  4. offset(c) = Σ slotCount(a) for each ancestor a in MRO[c]
+//     except c itself. C3 dedupes shared ancestors so the sum
+//     stays correct for diamond hierarchies.
 //
-// V1 limitations:
+//  5. Mutate every NodeField's SlotIndex by adding the offset.
 //
-//   - Diamond inheritance with repeated ancestors. The naive sum
-//     double-counts a shared ancestor (e.g. `D is Y, Z` where both
-//     extend X sums X's slots twice). Sol's C3 linearization would
-//     dedupe X; V1 does not. A V2+ pass can apply the linearization
-//     visit order before the count.
-//   - Library subkind contracts (SubKind="library") are included in
-//     the index. Libraries hold no state in practice, so the
+// Limitations remaining:
+//
+//   - Library subkind contracts (SubKind="library") are included
+//     in the index. Libraries hold no state in practice, so the
 //     adjustment is a no-op for them; no explicit filter.
-//   - Cross-file homonymous contracts pick the first-occurrence ID.
-//     Same disambiguation rule used by every other byName-style
-//     resolver in the Sol pass.
+//   - Cross-file homonymous contracts pick the first-occurrence ID
+//     (same idiom every other byName resolver uses).
+//   - Inconsistent hierarchies (no C3 solution exists, which solc
+//     would reject) fall back to the V1 depth-first walk so the
+//     result stays deterministic.
 func applyInheritanceSlotOffset(nodes []types.Node, parents map[string][]string) {
 	contractIDByName := map[string]string{}
 	for _, n := range nodes {
@@ -919,25 +920,20 @@ func applyInheritanceSlotOffset(nodes []types.Node, parents map[string][]string)
 		}
 	}
 
+	mro := computeC3Linearization(parents)
 	offset := map[string]int{}
-	var dfs func(cid string, visited map[string]bool) int
-	dfs = func(cid string, visited map[string]bool) int {
-		if cached, ok := offset[cid]; ok {
-			return cached
+	for _, cid := range contractIDByName {
+		lin := mro[cid]
+		if len(lin) == 0 {
+			// Contract has no recorded parents — leaf or no
+			// inheritance edges resolved. Offset is zero.
+			continue
 		}
-		if visited[cid] {
-			return 0
-		}
-		visited[cid] = true
 		total := 0
-		for _, pid := range parents[cid] {
-			total += dfs(pid, visited) + slotCount[pid]
+		for _, anc := range lin[1:] { // skip self
+			total += slotCount[anc]
 		}
 		offset[cid] = total
-		return total
-	}
-	for _, cid := range contractIDByName {
-		dfs(cid, map[string]bool{})
 	}
 
 	for i := range nodes {

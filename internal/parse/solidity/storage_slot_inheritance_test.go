@@ -55,3 +55,49 @@ func TestStorageSlot_InheritanceOffset(t *testing.T) {
 		}
 	}
 }
+
+// TestStorageSlot_DiamondC3Linearization — W-C W9 V7. Verifies that
+// diamond inheritance (D extends B, C where both extend Base) does
+// not double-count Base's slot. The C3 MRO for D is
+// [D, B, C, Base]; the offset sums each ancestor once.
+//
+// Slot expectations (one uint256 per contract, no packing):
+//
+//	Base.x : slot 0  (offset 0)
+//	B.y    : slot 1  (offset = Base.1)
+//	C.z    : slot 1  (offset = Base.1)
+//	D.w    : slot 3  (offset = B.1 + C.1 + Base.1)
+//
+// Pre-V7 D.w would have been slot 4 because the naive parents
+// sum walked Base twice (once via B, once via C).
+func TestStorageSlot_DiamondC3Linearization(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/storage_slot_inheritance", "diamond_c3.sol")
+
+	want := map[string]int{
+		"Base.x": 0,
+		"B.y":    1,
+		"C.z":    1,
+		"D.w":    3,
+	}
+
+	got := map[string]int{}
+	for _, n := range nodes {
+		if n.Type != types.NodeField {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = n.SlotIndex
+		}
+	}
+
+	for qn, w := range want {
+		g, present := got[qn]
+		if !present {
+			t.Errorf("missing NodeField %q", qn)
+			continue
+		}
+		if g != w {
+			t.Errorf("NodeField %q SlotIndex: got %d, want %d", qn, g, w)
+		}
+	}
+}
