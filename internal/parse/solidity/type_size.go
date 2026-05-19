@@ -33,43 +33,102 @@ import (
 //   bytes (dynamic) / string / arrays / structs / mappings /
 //   user-defined types / anything not in the above list.
 func solTypeSize(sig string) int {
+	if size, ok := solValueTypeSize(sig); ok {
+		return size
+	}
+	return 32
+}
+
+// solValueTypeSize returns the byte footprint of a Sol value type
+// signature along with a flag indicating whether the signature is
+// in the recognised value-type set. Callers needing to distinguish
+// "known full-slot type" (uint256, bytes32, int256) from "unknown
+// conservative fallback" (string, custom struct, ...) read the
+// second return.
+func solValueTypeSize(sig string) (int, bool) {
 	sig = strings.TrimSpace(sig)
 	switch sig {
 	case "bool":
-		return 1
+		return 1, true
 	case "address", "address payable":
-		return 20
+		return 20, true
 	case "uint", "int":
-		return 32
+		return 32, true
 	}
-	// uintN
 	if strings.HasPrefix(sig, "uint") {
 		if rest := sig[len("uint"):]; rest != "" {
 			n, err := strconv.Atoi(rest)
 			if err == nil && n >= 8 && n <= 256 && n%8 == 0 {
-				return n / 8
+				return n / 8, true
 			}
 		}
 	}
-	// intN
 	if strings.HasPrefix(sig, "int") {
 		if rest := sig[len("int"):]; rest != "" {
 			n, err := strconv.Atoi(rest)
 			if err == nil && n >= 8 && n <= 256 && n%8 == 0 {
-				return n / 8
+				return n / 8, true
 			}
 		}
 	}
-	// bytesN (fixed). Exclude bare "bytes" (dynamic) and "bytes32" etc.
 	if strings.HasPrefix(sig, "bytes") {
 		if rest := sig[len("bytes"):]; rest != "" {
 			n, err := strconv.Atoi(rest)
 			if err == nil && n >= 1 && n <= 32 {
-				return n
+				return n, true
 			}
 		}
 	}
-	return 32
+	return 0, false
+}
+
+// solFixedArrayBytes parses a Sol fixed-size value-type array
+// signature (`T[N]`, `T[N][M]`, …) and returns the total byte
+// footprint = element_size * N * M * … . Returns ok=false for
+// dynamic arrays (`T[]`), non-array signatures, and arrays whose
+// element type isn't in the recognised value-type set (callers fall
+// back to the conservative full-slot path).
+//
+// Sol §11.1: fixed-size value-type arrays pack their elements
+// tightly into consecutive storage slots. Compound shapes nest:
+// `uint8[4][2]` is two arrays of `uint8[4]`, so the total is
+// 2 × 4 × 1 = 8 bytes. Elements span slot boundaries — a 33-byte
+// array (`uint8[33]`) consumes two slots with one byte spilling
+// into the second.
+func solFixedArrayBytes(sig string) (int, bool) {
+	sig = strings.TrimSpace(sig)
+	if !strings.HasSuffix(sig, "]") {
+		return 0, false
+	}
+	openIdx := strings.LastIndex(sig, "[")
+	if openIdx < 0 {
+		return 0, false
+	}
+	closeIdx := len(sig) - 1
+	countStr := strings.TrimSpace(sig[openIdx+1 : closeIdx])
+	if countStr == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(countStr)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	inner := strings.TrimSpace(sig[:openIdx])
+	var elementSize int
+	if strings.HasSuffix(inner, "]") {
+		innerBytes, ok := solFixedArrayBytes(inner)
+		if !ok {
+			return 0, false
+		}
+		elementSize = innerBytes
+	} else {
+		size, ok := solValueTypeSize(inner)
+		if !ok {
+			return 0, false
+		}
+		elementSize = size
+	}
+	return elementSize * n, true
 }
 
 // slotState carries the per-contract packing counter used by
@@ -131,4 +190,25 @@ func advanceForMapping(state slotState) (int, slotState) {
 	slot := state.slot
 	state.slot++
 	return slot, state
+}
+
+// advanceForArrayField (W-C W9 V4, 2026-05-19) places a fixed-size
+// value-type array. Sol §11.1 says struct- and array-shaped state
+// variables always start a new slot, and the next variable after
+// them also starts a new slot — so we pre-align, occupy
+// ceil(totalBytes / 32) slots, and post-align by clearing used. The
+// returned slot index is the first slot of the array.
+func advanceForArrayField(state slotState, totalBytes int) (int, slotState) {
+	if state.used > 0 {
+		state.slot++
+		state.used = 0
+	}
+	startSlot := state.slot
+	slotsNeeded := (totalBytes + 31) / 32
+	if slotsNeeded < 1 {
+		slotsNeeded = 1
+	}
+	state.slot += slotsNeeded
+	state.used = 0
+	return startSlot, state
 }

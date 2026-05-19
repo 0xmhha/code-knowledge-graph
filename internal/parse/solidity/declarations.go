@@ -353,24 +353,32 @@ func (v *declVisitor) runStateVarDecl() {
 					}
 				}
 			}
-			// W-C W9 V2 / V3 (2026-05-18): assign packed slot index for
-			// every state-var, including mappings. V2 introduced type-
-			// size aware packing for non-mapping fields; V3 made
-			// advanceForMapping return the slot the mapping occupies
-			// so NodeMapping rows are addressable by declaration slot
-			// the same way NodeField rows are.
+			// W-C W9 V2 / V3 / V4 (2026-05-18..19): assign packed slot
+			// index for every state-var. V2 introduced type-size aware
+			// packing; V3 made mappings addressable by declaration slot;
+			// V4 handles fixed-size value-type arrays (uint8[4],
+			// uint256[2], uint8[4][2]) which Sol §11.1 lays out as
+			// new-slot-aligned blocks of ceil(elementBytes * count / 32)
+			// consecutive slots with post-slot alignment.
 			slotIndex := 0
 			containerKey := nearestContractName(nameNode, v.src)
 			state := slotPerContract[containerKey]
-			if isMapping {
+			switch {
+			case isMapping:
 				slot, newState := advanceForMapping(state)
 				slotIndex = slot
 				slotPerContract[containerKey] = newState
-			} else {
-				size := solTypeSize(signature)
-				slot, newState := advanceForField(state, size)
-				slotIndex = slot
-				slotPerContract[containerKey] = newState
+			default:
+				if arrayBytes, ok := solFixedArrayBytes(signature); ok {
+					slot, newState := advanceForArrayField(state, arrayBytes)
+					slotIndex = slot
+					slotPerContract[containerKey] = newState
+				} else {
+					size := solTypeSize(signature)
+					slot, newState := advanceForField(state, size)
+					slotIndex = slot
+					slotPerContract[containerKey] = newState
+				}
 			}
 			// W-C W8 V2 (2026-05-18): function-typed state-var marker.
 			// Detection: type_name contains `parameter` or `return_parameter`
