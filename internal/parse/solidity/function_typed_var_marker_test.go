@@ -6,6 +6,39 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// W-C W8 V6 — HasFunctionPointerCall fires on cross-contract
+// function-pointer invocations: `h.onAction(x)` where `h` is a
+// state-var of type Hub and Hub.onAction is a function-typed
+// NodeField. Pass 2 walks the receiver type chain, finds the
+// fn-typed field on the other contract, and marks the caller.
+func TestFunctionTypedVar_CrossContractCall(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "cross_contract_call.sol")
+
+	want := map[string]bool{
+		"Caller.trigger": true,
+		"Caller.noop":    false,
+		// Hub.setHook declares a fn-typed param `cb` but only
+		// assigns it to a state-var — never invokes it. V4/V5/V6
+		// look for invocations, so HasFunctionPointerCall stays
+		// false. (HasFunctionTypedVar would still be true.)
+		"Hub.setHook": false,
+	}
+	got := map[string]bool{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = n.HasFunctionPointerCall
+		}
+	}
+	for qn, w := range want {
+		if got[qn] != w {
+			t.Errorf("HasFunctionPointerCall on %q: got %v want %v", qn, got[qn], w)
+		}
+	}
+}
+
 // W-C W8 V5 — HasFunctionPointerCall fires on calls to function-
 // typed state variables (`onAction(x)` where onAction is a state-
 // var of function type). Extends V4 (bare-identifier param/local

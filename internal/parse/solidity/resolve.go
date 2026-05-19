@@ -498,6 +498,30 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// care about arbitrary-address dispatch surfaces specifically.
 	externalCallSrcs := map[string]bool{}
 
+	// W-C W8 V6 (2026-05-19): collect callable IDs that invoked a
+	// cross-contract function-pointer (receiver typed as another
+	// contract whose method is a function-typed state variable) so
+	// we can mark HasFunctionPointerCall after Pass 2b completes.
+	fnPointerCallSrcs := map[string]bool{}
+	// Index function-typed NodeField rows by (contractName, fieldName)
+	// for O(1) lookup during cross-contract dispatch resolution.
+	fnTypedFields := map[string]map[string]bool{}
+	for _, n := range out.Nodes {
+		if n.Type != types.NodeField || !n.IsFunctionTyped {
+			continue
+		}
+		dot := strings.IndexByte(n.QualifiedName, '.')
+		if dot <= 0 || dot == len(n.QualifiedName)-1 {
+			continue
+		}
+		contract := n.QualifiedName[:dot]
+		field := n.QualifiedName[dot+1:]
+		if fnTypedFields[contract] == nil {
+			fnTypedFields[contract] = map[string]bool{}
+		}
+		fnTypedFields[contract][field] = true
+	}
+
 	// Pass 2b — everything except W1 inheritance (already done) and any
 	// future detector-specific branches go through this loop. W2 overrides
 	// rely on the `parents` index built between the two sub-passes.
@@ -580,6 +604,33 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 					containerIDByFuncID, funcByQName, nodeFile,
 				); ok {
 					out.Edges = append(out.Edges, edge)
+				}
+				continue
+			}
+			// W-C W8 V6 (2026-05-19) — cross-contract function-pointer
+			// call. Resolves `r.handler(x)` to a marker on the
+			// enclosing callable when r's declared type is a known
+			// contract whose `handler` is a function-typed state-var.
+			// No edge is emitted; the marker is the only side
+			// effect.
+			if pr.DispatchKind == dispatchKindCrossContractFnPointerCall {
+				sep := strings.IndexByte(pr.TargetQName, '|')
+				if sep < 0 {
+					continue
+				}
+				receiverName := pr.TargetQName[:sep]
+				methodName := pr.TargetQName[sep+1:]
+				contractID, ok := containerIDByFuncID[pr.SrcID]
+				if !ok {
+					continue
+				}
+				typeName := lookupReceiverType(receiverName, contractID, pr.SrcID,
+					pr.Line, pr.ByteOffset, stateVarTypes, paramTypes, localVarTypes)
+				if typeName == "" {
+					continue
+				}
+				if fields, has := fnTypedFields[typeName]; has && fields[methodName] {
+					fnPointerCallSrcs[pr.SrcID] = true
 				}
 				continue
 			}
@@ -783,6 +834,17 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 		for i := range out.Nodes {
 			if externalCallSrcs[out.Nodes[i].ID] {
 				out.Nodes[i].HasExternalCall = true
+			}
+		}
+	}
+	// W-C W8 V6 (2026-05-19): apply HasFunctionPointerCall to every
+	// callable that invoked a cross-contract function-pointer (a
+	// member_expression whose property is a function-typed state-var
+	// on the receiver's contract).
+	if len(fnPointerCallSrcs) > 0 {
+		for i := range out.Nodes {
+			if fnPointerCallSrcs[out.Nodes[i].ID] {
+				out.Nodes[i].HasFunctionPointerCall = true
 			}
 		}
 	}

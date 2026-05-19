@@ -219,6 +219,12 @@ func (v *declVisitor) visit() {
 	// Complements W8 V2's NodeField marker and surfaces indirect
 	// dispatch surfaces for security tooling.
 	v.runFunctionTypedVarMarker()
+	// W8 V6 (2026-05-19): queue `<receiver>.<method>(...)` PendingRefs
+	// so Pass 2 can resolve cross-contract function-pointer calls
+	// (receiver typed as another contract whose method is a function-
+	// typed state-var). Pass 2 marks HasFunctionPointerCall when the
+	// chain resolves; the walker itself does not emit any edge.
+	v.runCrossContractFnPointerCall()
 	// W10 V5 (2026-05-19): mark HasExternalCall=true on callables
 	// that perform `address(x).call(...)` / `payable(x).call(...)`
 	// cast-shape low-level calls. Complements the V4 Pass-2 mark
