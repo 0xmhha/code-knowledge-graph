@@ -75,7 +75,16 @@ func (v *declVisitor) runExternalCallCastMarker() {
 				continue
 			}
 			methodName := property.Utf8Text(v.src)
-			if !isLowLevelMethod(methodName) {
+			// W-C W10 V12 (2026-05-19): also accept value-
+			// transfer methods (send / transfer) for the self-
+			// cast detection. `payable(this).transfer(value)`
+			// is a self-reentrant surface even though the
+			// existing low-level call branch wouldn't admit it.
+			// Arbitrary-address transfers (`payable(target)
+			// .transfer(...)`) stay on the V5 HasValueTransfer
+			// path and don't trigger HasExternalCall — the
+			// value-transfer marker is its own signal.
+			if !isLowLevelMethod(methodName) && !isValueTransferMethod(methodName) {
 				continue
 			}
 			parent := member.Parent()
@@ -100,7 +109,11 @@ func (v *declVisitor) runExternalCallCastMarker() {
 				if methodName == "delegatecall" {
 					selfDelegatecallDead[id] = true
 				}
-			} else {
+			} else if isLowLevelMethod(methodName) {
+				// Arbitrary-address low-level call (V5 path).
+				// Arbitrary-address value-transfer is already
+				// covered by W8 V1's HasValueTransfer marker
+				// — don't double-count it on HasExternalCall.
 				affected[id] = true
 			}
 		}
