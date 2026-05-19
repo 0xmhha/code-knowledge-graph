@@ -48,7 +48,11 @@ CREATE TABLE IF NOT EXISTS nodes (
     pagerank      DOUBLE PRECISION NOT NULL DEFAULT 0,
     usage_score   DOUBLE PRECISION NOT NULL DEFAULT 0,
     confidence    TEXT    NOT NULL DEFAULT 'EXTRACTED',
-    sub_kind      TEXT    NOT NULL DEFAULT ''
+    sub_kind      TEXT    NOT NULL DEFAULT '',
+    -- attrs (W-C W11 V9, 2026-05-19): JSON-blob carrying every
+    -- types.Node marker that doesn't have its own column.
+    -- Mirrors the SQLite nodes.attrs added under schema 1.9.
+    attrs         TEXT    NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -247,6 +251,7 @@ func insertNodes(ctx context.Context, pool *pgxpool.Pool, nodes []types.Node, lo
 
 	rows := make([][]any, 0, len(nodes))
 	for _, n := range nodes {
+		attrs := marshalNodeAttrs(&n)
 		rows = append(rows, []any{
 			n.ID,
 			string(n.Type),
@@ -268,6 +273,7 @@ func insertNodes(ctx context.Context, pool *pgxpool.Pool, nodes []types.Node, lo
 			n.UsageScore,
 			string(n.Confidence),
 			n.SubKind,
+			attrs,
 		})
 	}
 
@@ -276,7 +282,7 @@ func insertNodes(ctx context.Context, pool *pgxpool.Pool, nodes []types.Node, lo
 		"start_line", "end_line", "start_byte", "end_byte", "language",
 		"visibility", "signature", "doc_comment", "complexity",
 		"in_degree", "out_degree", "pagerank", "usage_score",
-		"confidence", "sub_kind",
+		"confidence", "sub_kind", "attrs",
 	}
 	n, err := pool.CopyFrom(
 		ctx,
