@@ -51,6 +51,47 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V10 — emit-statement propagation. `emit Event(handler)`
+// logs the fn-typed value to chain — propagation surface that
+// the V8 assignment / argument and V9 return passes don't cover.
+// HasFunctionPointerPropagation=true on the emitting function;
+// HasFunctionPointerCall=false (no invocation).
+func TestFunctionTypedVar_EmitPropagation(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "emit_prop.sol")
+
+	want := map[string]struct {
+		propagation bool
+		invocation  bool
+	}{
+		"EventEmitter.logHandler": {propagation: true, invocation: false},
+		"EventEmitter.logPlain":   {propagation: false, invocation: false},
+	}
+	got := map[string]struct {
+		propagation bool
+		invocation  bool
+	}{}
+	for _, n := range nodes {
+		if n.Type != types.NodeFunction {
+			continue
+		}
+		if _, ok := want[n.QualifiedName]; ok {
+			got[n.QualifiedName] = struct {
+				propagation bool
+				invocation  bool
+			}{n.HasFunctionPointerPropagation, n.HasFunctionPointerCall}
+		}
+	}
+	for qn, w := range want {
+		g := got[qn]
+		if g.propagation != w.propagation {
+			t.Errorf("%s HasFunctionPointerPropagation: got %v want %v", qn, g.propagation, w.propagation)
+		}
+		if g.invocation != w.invocation {
+			t.Errorf("%s HasFunctionPointerCall: got %v want %v", qn, g.invocation, w.invocation)
+		}
+	}
+}
+
 // W-C W8 V9 — return-position propagation. `return cb;` where cb
 // is a fn-typed param/local/state-var counts as propagation
 // (HasFunctionPointerPropagation=true), parallel to the V8

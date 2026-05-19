@@ -221,6 +221,34 @@ func (v *declVisitor) findFunctionPointerPropagators(
 		}
 	}
 
+	// W-C W8 V10 (2026-05-19) — Pass 4: emit-statement propagation.
+	// `emit MyEvent(handler)` passes a fn-typed value through an
+	// event, which logs it to the chain — security-relevant
+	// propagation that the assignment / argument / return passes
+	// don't cover. We scan every identifier descendant of each
+	// emit_statement and mark any that matches a fn-typed name.
+	const eq = `(emit_statement) @emit`
+	if query, qErr := sitter.NewQuery(v.lang, eq); qErr == nil {
+		defer query.Close()
+		cur := sitter.NewQueryCursor()
+		defer cur.Close()
+		matches := cur.Matches(query, v.root, v.src)
+		names := query.CaptureNames()
+		for {
+			m := matches.Next()
+			if m == nil {
+				break
+			}
+			for _, c := range m.Captures {
+				if names[c.Index] != "emit" {
+					continue
+				}
+				emitNode := c.Node
+				walkIdentifiers(&emitNode, markIfFnTyped)
+			}
+		}
+	}
+
 	// W-C W8 V9 (2026-05-19) — Pass 3: return-position propagation.
 	// `return cb;` where cb is a fn-typed param/local/state-var
 	// propagates the function pointer to the caller.
@@ -349,6 +377,25 @@ func (v *declVisitor) findFunctionPointerCallers(
 		}
 	}
 	return out
+}
+
+// walkIdentifiers recurses into a subtree and invokes fn for every
+// identifier descendant. Used by the W8 V10 emit-statement walker
+// so an identifier nested under nested call_arguments / expression
+// wrappers is still inspected. The recursion bound is the AST
+// depth of a single emit statement (typically <10) so cost stays
+// trivial.
+func walkIdentifiers(n *sitter.Node, fn func(*sitter.Node)) {
+	if n == nil {
+		return
+	}
+	if n.Kind() == "identifier" {
+		fn(n)
+		return
+	}
+	for i := uint(0); i < n.NamedChildCount(); i++ {
+		walkIdentifiers(n.NamedChild(i), fn)
+	}
 }
 
 // bareIdentifierCallee returns the callee identifier of a
