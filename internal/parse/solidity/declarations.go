@@ -332,6 +332,19 @@ func (v *declVisitor) runStateVarDecl() {
 				continue
 			}
 			declNode := c.Node
+			// W-C W9 V9 (2026-05-19): operator-form using directives
+			// (`using {f as +} for T;`) misparse as ERROR-wrapped
+			// state_variable_declaration nodes in vendored tree-
+			// sitter-solidity v1.2.11. V2.20's recovery walker emits
+			// the binding edge for those — runStateVarDecl must NOT
+			// also emit a NodeField for them, because doing so
+			// inflates the per-contract slot count by one for every
+			// operator-form directive (Sol §11.1 says using
+			// directives don't consume storage). Skip when the
+			// misparse signature matches.
+			if _, _, ok := matchOperatorFormStateVar(&declNode, v.src); ok {
+				continue
+			}
 			nameNode := declNode.ChildByFieldName("name")
 			typeNode := declNode.ChildByFieldName("type")
 			if nameNode == nil {
