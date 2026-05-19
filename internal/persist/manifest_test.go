@@ -176,6 +176,6 @@ func TestManifestRoundTrip_FilesAbsent_LegacyCompat(t *testing.T) {
 
 // persistSchemaVersionForTest mirrors the buildpipe.SchemaVersion constant
 // without importing the package (avoids import cycle in persist tests).
-// Update when the constant moves. Bumped to 1.7 by Track C (dispatch_kind +
-// uses_type/instantiates emit sites + goroutine lock-edge fix).
-func persistSchemaVersionForTest() string { return "1.7" }
+// Update when the constant moves. Current value tracks W-C W11 V8
+// (2026-05-19): 1.11 for the nodes.attrs JSON-blob column.
+func persistSchemaVersionForTest() string { return "1.11" }

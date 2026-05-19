@@ -70,9 +70,23 @@ import (
 // docs/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4 and
 // docs/design/{ts-async-await-and-interface,solidity-inheritance-and-interface-dispatch}.md.
 //
+// Bumped from "1.10" to "1.11" by W-C W11 V7 (2026-05-19): the
+// nodes table gains the `attrs` JSON-blob column that carries
+// every types.Node marker without its own SQLite column (SlotIndex,
+// HasAssembly, HasLowLevelCall, HasValueTransfer, YulBuiltins,
+// IsFunctionTyped, HasFunctionTypedVar, HasFunctionPointerCall,
+// HasFunctionPointerPropagation, HasExternalCall,
+// HasInheritanceMROFallback, HasSelfReentrantCall,
+// HasSelfDelegatecallDead). Migrate() ALTER-adds the column on
+// pre-1.11 DBs via ensureAttrsColumn — incremental builds still
+// upgrade — but the cache-key flip forces a cold rebuild on first
+// 1.11 run so the new attrs land for every node, not just the
+// ones touched by dirty files. See internal/persist/node_attrs.go
+// for the JSON encoding.
+//
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.10"
+const SchemaVersion = "1.11"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int
