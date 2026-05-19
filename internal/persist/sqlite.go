@@ -92,8 +92,46 @@ func (s *sqliteStore) Migrate() error {
 	if err := ensureDispatchKindColumn(s.db, "pending_refs"); err != nil {
 		return fmt.Errorf("migrate dispatch_kind on pending_refs: %w", err)
 	}
-	// Schema 1.9: no migrations required (see func docstring).
-	// Schema 1.10: no migrations required — slot-only enum bump.
+	// W-C W11 V7 (2026-05-19): nodes.attrs JSON blob carries every
+	// types.Node marker that doesn't have its own column. Pre-1.9
+	// DBs need ALTER ADD.
+	if err := ensureAttrsColumn(s.db); err != nil {
+		return fmt.Errorf("migrate attrs on nodes: %w", err)
+	}
+	return nil
+}
+
+// ensureAttrsColumn ALTER-adds nodes.attrs on pre-1.9 DBs.
+// Idempotent: detects the column via PRAGMA table_info and no-ops
+// when already present.
+func ensureAttrsColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(nodes)`)
+	if err != nil {
+		return fmt.Errorf("table_info(nodes): %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "attrs" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE nodes ADD COLUMN attrs TEXT`); err != nil {
+		return fmt.Errorf("alter nodes add attrs: %w", err)
+	}
 	return nil
 }
 
@@ -142,7 +180,10 @@ func ensureDispatchKindColumn(db *sql.DB, table string) error {
 	return nil
 }
 
-// InsertNodes bulk-inserts nodes (transactional).
+// InsertNodes bulk-inserts nodes (transactional). The trailing
+// attrs column carries the W11 V7 JSON blob (SlotIndex,
+// HasAssembly, IsFunctionTyped, HasFunctionPointerCall,
+// HasExternalCall, YulBuiltins, HasInheritanceMROFallback, …).
 func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -152,18 +193,19 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO nodes
 		(id, type, name, qualified_name, file_path, start_line, end_line,
 		 start_byte, end_byte, language, visibility, signature, doc_comment,
-		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind, attrs)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, n := range nodes {
+		attrs := marshalNodeAttrs(&n)
 		if _, err := stmt.Exec(n.ID, n.Type, n.Name, n.QualifiedName, n.FilePath,
 			n.StartLine, n.EndLine, n.StartByte, n.EndByte, n.Language,
 			n.Visibility, n.Signature, n.DocComment, n.Complexity,
 			n.InDegree, n.OutDegree, n.PageRank, n.UsageScore,
-			string(n.Confidence), n.SubKind); err != nil {
+			string(n.Confidence), n.SubKind, attrs); err != nil {
 			return fmt.Errorf("insert node %s: %w", n.ID, err)
 		}
 	}
@@ -175,18 +217,19 @@ func (s *sqliteStore) GetNode(id string) (types.Node, error) {
 	row := s.db.QueryRow(`SELECT id, type, name, qualified_name, file_path,
 		start_line, end_line, start_byte, end_byte, language, visibility,
 		signature, doc_comment, complexity, in_degree, out_degree, pagerank,
-		usage_score, confidence, sub_kind FROM nodes WHERE id = ?`, id)
+		usage_score, confidence, sub_kind, COALESCE(attrs,'') FROM nodes WHERE id = ?`, id)
 	var n types.Node
-	var conf string
+	var conf, attrs string
 	err := row.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
 		&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
 		&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
 		&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
-		&conf, &n.SubKind)
+		&conf, &n.SubKind, &attrs)
 	if err != nil {
 		return n, err
 	}
 	n.Confidence = types.Confidence(conf)
+	unmarshalNodeAttrs(attrs, &n)
 	return n, nil
 }
 
@@ -410,7 +453,7 @@ const nodeColumns = `id, type, name, qualified_name, file_path,
 	start_line, end_line, start_byte, end_byte, language,
 	COALESCE(visibility,''), COALESCE(signature,''), COALESCE(doc_comment,''),
 	COALESCE(complexity,0), in_degree, out_degree, pagerank, usage_score,
-	confidence, COALESCE(sub_kind,'')`
+	confidence, COALESCE(sub_kind,''), COALESCE(attrs,'')`
 
 // QueryNodes returns either top-level packages (when parent is empty) or
 // the children of parent via the pkg_tree join. Limit caps the result set.
@@ -593,7 +636,7 @@ func (s *sqliteStore) SearchFTS(q string, limit int) ([]types.Node, error) {
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
 		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
-		n.confidence, COALESCE(n.sub_kind,'')
+		n.confidence, COALESCE(n.sub_kind,''), COALESCE(n.attrs,'')
 		FROM nodes_fts f
 		JOIN nodes n ON n.rowid = f.rowid
 		WHERE nodes_fts MATCH ? LIMIT ?`, q, limit)
@@ -720,7 +763,7 @@ func (s *sqliteStore) SearchSubstr(q string, limit int) ([]types.Node, error) {
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
 		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
-		n.confidence, COALESCE(n.sub_kind,'')
+		n.confidence, COALESCE(n.sub_kind,''), COALESCE(n.attrs,'')
 		FROM nodes n
 		WHERE n.name LIKE ? OR n.qualified_name LIKE ? LIMIT ?`, pat, pat, limit)
 	if err != nil {
@@ -751,15 +794,16 @@ func scanNodes(rows *sql.Rows) ([]types.Node, error) {
 	var out []types.Node
 	for rows.Next() {
 		var n types.Node
-		var conf string
+		var conf, attrs string
 		if err := rows.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
 			&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
 			&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
 			&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
-			&conf, &n.SubKind); err != nil {
+			&conf, &n.SubKind, &attrs); err != nil {
 			return nil, fmt.Errorf("scan node row: %w", err)
 		}
 		n.Confidence = types.Confidence(conf)
+		unmarshalNodeAttrs(attrs, &n)
 		out = append(out, n)
 	}
 	if err := rows.Err(); err != nil {

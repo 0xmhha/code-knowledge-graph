@@ -9,23 +9,19 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// TestPipelineMultilangV6Markers — W-C W11 V6. Runs the full
+// TestPipelineMultilangV6Markers — W-C W11 V6 / V7. Runs the full
 // buildpipe.Run cold-rebuild pipeline over a multi-language
 // fixture (Sol + TS + Go) and verifies the round-trip contract
-// for the *currently persisted* surface: node identity by
-// qualified name, file paths, language stamps, and the cross-
-// language binds_to edge produced by linker T20.
+// for both:
 //
-// Marker persistence (HasExternalCall / HasFunctionPointerCall /
-// IsFunctionTyped / SlotIndex / HasInheritanceMROFallback / …)
-// is INTENTIONALLY NOT asserted here. Writing this test
-// surfaced the broader gap that internal/persist/schema.sql's
-// nodes table stops at sub_kind — every W6-W10 marker added on
-// the types.Node struct is silently dropped at the SQLite
-// boundary today. Closing that gap is its own scope (schema
-// bump + migration helper) tracked as the next W11 V7+ item;
-// V6's job is to lock the existing round-trip contract and
-// document the gap.
+//   - Identity surface: qualified name, file path, language stamp,
+//     cross-language binds_to edges (T20 linker output).
+//   - Marker surface: HasFunctionPointerCall, IsFunctionTyped,
+//     HasExternalCall, and the rest survive the SQLite write-
+//     then-read cycle via the nodes.attrs JSON-blob column added
+//     in schema 1.9 (W11 V7). V6 originally documented this as a
+//     gap; V7 closed it and this test gained the marker
+//     assertions.
 func TestPipelineMultilangV6Markers(t *testing.T) {
 	out := t.TempDir()
 	_, err := buildpipe.Run(buildpipe.Options{
@@ -72,6 +68,29 @@ func TestPipelineMultilangV6Markers(t *testing.T) {
 		}
 		if n.FilePath == "" {
 			t.Errorf("%s: empty FilePath", qn)
+		}
+	}
+
+	// (a.1) W-C W11 V7: marker round-trip. The Sol parser stamps
+	// HasFunctionPointerCall on Wallet.trigger (W8 V5) and
+	// HasExternalCall on Wallet.relay (W10 V5). The fn-typed
+	// state-var onAction lights up IsFunctionTyped on the
+	// corresponding NodeField. All three markers MUST survive the
+	// SQLite write-then-read cycle now that schema 1.9 (nodes.attrs)
+	// is in place.
+	if n, ok := solByQName["Wallet.trigger"]; ok {
+		if !n.HasFunctionPointerCall {
+			t.Errorf("Wallet.trigger HasFunctionPointerCall: got false, want true (after V7 attrs roundtrip)")
+		}
+	}
+	if n, ok := solByQName["Wallet.relay"]; ok {
+		if !n.HasExternalCall {
+			t.Errorf("Wallet.relay HasExternalCall: got false, want true (after V7 attrs roundtrip)")
+		}
+	}
+	if n, ok := solByQName["Wallet.onAction"]; ok {
+		if !n.IsFunctionTyped {
+			t.Errorf("Wallet.onAction IsFunctionTyped: got false, want true (after V7 attrs roundtrip)")
 		}
 	}
 

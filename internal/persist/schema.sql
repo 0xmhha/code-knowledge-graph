@@ -23,7 +23,15 @@ CREATE TABLE IF NOT EXISTS nodes (
   pagerank       REAL    NOT NULL DEFAULT 0,
   usage_score    REAL    NOT NULL DEFAULT 0,
   confidence     TEXT    NOT NULL DEFAULT 'EXTRACTED',
-  sub_kind       TEXT
+  sub_kind       TEXT,
+  -- attrs (schema 1.9, W-C W11 V7) is a JSON blob column carrying the
+  -- type-Node fields that don't have their own column: SlotIndex,
+  -- HasAssembly, HasLowLevelCall, HasValueTransfer, YulBuiltins,
+  -- IsFunctionTyped, HasFunctionTypedVar, HasFunctionPointerCall,
+  -- HasExternalCall, HasInheritanceMROFallback. Future markers slot
+  -- into the JSON without further schema migration. Pre-1.9 DBs are
+  -- migrated by ensureAttrsColumn at Open() time.
+  attrs          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file  ON nodes(file_path);
