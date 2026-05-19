@@ -42,6 +42,12 @@ type declVisitor struct {
 	// candidates across files, the resolver prefers a candidate
 	// whose file path matches M's recorded source path.
 	namespacePaths map[string]string
+	// W-C W6 V6 (2026-05-19): named-import alias -> source path
+	// captured from `import {orig as alias} from "./path.sol";`.
+	// Same lookup role as namespacePaths but for the named-import
+	// form. resolveUsingForRef consults both maps when resolving a
+	// using-for binding's leading identifier.
+	importPaths map[string]string
 	// W-C W9 V5 (2026-05-19): per-file struct → byte footprint when
 	// declared as a storage state variable. Populated by
 	// computeStructSizes (called once before runStateVarDecl) by
@@ -67,6 +73,7 @@ func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.
 		importAliases:    map[string]string{},
 		namespaceAliases: map[string]bool{},
 		namespacePaths:   map[string]string{},
+		importPaths:      map[string]string{},
 		structSizes:      map[string]int{},
 	}
 	fileQ := "file:" + rel
@@ -783,6 +790,14 @@ func (v *declVisitor) runImportAliases() {
 				if lastImportName != "" {
 					v.importAliases[aliasName] = lastImportName
 					lastImportName = "" // consumed
+					// W-C W6 V6 (2026-05-19): record the named-
+					// import alias source path so resolveUsingFor
+					// Ref can disambiguate cross-file free-
+					// function homonyms the same way the V5
+					// namespace-alias path hint does.
+					if sourcePath != "" {
+						v.importPaths[aliasName] = sourcePath
+					}
 				} else {
 					// Whole-file namespace alias (V1.29).
 					v.namespaceAliases[aliasName] = true
