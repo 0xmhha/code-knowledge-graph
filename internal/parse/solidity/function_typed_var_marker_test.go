@@ -51,6 +51,34 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V13 — mapping value as function pointer. The state-var
+// `mapping(address => function(...)) handlers` is emitted as a
+// NodeMapping (mapping's own node type) rather than NodeField,
+// but the IsFunctionTyped flag still applies — V13 drops the
+// V2 `!isMapping` guard so the same shared
+// typeNameIsFunctionTyped check fires on the mapping outer
+// type_name (its nested type_name child carries the function
+// signature).
+func TestFunctionTypedVar_MappingValueFunctionPointer(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "fn_pointer_mapping.sol")
+
+	// NodeMapping uses a `<name>:mapping` QualifiedName shape;
+	// match by Name + Type to avoid the shape detail.
+	var mapping types.Node
+	for _, n := range nodes {
+		if n.Name == "handlers" && n.Type == types.NodeMapping {
+			mapping = n
+			break
+		}
+	}
+	if mapping.ID == "" {
+		t.Fatalf("handlers mapping not indexed as NodeMapping")
+	}
+	if !mapping.IsFunctionTyped {
+		t.Errorf("IsFunctionTyped on fn-typed mapping: got false, want true")
+	}
+}
+
 // W-C W8 V12 — function pointer array marker. typeNameIsFunctionTyped
 // now recurses into array_type wrappers so
 // `function(uint256)[] handlers` lights up the same markers as

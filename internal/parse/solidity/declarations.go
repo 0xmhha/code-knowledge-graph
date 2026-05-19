@@ -452,12 +452,16 @@ func (v *declVisitor) runStateVarDecl() {
 			// signatures instead of the usual primitive_type / user_defined_type
 			// / mapping shape). NodeMapping path keeps IsFunctionTyped false
 			// since mappings are a distinct grammar shape.
-			// W-C W8 V12 (2026-05-19): delegate to the shared
-			// typeNameIsFunctionTyped helper so scalar AND
-			// array-of-function-type state vars both light up
-			// IsFunctionTyped. The helper recurses into
-			// array_type wrappers.
-			isFunctionTyped := !isMapping && typeNameIsFunctionTyped(typeNode)
+			// W-C W8 V12 (2026-05-19) / V13 (2026-05-19): delegate
+			// to the shared typeNameIsFunctionTyped helper. V12
+			// added array_type recursion; V13 drops the
+			// !isMapping guard so `mapping(K => function(...))`
+			// also lights up the marker. typeNameIsFunctionTyped
+			// recurses into nested type_name children and
+			// returns false for ordinary mappings whose value
+			// is a primitive — no false positives from removing
+			// the guard.
+			isFunctionTyped := typeNameIsFunctionTyped(typeNode)
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: name, QualifiedName: qname,
 				FilePath: v.rel, StartLine: line, EndLine: line,
