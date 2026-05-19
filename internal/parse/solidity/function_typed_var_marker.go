@@ -430,6 +430,13 @@ func bareIdentifierCallee(callNode *sitter.Node) *sitter.Node {
 // `return_parameter` named child. Mirrors the inline check in
 // runStateVarDecl (W8 V2) so both walkers agree on what counts as
 // function-typed.
+//
+// W-C W8 V12 (2026-05-19): also recurses into nested type_name
+// wrappers so `function(uint256)[] handlers` lights up the same
+// markers as the scalar form. tree-sitter-solidity v1.2.11 models
+// the array form as an outer type_name whose first named child is
+// the inner element type_name (the surrounding `[]` is punctuation,
+// not a separate AST node).
 func typeNameIsFunctionTyped(typeNode *sitter.Node) bool {
 	if typeNode == nil {
 		return false
@@ -439,8 +446,16 @@ func typeNameIsFunctionTyped(typeNode *sitter.Node) bool {
 		if child == nil {
 			continue
 		}
-		if child.Kind() == "parameter" || child.Kind() == "return_parameter" {
+		switch child.Kind() {
+		case "parameter", "return_parameter":
 			return true
+		case "type_name":
+			// V12: nested type_name (array wrapper). Recurse
+			// into the element type — if it's a function type,
+			// the whole array is fn-typed.
+			if typeNameIsFunctionTyped(child) {
+				return true
+			}
 		}
 	}
 	return false

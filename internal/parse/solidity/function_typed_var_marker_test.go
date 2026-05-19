@@ -51,6 +51,47 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V12 — function pointer array marker. typeNameIsFunctionTyped
+// now recurses into array_type wrappers so
+// `function(uint256)[] handlers` lights up the same markers as
+// the scalar form. The state-var gets IsFunctionTyped=true and a
+// callable declaring an array-of-fn local lights up
+// HasFunctionTypedVar.
+func TestFunctionTypedVar_FunctionPointerArray(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "fn_pointer_array.sol")
+
+	// (a) state-var field carries IsFunctionTyped.
+	var field types.Node
+	for _, n := range nodes {
+		if n.QualifiedName == "ArrayHolder.handlers" && n.Type == types.NodeField {
+			field = n
+			break
+		}
+	}
+	if field.ID == "" {
+		t.Fatalf("ArrayHolder.handlers not indexed")
+	}
+	if !field.IsFunctionTyped {
+		t.Errorf("ArrayHolder.handlers IsFunctionTyped: got false, want true")
+	}
+
+	// (b) function declaring the array-of-fn local lights up
+	// HasFunctionTypedVar.
+	var fn types.Node
+	for _, n := range nodes {
+		if n.QualifiedName == "ArrayHolder.captureArray" && n.Type == types.NodeFunction {
+			fn = n
+			break
+		}
+	}
+	if fn.ID == "" {
+		t.Fatalf("ArrayHolder.captureArray not indexed")
+	}
+	if !fn.HasFunctionTypedVar {
+		t.Errorf("ArrayHolder.captureArray HasFunctionTypedVar: got false, want true")
+	}
+}
+
 // W-C W8 V11 — try/catch with fn-typed returns parameter
 // propagation. `try provider.getCallback() returns (function(...)
 // cb) { handler = cb; }` extracts a function pointer from a try-
