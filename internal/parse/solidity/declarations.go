@@ -148,6 +148,13 @@ func (v *declVisitor) visit() {
 	// container in the file (file-level binding applies to all). Closes
 	// V2.16 row 1 grammar-block.
 	v.runFileLevelUsingFor()
+	// W6 V2.5 (2026-05-19): file-level operator-form using directive
+	// ERROR recovery. `using {f as +, g as -} for T [global];` at
+	// source_file scope parses to an ERROR child whose braced body
+	// isn't surfaced as named children; the walker extracts the bound
+	// function names and bound type from the raw ERROR text and emits
+	// one binding pair per (container, function).
+	v.runFileLevelOperatorForm()
 	// W6 V2.20 (2026-05-18): operator-form using directive ERROR
 	// recovery. `using {f as +} for T;` parses to a misclassified
 	// state_variable_declaration; pattern-match the shape and emit
