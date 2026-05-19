@@ -230,6 +230,12 @@ func (v *declVisitor) visit() {
 	// cast-shape low-level calls. Complements the V4 Pass-2 mark
 	// for bare-identifier address-typed receivers.
 	v.runExternalCallCastMarker()
+	// W10 V6 (2026-05-19): queue PendingRefs for chained-call
+	// shape (`getTarget().call(...)`). Pass 2 looks up the inner
+	// function's first return type via funcReturnTypes and marks
+	// HasExternalCall on the source callable when the type is
+	// address / address payable.
+	v.runChainedExternalCall()
 	v.collectABI()
 }
 

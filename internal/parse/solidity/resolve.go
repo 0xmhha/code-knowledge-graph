@@ -607,6 +607,37 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				}
 				continue
 			}
+			// W-C W10 V6 (2026-05-19) — chained-call shape for
+			// HasExternalCall. `getTarget().call(data)` resolves
+			// the inner function's first return type via
+			// funcReturnTypes; if that type is address-like, mark
+			// the source. No edge emitted.
+			if pr.DispatchKind == dispatchKindChainedExternalCall {
+				sep := strings.IndexByte(pr.TargetQName, '|')
+				if sep < 0 {
+					continue
+				}
+				innerFnName := pr.TargetQName[:sep]
+				containerName := containerNameByID[containerIDByFuncID[pr.SrcID]]
+				var innerFuncID string
+				if containerName != "" {
+					if ids := funcByQName[containerName+"."+innerFnName]; len(ids) > 0 {
+						innerFuncID = pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+					}
+				}
+				if innerFuncID == "" {
+					if ids := funcByQName[innerFnName]; len(ids) > 0 {
+						innerFuncID = pickSameFileCandidate(ids, nodeFile[pr.SrcID], nodeFile)
+					}
+				}
+				if innerFuncID == "" {
+					continue
+				}
+				if rt := funcReturnTypes[innerFuncID]; rt == "address" || rt == "address payable" {
+					externalCallSrcs[pr.SrcID] = true
+				}
+				continue
+			}
 			// W-C W8 V6 (2026-05-19) — cross-contract function-pointer
 			// call. Resolves `r.handler(x)` to a marker on the
 			// enclosing callable when r's declared type is a known
