@@ -99,11 +99,19 @@ func (v *declVisitor) runFileLevelOperatorForm() {
 			// disambiguation hint. resolveUsingForRef prefers
 			// candidates whose file path matches the hint before
 			// falling back to pickSameFileCandidate.
+			//
+			// W-C W6 V8 (2026-05-19): also append the method name (the
+			// tail's leaf segment when present, e.g. `add` from
+			// `M.SubMath.add`) encoded with the RFC record separator
+			// so resolveUsingForRef can surface it on Edge.DispatchKind.
 			target := libName
 			if path, has := v.namespacePaths[entry.leading]; has {
 				target = libName + "||" + path
 			} else if path, has := v.importPaths[entry.leading]; has {
 				target = libName + "||" + path
+			}
+			if methodName := leafSegment(entry.tail); methodName != "" && methodName != libName {
+				target = target + "\x1e" + methodName
 			}
 			for _, srcID := range containerIDs {
 				v.pending = append(v.pending, parse.PendingRef{
@@ -125,6 +133,21 @@ func (v *declVisitor) runFileLevelOperatorForm() {
 			}
 		}
 	}
+}
+
+// leafSegment returns the last dot-segment of a dotted path. For
+// `SubMath.addOne` it returns `addOne`; for bare `mul` it returns
+// `mul`; for empty input it returns `""`. Used by the file-level
+// operator-form walker (W6 V8) to extract the method name when
+// the entry was a 3+ segment path like `M.SubMath.addOne`.
+func leafSegment(path string) string {
+	if path == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(path, "."); idx >= 0 {
+		return path[idx+1:]
+	}
+	return path
 }
 
 // resolveUsingBindingLeading normalises a using-for binding entry's

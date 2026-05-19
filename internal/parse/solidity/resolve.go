@@ -1233,13 +1233,23 @@ func resolveUsingForRef(
 	byName map[types.NodeType]map[string][]string,
 	nodeFile map[string]string,
 ) (types.Edge, bool) {
-	// W-C W6 V5 (2026-05-19): the file-level operator-form walker
-	// can attach a "||<importPath>" disambiguation hint to the
-	// PendingRef's TargetQName when the entry came from a
-	// namespace alias. Split here so the rest of the lookup uses
-	// the bare library / free-function name.
+	// W-C W6 V5 / V8 (2026-05-19): the using-for walkers may attach
+	// two TargetQName hints to a binding PendingRef:
+	//
+	//   - "||<importPath>" — V5/V6 namespace / named-import alias
+	//     source path for cross-file homonym disambiguation.
+	//   - "\x1e<methodName>" — V8 method name from `Lib.method`
+	//     forms so the Edge.DispatchKind can surface it.
+	//
+	// The two separators are distinct (`||` vs `\x1e`) so the
+	// decode order doesn't matter. Strip both before the lookup.
 	target := pr.TargetQName
 	pathHint := ""
+	methodName := ""
+	if idx := strings.Index(target, "\x1e"); idx >= 0 {
+		methodName = target[idx+1:]
+		target = target[:idx]
+	}
 	if idx := strings.Index(target, "||"); idx >= 0 {
 		pathHint = target[idx+2:]
 		target = target[:idx]
@@ -1268,9 +1278,19 @@ func resolveUsingForRef(
 	if srcFile != "" && nodeFile[dstID] != "" && srcFile != nodeFile[dstID] {
 		conf = types.ConfInferred
 	}
+	// W-C W6 V8 (2026-05-19): when the walker carried a method name,
+	// publish it on Edge.DispatchKind as `using_for|<method>` so
+	// downstream consumers can read which library member the using
+	// directive targets without re-parsing source. Empty method
+	// keeps the bare `using_for` value for backward compatibility.
+	dispatchKind := dispatchKindUsingFor
+	if methodName != "" {
+		dispatchKind = dispatchKindUsingFor + "|" + methodName
+	}
 	return types.Edge{
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeUsesFor,
 		Line: pr.Line, Count: 1, Confidence: conf,
+		DispatchKind: dispatchKind,
 	}, true
 }
 

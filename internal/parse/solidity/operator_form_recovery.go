@@ -52,10 +52,21 @@ const dispatchKindUsingForOperator = "using_for_operator"
 // is extracted from the trailing ERROR text by stripping the leading
 // operator characters and the " for " separator.
 func matchOperatorFormStateVar(node *sitter.Node, src []byte) (string, string, bool) {
+	lib, boundType, _, ok := matchOperatorFormStateVarFull(node, src)
+	return lib, boundType, ok
+}
+
+// matchOperatorFormStateVarFull is the W-C W6 V8 (2026-05-19)
+// variant that also returns the method name embedded in the
+// misparse (e.g. `add` from `using {Math.add as +}`). The legacy
+// 3-tuple wrapper above keeps the original callers compiling
+// without forcing them to consume the method when they don't need
+// it.
+func matchOperatorFormStateVarFull(node *sitter.Node, src []byte) (string, string, string, bool) {
 	if node == nil || node.Kind() != "state_variable_declaration" || !node.HasError() {
-		return "", "", false
+		return "", "", "", false
 	}
-	var libName string
+	var libName, methodName string
 	var hasAsIdent bool
 	var trailingError string
 	for i := uint(0); i < node.NamedChildCount(); i++ {
@@ -65,12 +76,16 @@ func matchOperatorFormStateVar(node *sitter.Node, src []byte) (string, string, b
 		}
 		switch child.Kind() {
 		case "type_name":
-			// Look for user_defined_type child with first identifier
-			// as the library name.
+			// Look for user_defined_type child. First identifier is
+			// the library name; second identifier (if present) is
+			// the method name in the `Lib.method` form.
 			udt := child.NamedChild(0)
 			if udt != nil && udt.Kind() == "user_defined_type" {
 				if id := udt.NamedChild(0); id != nil && id.Kind() == "identifier" {
 					libName = id.Utf8Text(src)
+				}
+				if id := udt.NamedChild(1); id != nil && id.Kind() == "identifier" {
+					methodName = id.Utf8Text(src)
 				}
 			}
 		case "identifier":
@@ -79,28 +94,24 @@ func matchOperatorFormStateVar(node *sitter.Node, src []byte) (string, string, b
 			}
 		case "ERROR":
 			text := child.Utf8Text(src)
-			// Operator-form trailing ERROR text shape: "<op>} for <type>"
-			// or "<op>) for <type>". Tolerate leading whitespace.
 			if strings.Contains(text, " for ") {
 				trailingError = strings.TrimSpace(text)
 			}
 		}
 	}
 	if !hasAsIdent || libName == "" || trailingError == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	// Extract bound type: split on " for ", take the second part,
-	// trim trailing punctuation (";", whitespace).
 	idx := strings.Index(trailingError, " for ")
 	if idx < 0 {
-		return "", "", false
+		return "", "", "", false
 	}
 	rest := strings.TrimSpace(trailingError[idx+len(" for "):])
 	rest = strings.TrimRight(rest, ";} \t\n")
 	if rest == "" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return libName, rest, true
+	return libName, rest, methodName, true
 }
 
 // runOperatorFormRecovery walks every state_variable_declaration
@@ -129,7 +140,7 @@ func (v *declVisitor) runOperatorFormRecovery() {
 				continue
 			}
 			node := c.Node
-			libName, typeName, ok := matchOperatorFormStateVar(&node, v.src)
+			libName, typeName, methodName, ok := matchOperatorFormStateVarFull(&node, v.src)
 			if !ok {
 				continue
 			}
@@ -158,10 +169,17 @@ func (v *declVisitor) runOperatorFormRecovery() {
 				libName = orig
 			}
 
+			// W-C W6 V8 (2026-05-19): encode the method name with the
+			// RFC record separator so resolveUsingForRef can decode it
+			// without colliding with V5's `||<path>` hint syntax.
+			target := libName
+			if methodName != "" {
+				target = libName + "\x1e" + methodName
+			}
 			v.pending = append(v.pending, parse.PendingRef{
 				SrcID:        srcID,
 				EdgeType:     types.EdgeUsesFor,
-				TargetQName:  libName,
+				TargetQName:  target,
 				Line:         line,
 				ByteOffset:   byteOff,
 				DispatchKind: dispatchKindUsingFor,
