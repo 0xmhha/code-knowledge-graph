@@ -498,6 +498,13 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// care about arbitrary-address dispatch surfaces specifically.
 	externalCallSrcs := map[string]bool{}
 
+	// W-C W6 V10 (2026-05-19): dedup EdgeUsesFor emit. Multiple
+	// walkers can pattern-match the same ERROR-wrapped misparse,
+	// so the resolver guards against double emit by remembering
+	// (Src, Dst, Type, Line, DispatchKind) tuples seen for the
+	// dispatchKindUsingFor branch.
+	usingForEdgeSeen := map[string]bool{}
+
 	// W-C W8 V6 (2026-05-19) / V7 (2026-05-19): collect callable IDs
 	// that invoked a cross-contract function-pointer (receiver typed
 	// as another contract whose method — or an inherited method — is
@@ -585,7 +592,21 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 				if edge, ok := resolveUsingForRef(
 					pr, byName, nodeFile,
 				); ok {
-					out.Edges = append(out.Edges, edge)
+					// W-C W6 V10 (2026-05-19): the file-level
+					// using_for and file-level operator-form
+					// walkers both pattern-match the same
+					// ERROR-wrapped misparse in some shapes, so
+					// the same logical binding can reach the
+					// resolver twice. Dedup on (Src, Dst, Type,
+					// Line, DispatchKind) here — the natural
+					// edge identity for using-for binding emit
+					// — so a single source-level directive lands
+					// as a single graph edge regardless of
+					// which walker caught it.
+					if !usingForEdgeSeen[edgeIdentityKey(edge)] {
+						usingForEdgeSeen[edgeIdentityKey(edge)] = true
+						out.Edges = append(out.Edges, edge)
+					}
 				}
 				continue
 			}
@@ -2609,6 +2630,15 @@ func resolveUsingForThisNestedChainCallRef(
 		Src: pr.SrcID, Dst: dstID, Type: types.EdgeCalls,
 		Line: pr.Line, Count: 1, Confidence: conf,
 	}, true
+}
+
+// edgeIdentityKey returns a stable string key identifying an
+// edge's logical identity (Src + Type + Dst + Line +
+// DispatchKind). Used by the W6 V10 dedup guard to discard
+// duplicate EdgeUsesFor emits when two walkers pattern-match
+// the same misparse.
+func edgeIdentityKey(e types.Edge) string {
+	return e.Src + "|" + string(e.Type) + "|" + e.Dst + "|" + e.DispatchKind + "|" + strconv.Itoa(e.Line)
 }
 
 // pickSameFileCandidate returns the candidate ID whose file matches srcFile
