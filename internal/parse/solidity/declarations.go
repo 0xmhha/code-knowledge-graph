@@ -35,6 +35,15 @@ type declVisitor struct {
 	// is skipped (otherwise Pass 2 byName[NodeContract] would emit a
 	// false-positive EdgeUsesFor against any unrelated contract named L).
 	namespaceAliases map[string]bool
+	// W-C W9 V5 (2026-05-19): per-file struct → byte footprint when
+	// declared as a storage state variable. Populated by
+	// computeStructSizes (called once before runStateVarDecl) by
+	// summing each member's solTypeSize / solFixedArrayBytes /
+	// recursive struct lookup with the standard slotState packing
+	// rules. Used by runStateVarDecl to route NodeField state-vars
+	// whose user_defined_type matches a known struct through the
+	// array-shaped advanceForStructField path.
+	structSizes map[string]int
 }
 
 // newDeclVisitor allocates a per-file visitor with a local abi map. The
@@ -50,6 +59,7 @@ func newDeclVisitor(rel string, src []byte, lang *sitter.Language, root *sitter.
 		abi:              map[string][]ABISig{},
 		importAliases:    map[string]string{},
 		namespaceAliases: map[string]bool{},
+		structSizes:      map[string]int{},
 	}
 	fileQ := "file:" + rel
 	v.fileID = parse.MakeID(fileQ, "sol", 0)
@@ -105,6 +115,10 @@ func (v *declVisitor) visit() {
 	v.runDecl(queryEvent, types.NodeEvent)
 	v.runDecl(queryStruct, types.NodeStruct)
 	v.runDecl(queryEnum, types.NodeEnum)
+	// W-C W9 V5 (2026-05-19): compute per-struct byte footprint so
+	// runStateVarDecl can size NodeField rows whose user_defined_type
+	// is a known struct. Must run before runStateVarDecl.
+	v.computeStructSizes()
 	v.runStateVarDecl()
 	v.runEmits()
 	v.runHasModifier()
@@ -371,6 +385,13 @@ func (v *declVisitor) runStateVarDecl() {
 			default:
 				if arrayBytes, ok := solFixedArrayBytes(signature); ok {
 					slot, newState := advanceForArrayField(state, arrayBytes)
+					slotIndex = slot
+					slotPerContract[containerKey] = newState
+				} else if structBytes, ok := v.structSizes[signature]; ok {
+					// W-C W9 V5: struct state-vars consume
+					// ceil(sum_of_field_bytes / 32) slots, with
+					// pre/post slot alignment same as arrays.
+					slot, newState := advanceForArrayField(state, structBytes)
 					slotIndex = slot
 					slotPerContract[containerKey] = newState
 				} else {
