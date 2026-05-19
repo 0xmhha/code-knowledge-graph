@@ -211,6 +211,11 @@ func (v *declVisitor) visit() {
 	// Complements W8 V2's NodeField marker and surfaces indirect
 	// dispatch surfaces for security tooling.
 	v.runFunctionTypedVarMarker()
+	// W10 V5 (2026-05-19): mark HasExternalCall=true on callables
+	// that perform `address(x).call(...)` / `payable(x).call(...)`
+	// cast-shape low-level calls. Complements the V4 Pass-2 mark
+	// for bare-identifier address-typed receivers.
+	v.runExternalCallCastMarker()
 	v.collectABI()
 }
 
