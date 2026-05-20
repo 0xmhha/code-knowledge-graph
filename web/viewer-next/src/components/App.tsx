@@ -213,7 +213,6 @@ export default function App() {
           const group = GRAPH_GROUPS.find(g => g.id === groupId);
           if (group) {
             useStore.getState().setEdgeTypeWhitelistBulk(group.edges, true);
-            // eslint-disable-next-line no-console
             console.info(
               `[ckg] auto-enabled ${group.id} ${group.label} ` +
               `(${dominantCount} edges) — trace had hidden edges only.`,

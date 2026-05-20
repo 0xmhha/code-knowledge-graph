@@ -216,6 +216,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
 
   // Mesh index for 3D mode — keeps mesh references alive so we can mutate
   // material.opacity directly on focus changes without rebuilding the scene.
+  // viewMode is intentionally in the deps so a 3D↔2D toggle drops stale mesh
+  // references (the scene is fully rebuilt on toggle and any held mesh from
+  // the previous mode would point at a disposed object).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- viewMode is the reset trigger, not a read dependency
   const meshIndex = useMemo(() => new Map<NodeId, import('three').Mesh>(), [viewMode]);
 
   // Reapply focus halo to existing meshes whenever focusDistance OR

@@ -86,6 +86,10 @@ export function usePersistedJSON<T>(
         setVal(parsed as T);
       }
     } catch { /* ignore */ }
+    // validate is intentionally omitted: this effect is a one-shot localStorage
+    // hydrate keyed off `key`, not a re-validation pipeline. Including validate
+    // would re-hydrate on every render whose parent inlines the predicate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   const set = useCallback((v: T) => {
     setVal(v);

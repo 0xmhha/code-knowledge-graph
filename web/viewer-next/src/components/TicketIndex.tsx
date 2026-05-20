@@ -141,7 +141,7 @@ export default function TicketIndex({ api }: Props) {
     if (collapsed) {
       setCollapsed(false);
     }
-  }, [selectedIssueID, collapsed]);
+  }, [selectedIssueID, collapsed, setCollapsed]);
 
   useEffect(() => {
     if (!selectedIssueID || !rows) return;
