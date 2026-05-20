@@ -22,6 +22,7 @@ var (
 	_ store.SearchHit         = store.SearchHit{}
 	_ store.SearchFTSOptions  = store.SearchFTSOptions{}
 	_ store.FindSymbolOptions = store.FindSymbolOptions{}
+	_ store.Manifest          = store.Manifest{}
 	_                         = store.ErrInvalidMetric
 )
 
@@ -56,6 +57,21 @@ func TestPublicSurface_CanConstructOptions(t *testing.T) {
 	}
 	if hit.Node.ID == "" || hit.Score == 0 {
 		t.Errorf("SearchHit field access failed")
+	}
+}
+
+// TestPublicManifest_FieldAccess confirms an external consumer can
+// construct and read every public Manifest field without falling back
+// to internal/persist. This catches regressions where a field gets
+// silently moved or unexported during a refactor.
+func TestPublicManifest_FieldAccess(t *testing.T) {
+	m := store.Manifest{
+		CommitHash:     "abc123",
+		SchemaVersion:  "1.9",
+		IndexTimestamp: "2026-05-20T12:00:00Z",
+	}
+	if m.CommitHash == "" || m.SchemaVersion == "" || m.IndexTimestamp == "" {
+		t.Errorf("Manifest field access failed: %+v", m)
 	}
 }
 
