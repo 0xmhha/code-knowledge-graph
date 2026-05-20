@@ -1,4 +1,4 @@
-.PHONY: all build viewer test test-race lint lint-viewer audit clean
+.PHONY: all build viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean
 
 GO ?= go
 
@@ -41,8 +41,45 @@ test:
 test-race:
 	$(GO) test -race -coverprofile=coverage.out ./...
 
-lint: lint-viewer
+lint: lint-viewer fmt-check
 	$(GO) vet ./...
+
+# fmt: rewrite every Go file in place with gofmt's canonical
+# formatting. Safe to run any time — gofmt is deterministic and
+# behaviour-preserving, so 'make fmt' followed by 'make test' is
+# a no-op for everything except whitespace.
+#
+# Scope: every .go file under the repo except web/viewer-next/node_modules,
+# which contains vendored .go files we must not touch.
+fmt:
+	@find . -name '*.go' -not -path './web/viewer-next/node_modules/*' -print0 | xargs -0 gofmt -w
+
+# fmt-check: fail loudly when any tracked .go file diverges from
+# gofmt's canonical form. Added as a `lint` dependency so the same
+# 'make lint' that CI already runs (.github/workflows/ci.yml) blocks
+# gofmt drift PRs without needing a new workflow step.
+#
+# Why this matters: the repo accumulated 79 unformatted files between
+# 2026-05-19 and 2026-05-20 (cleaned up in commit df5709b). Without
+# a gate, the same drift returns the moment someone forgets `gofmt -w`
+# before commit. The check is fast (<1s on this tree) so it is fine
+# to run on every PR.
+fmt-check:
+	@drift=$$(find . -name '*.go' -not -path './web/viewer-next/node_modules/*' -print0 | xargs -0 gofmt -l); \
+	if [ -n "$$drift" ]; then \
+	    echo "gofmt drift detected — run 'make fmt' before commit:"; \
+	    echo "$$drift"; \
+	    exit 1; \
+	fi
+
+# install-hooks: opt-in helper that points git at .githooks/ so the
+# pre-commit script runs locally. Idempotent — re-running is safe.
+# We don't auto-install on `make build` because hooks are a per-clone
+# config (some operators use IDE-side commit flows that already cover
+# formatting).
+install-hooks:
+	@git config core.hooksPath .githooks
+	@echo "git hooks path set to .githooks (pre-commit will run fmt-check)"
 
 # lint-viewer: ESLint over web/viewer-next/. The primary concern is
 # react-hooks/rules-of-hooks — viewer once shipped a regression where a

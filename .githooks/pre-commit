@@ -1,0 +1,36 @@
+#!/bin/sh
+# Pre-commit hook: gofmt drift check.
+#
+# Opt-in: enable with `make install-hooks`. Without that one-time
+# `git config core.hooksPath .githooks`, git keeps looking at
+# .git/hooks/ and ignores this file.
+#
+# Scope kept intentionally narrow:
+#   - gofmt drift only (fast, deterministic, safe to enforce)
+#   - skips go vet / npm lint / tests (slow, need network/build, will
+#     run in CI anyway via .github/workflows/ci.yml)
+#
+# Bypass: `git commit --no-verify` if you genuinely need to land an
+# unformatted file (rare — usually means generated code that should
+# be excluded at the make-fmt level instead).
+#
+# The check delegates to `make fmt-check` so the gate logic lives in
+# one place (Makefile) and not duplicated here.
+
+set -e
+
+if ! command -v make >/dev/null 2>&1; then
+    echo "pre-commit: 'make' not on PATH; skipping fmt-check" >&2
+    exit 0
+fi
+
+# Run from repo root regardless of where git invoked the hook from.
+cd "$(git rev-parse --show-toplevel)"
+
+if ! make fmt-check; then
+    echo
+    echo "pre-commit: gofmt drift detected." >&2
+    echo "Fix with: make fmt && git add -u" >&2
+    echo "Bypass:   git commit --no-verify   (use sparingly)" >&2
+    exit 1
+fi
