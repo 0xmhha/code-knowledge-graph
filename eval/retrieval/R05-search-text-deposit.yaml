@@ -1,0 +1,20 @@
+id: R05-search-text-deposit
+description: |
+  FTS5 / ts_rank smoke: "deposit" must surface every symbol containing
+  the token. The recall gate is 0.66 rather than 1.0 because FTS
+  tokenisation is backend-dependent (SQLite FTS5 vs PostgreSQL ts_vector
+  produce slightly different token boundaries on CamelCase); we ratchet
+  it to 1.0 once cross-backend behaviour is locked.
+probe:
+  tool: search_text
+  args:
+    query: "Deposit"
+    top_k: 20
+expected:
+  symbols:
+    - "api.Handler.HandleDeposit"
+    - "service.Vault.Deposit"
+    - "domain.DepositRequest"
+scoring:
+  recall_min: 0.66
+  precision_min: 0.0

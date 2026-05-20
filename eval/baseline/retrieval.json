@@ -1,0 +1,103 @@
+{
+  "graph": "eval/.synthetic-data",
+  "fixtures_total": 5,
+  "passed": 5,
+  "failed": 0,
+  "aggregate": {
+    "recall": 1,
+    "precision": 0.6,
+    "f1": 0.7499999999999999
+  },
+  "results": [
+    {
+      "id": "R01-find-callers-vault-deposit",
+      "tool": "find_callers",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "api.Handler.HandleDeposit"
+      ]
+    },
+    {
+      "id": "R02-find-callees-handle-deposit",
+      "tool": "find_callees",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit"
+      ]
+    },
+    {
+      "id": "R03-find-callers-service-new",
+      "tool": "find_callers",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "api.NewHandler"
+      ]
+    },
+    {
+      "id": "R04-find-symbol-vault",
+      "tool": "find_symbol",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault",
+        "api.Handler.vault"
+      ]
+    },
+    {
+      "id": "R05-search-text-deposit",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 0.6666666666666666,
+        "precision": 0.3333333333333333,
+        "f1": 0.4444444444444444,
+        "missing": [
+          "api.Handler.HandleDeposit"
+        ],
+        "extra": [
+          "domain.DepositRequest.Amount",
+          "domain.DepositRequest.From",
+          "service.Vault.Deposit#IfStmt@276",
+          "service.Vault.Deposit#ReturnStmt@378"
+        ]
+      },
+      "got": [
+        "domain.DepositRequest",
+        "service.Vault.Deposit",
+        "domain.DepositRequest.Amount",
+        "domain.DepositRequest.From",
+        "service.Vault.Deposit#IfStmt@276",
+        "service.Vault.Deposit#ReturnStmt@378"
+      ]
+    }
+  ]
+}

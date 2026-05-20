@@ -1,0 +1,21 @@
+id: R04-find-symbol-vault
+description: |
+  find_symbol with the bare name "Vault" and exact=false. The SQL
+  predicate is `qname = ? OR qname LIKE '%.<name>'`, and SQLite's
+  default LIKE is ASCII case-insensitive — so a struct field named
+  `vault` is a legitimate match alongside the `Vault` struct itself.
+  This fixture both documents and locks that behaviour: a regression
+  that switched FindSymbol to a case-sensitive predicate would drop
+  api.Handler.vault and fail the recall gate.
+probe:
+  tool: find_symbol
+  args:
+    name: "Vault"
+    exact: false
+expected:
+  symbols:
+    - "service.Vault"
+    - "api.Handler.vault"
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

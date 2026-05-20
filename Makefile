@@ -102,20 +102,29 @@ install-hooks:
 # PR if/when CI integration lands.
 eval: build-no-viewer
 	@mkdir -p eval/results/latest
-	@echo "=== ckg eval: step 1/4 — self-index ==="
+	@echo "=== ckg eval: step 1/5 — self-index (corpus baselining) ==="
 	./bin/ckg build --src=. --out=eval/.ckg-data --lang=go
 	@echo
-	@echo "=== ckg eval: step 2/4 — validate (schema integrity) ==="
+	@echo "=== ckg eval: step 2/5 — validate (schema integrity) ==="
 	./bin/ckg validate --graph=eval/.ckg-data --format=json > eval/results/latest/validate.json
 	@echo "  → eval/results/latest/validate.json"
 	@echo
-	@echo "=== ckg eval: step 3/4 — benchmark (token reduction) ==="
+	@echo "=== ckg eval: step 3/5 — benchmark (token reduction) ==="
 	./bin/ckg benchmark --graph=eval/.ckg-data --format=json > eval/results/latest/benchmark.json
 	@echo "  → eval/results/latest/benchmark.json"
 	@echo
-	@echo "=== ckg eval: step 4/4 — bench-mcp (latency, depth sweep) ==="
+	@echo "=== ckg eval: step 4/5 — bench-mcp (latency, depth sweep) ==="
 	./bin/ckg bench-mcp --graph=eval/.ckg-data --depth-sweep --iterations=50 \
 	    --output=eval/results/latest/bench-mcp.json
+	@echo
+	@# Retrieval probes run against the synthetic corpus rather than the
+	@# self-index because expected node IDs must stay stable across code
+	@# changes. testdata/synthetic/ is the fixed ground truth; eval/.synthetic-data/
+	@# is the regenerable index.
+	@echo "=== ckg eval: step 5/5 — eval-retrieval (LLM-free recall/precision) ==="
+	./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go
+	./bin/ckg eval-retrieval --graph=eval/.synthetic-data --fixtures=eval/retrieval \
+	    --output=eval/results/latest/retrieval.json
 	@echo
 	@echo "=== Summary ==="
 	@if [ -d eval/baseline ]; then \

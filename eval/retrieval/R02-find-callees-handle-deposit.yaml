@@ -1,0 +1,16 @@
+id: R02-find-callees-handle-deposit
+description: |
+  find_callees forward traversal: api.Handler.HandleDeposit calls
+  service.Vault.Deposit. Mirror of R01 to cover both traversal
+  directions through the same call edge.
+probe:
+  tool: find_callees
+  args:
+    qname: "api.Handler.HandleDeposit"
+    depth: 2
+expected:
+  symbols:
+    - "service.Vault.Deposit"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.0

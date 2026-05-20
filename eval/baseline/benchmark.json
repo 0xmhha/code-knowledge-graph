@@ -1,34 +1,34 @@
 {
   "src_root": ".",
-  "src_commit": "c3cff0cfc40d0ccc916361a837af05a8719102f4",
-  "corpus_tokens": 588365,
-  "avg_query_tokens": 4432,
-  "reduction_ratio": 132.7538357400722,
+  "src_commit": "52a4f02680cec7d47a922efdc704553d795c14e3",
+  "corpus_tokens": 594132,
+  "avg_query_tokens": 4431,
+  "reduction_ratio": 134.08530805687204,
   "per_query": [
     {
       "qualified_name": "types.Node",
       "tokens": 2998,
-      "reduction_ratio": 196.25250166777852
+      "reduction_ratio": 198.17611741160775
     },
     {
       "qualified_name": "types.Edge",
       "tokens": 3410,
-      "reduction_ratio": 172.54105571847506
+      "reduction_ratio": 174.23225806451612
     },
     {
       "qualified_name": "solidity_test.parseResolveOneSol",
       "tokens": 5980,
-      "reduction_ratio": 98.38879598662207
+      "reduction_ratio": 99.35317725752509
     },
     {
       "qualified_name": "persist.StoreWriter.Close",
-      "tokens": 3653,
-      "reduction_ratio": 161.06350944429235
+      "tokens": 3649,
+      "reduction_ratio": 162.82049876678542
     },
     {
       "qualified_name": "solidity_test.collectUsingForCalls",
       "tokens": 6121,
-      "reduction_ratio": 96.12236562653162
+      "reduction_ratio": 97.06453193922562
     }
   ]
 }

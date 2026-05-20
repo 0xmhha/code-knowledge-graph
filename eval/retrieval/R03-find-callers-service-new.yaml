@@ -1,0 +1,17 @@
+id: R03-find-callers-service-new
+description: |
+  Second find_callers probe to guard against the regression where the
+  reverse-traversal path works for one seed but not another (e.g.
+  index-key mismatch on Method vs Function). service.New is a Function
+  rather than a Method — different qname shape from R01's Method seed.
+probe:
+  tool: find_callers
+  args:
+    qname: "service.New"
+    depth: 2
+expected:
+  symbols:
+    - "api.NewHandler"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.0
