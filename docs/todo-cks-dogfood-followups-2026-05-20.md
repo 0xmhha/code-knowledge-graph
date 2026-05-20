@@ -15,7 +15,7 @@
 | CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | ✅ `2f89b17` |
 | CKG-2 | `SearchFTS`에 native filter (language) | High | 중간 | ✅ `570e5ec` |
 | CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ✅ `d34a2eb` |
-| CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⬜ |
+| CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⏸️ 보류 (cks 시나리오 필요) |
 | CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ⬜ |
 | CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
 | CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
@@ -76,9 +76,31 @@
 **다운스트림 액션 (E2 후속):** cks Stage 2 `arch_explain` 의도에서 N round-trip → 1 query로 단축 가능. dedupe는 Citation key 기준 클라이언트 측 유지.
 
 
-### CKG-3 / 5 / 6 / 7
+### CKG-3 세부 — Cross-snapshot 정책 결정 ⏸️ **보류**
 
-- **CKG-3**: cross-snapshot 로드맵 결정 먼저 → 문서화 or 구현
+**보류 사유 (2026-05-20 결정):**
+
+ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하는지, 어떤 시나리오(시간순 회귀 추적? 두 commit 비교? 마이그레이션 영향 분석?)에서 쓰는지 모름. 작업 옵션 3개의 비용 차이가 매우 크므로(문서화 1줄 vs 스키마+25개 query 전면 수정) 시나리오 없이 옵션 선택은 위험.
+
+**재개 조건 (다음 중 하나라도 충족 시):**
+1. cks 팀이 cross-commit 검색이 필요한 *구체적 시나리오 1-2개* 제시 (어떤 질의 패턴, 어떤 UI에서 사용)
+2. ckg 측에서 cross-commit 회귀 분석 같은 자체 use case가 생김
+3. 일정 기간(예: 다음 분기) 경과해도 needs가 안 모이면 **옵션 A — 단일 snapshot 제약 명시적 문서화** 진행하고 cks 측 `Filter.CommitHash` 필드 제거 PR 동조
+
+**현재 상태에서 분명한 것:**
+- ckg는 처음부터 단일 snapshot 모델 (`Manifest.SrcCommit` single string, DB 스키마에 `snapshot_id` 컬럼 없음)
+- cks `internal/ckgclient/real.go:144-147`이 `Filter.CommitHash`를 ignore 처리하고 "single snapshot" 주석 명시 — *기능 부재가 아니라 API drift*
+
+**작업 옵션 (재개 시 평가):**
+
+| 옵션 | ckg 변경 | cks 변경 | 비용 | 실제 cross-commit |
+|---|---|---|---|---|
+| A — 단일 snapshot 명시적 문서화 | 1줄 (docstring) | filter 필드 제거 | 매우 작음 | ❌ |
+| B — Multi-snapshot 완전 지원 | 스키마+모든 query+빌드 | 필터 활용 | 매우 큼 | ✅ |
+| C — 디렉토리 라우팅 (DB per commit) | 작음 (path 컨벤션) | client 측 라우팅 | 중간 | 부분 |
+
+### CKG-5 / 6 / 7
+
 - **CKG-5**: depth=2 측정 (recall vs latency)
 - **CKG-6**: `pkg/store.Reader`가 공식 surface면 internal alias 위로 끌어올림
 - **CKG-7**: `Manifest` 핵심 필드만 `pkg/store`로 재노출
