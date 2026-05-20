@@ -51,6 +51,39 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V15 — modifier-scope function-typed local audit. The
+// V3 marker query targets every (parameter)/(variable_declaration)
+// node and walks up via nearestFunctionQnameAndStart, which W6
+// V1.22 extended to recognise modifier_definition. runDecl emits
+// NodeModifier with the same (qname, startByte) pair that
+// parse.MakeID consumes, so the marker's affected[id] write
+// should land on the NodeModifier row's HasFunctionTypedVar
+// field.
+//
+// V15 locks the contract. A regression that excludes
+// modifier_definition from nearestFunctionQnameAndStart, or that
+// emits NodeModifier with a different startByte than the
+// identifier's start, would silently drop coverage on every
+// modifier body — a security-relevant blind spot since modifiers
+// frequently route auth/reentrancy checks.
+func TestFunctionTypedVar_ModifierScope(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "modifier_scope.sol")
+
+	var mod types.Node
+	for _, n := range nodes {
+		if n.QualifiedName == "ModHolder.withFnLocal" && n.Type == types.NodeModifier {
+			mod = n
+			break
+		}
+	}
+	if mod.ID == "" {
+		t.Fatalf("ModHolder.withFnLocal not indexed as NodeModifier")
+	}
+	if !mod.HasFunctionTypedVar {
+		t.Errorf("ModHolder.withFnLocal HasFunctionTypedVar: got false, want true")
+	}
+}
+
 // W-C W8 V14 — function-of-function-pointer audit. A state-var
 // typed as `function(...) returns (function(...) returns (...))`
 // is itself a function pointer whose return value is another
