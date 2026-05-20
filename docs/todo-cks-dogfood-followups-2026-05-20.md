@@ -1,0 +1,81 @@
+# 작업 투두 — 2026-05-20 정리
+
+> 출처: 2026-05-19 cks dogfood-eval 결과를 반영한 ckg 후속 작업 정리.
+> 본 문서는 진행 추적용이며, 항목별 상세 컨텍스트는
+> `docs/followups-from-cks-dogfood-2026-05-19.md` 참조.
+
+## 진행 상태
+
+- [x] **A1** `git push origin main` — 사용자가 수동 처리 완료 (2026-05-20)
+
+## B. cks dogfood 후속 (우선순위 順)
+
+| # | 항목 | 영향 | 표면 | 상태 |
+|---|---|---|---|---|
+| CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | 🟡 진행 중 |
+| CKG-2 | `SearchFTS`에 native filter (`language`, path) | High | 중간 | ⬜ |
+| CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ⬜ |
+| CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⬜ |
+| CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ⬜ |
+| CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
+| CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
+
+### CKG-1 세부 — `SearchFTS` 점수 반환
+
+**현황:**
+- `StoreReader.SearchFTS(q, limit) ([]types.Node, error)` — `internal/persist/store_interface.go:81`
+- 구현 3곳: `sqlite.go:634`, `postgres_store.go:926`, `mcp/h3_filter.go:89` (LLM-safe wrapper)
+- 호출자(non-test): `mcp/h3_filter.go:90` 1곳
+- 테스트 mock 1곳: `postgres_exporter_test.go:65`
+
+**다운스트림 통증:**
+- cks `internal/ckgclient/real.go:149-155`이 `1 - i/(N+1)` 가짜 점수 생성
+- 강한 단일 매치와 약한 5개 매치를 구분 불가 → cks 측 `fix: rerank by max(hit.Score)` 워크어라운드
+
+**Acceptance:**
+- 점수가 호출자에서 의미 있게 비교 가능 (단조성 보장)
+- 기존 `SearchFTS` 호출자 무파괴 또는 명시적 마이그레이션 경로
+- sqlite + postgres 양쪽 동작 일치
+- 회귀 테스트: 동일 쿼리에서 강한 매치가 약한 매치보다 높은 점수
+
+### CKG-2 세부 — native filter pushdown
+
+**현황:**
+- cks가 `FilterOverfetchRatio=3`으로 over-fetch 후 client-side에서 language/path 필터
+- 필터로 대다수가 떨어지면 작은 page 한계로 recall 손실
+
+**Acceptance:**
+- `language` 인자는 SQL `WHERE`로 push-down (sqlite/postgres 양쪽)
+- path glob은 client-side 유지 OK (비싼 LIKE 회피)
+- cks 측 over-fetch 로직 제거 가능한 형태
+
+### CKG-4 세부 — multi-kind symbol lookup
+
+**현황:**
+- cks Stage 2가 `arch_explain` intent에서 N round-trip (fns + types + interfaces)
+
+**Acceptance:**
+- `kinds []SymbolKind` 인자 수용
+- 결과에 kind 태그 (Citation key 기준 dedupe 가능)
+
+### CKG-3 / 5 / 6 / 7
+
+- **CKG-3**: cross-snapshot 로드맵 결정 먼저 → 문서화 or 구현
+- **CKG-5**: depth=2 측정 (recall vs latency)
+- **CKG-6**: `pkg/store.Reader`가 공식 surface면 internal alias 위로 끌어올림
+- **CKG-7**: `Manifest` 핵심 필드만 `pkg/store`로 재노출
+
+## C. W-C 회귀 가드 시리즈
+
+- [ ] **C1** 다음 invariant 후보 발굴 (현재 V14~V16까지 누적)
+
+## D. 잔여 정리
+
+- [ ] **D1** viewer ESLint 4 warnings 정리 (`App.tsx:216`, `GraphCanvas.tsx:219`, `TicketIndex.tsx:144`, `usePersistedState.ts:89`)
+- [ ] **D2** gofmt drift 재발 방지 (pre-commit hook 또는 CI gate)
+- [ ] **D3** Makefile에 `fmt` 타겟 추가 검토
+
+## E. 크로스 레포 동조
+
+- [ ] **E1** ckv 리포 companion `followups-from-cks-dogfood-2026-05-19.md` 작성
+- [ ] **E2** cks 측 워크어라운드 제거 PR (CKG-1, CKG-2 구현 후)
