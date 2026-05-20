@@ -16,7 +16,7 @@
 | CKG-2 | `SearchFTS`에 native filter (language) | High | 중간 | ✅ `570e5ec` |
 | CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ✅ `d34a2eb` |
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⏸️ 보류 (cks 시나리오 필요) |
-| CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ⬜ |
+| CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ✅ `c80b1c5` `b3db16f` `b308c1c` |
 | CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
 | CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
 
@@ -99,9 +99,22 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 | B — Multi-snapshot 완전 지원 | 스키마+모든 query+빌드 | 필터 활용 | 매우 큼 | ✅ |
 | C — 디렉토리 라우팅 (DB per commit) | 작음 (path 컨벤션) | client 측 라우팅 | 중간 | 부분 |
 
-### CKG-5 / 6 / 7
+### CKG-5 세부 — depth=2 측정 ✅ `c80b1c5` / `b3db16f` / `b308c1c`
 
-- **CKG-5**: depth=2 측정 (recall vs latency)
+**작업 구성 (3 commit):**
+1. `c80b1c5` — bench-mcp `--depth-sweep` 옵션 추가 + `mcpProbe` Tool/Name 분리 + `pickFunctionSeed` 핫픽스 (`QueryNodes("")` → `TopNodes("pagerank")`)
+2. `b3db16f` — 측정 데이터(`docs/ckg5-depth-sweep.json`) + 분석 리포트(`docs/ckg5-depth-sweep-report-2026-05-20.md`)
+3. `b308c1c` — `find_callers`/`find_callees` default 1→2 적용 (tool description에 리포트 링크)
+
+**측정 결과 요약:**
+- depth=2 p99이 4 tool 모두 30ms 이하
+- `get_subgraph` p99이 d=1(122ms) > d=2(51ms) — depth가 분산을 줄이는 반직관적 결과
+- `find_callees` d=1의 0.24ms는 측정 노이즈 베이스라인 → 17.8× ratio 과장됨
+
+**다운스트림 액션 (E2 후속):** cks 다음 dogfood에서 `mcp-tool-handlers` / `stamp-integrity-lookup` recall 변동 확인. recall ceiling 0.67이 회복되면 ckg 측 default 변경 정당화됨.
+
+### CKG-6 / 7
+
 - **CKG-6**: `pkg/store.Reader`가 공식 surface면 internal alias 위로 끌어올림
 - **CKG-7**: `Manifest` 핵심 필드만 `pkg/store`로 재노출
 
