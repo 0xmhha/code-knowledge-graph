@@ -54,14 +54,14 @@ var callEdgeTypes = []string{"calls", "invokes"}
 // registerFindCallers returns functions that call the seed symbol (reverse call graph).
 func registerFindCallers(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_callers",
-		mcp.WithDescription("Functions that call the symbol (reverse call graph). Filters to calls/invokes edges only."),
+		mcp.WithDescription("Functions that call the symbol (reverse call graph). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
-		mcp.WithNumber("depth", mcp.DefaultNumber(1)),
+		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		q := req.GetString("qname", "")
-		d := int(req.GetFloat("depth", 1))
+		d := int(req.GetFloat("depth", 2))
 		incl := req.GetBool("include_blobs", false)
 		nodes, edges, err := store.NeighborhoodByQname(q, d, true /*reverse*/, callEdgeTypes...)
 		if err != nil {
@@ -79,14 +79,14 @@ func registerFindCallers(s *server.MCPServer, store persist.StoreReader) {
 // registerFindCallees returns functions called by the seed symbol (forward call graph).
 func registerFindCallees(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("find_callees",
-		mcp.WithDescription("Functions called by the symbol (forward call graph). Filters to calls/invokes edges only."),
+		mcp.WithDescription("Functions called by the symbol (forward call graph). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
-		mcp.WithNumber("depth", mcp.DefaultNumber(1)),
+		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		q := req.GetString("qname", "")
-		d := int(req.GetFloat("depth", 1))
+		d := int(req.GetFloat("depth", 2))
 		incl := req.GetBool("include_blobs", false)
 		nodes, edges, err := store.NeighborhoodByQname(q, d, false, callEdgeTypes...)
 		if err != nil {
