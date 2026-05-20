@@ -12,7 +12,7 @@
 
 | # | 항목 | 영향 | 표면 | 상태 |
 |---|---|---|---|---|
-| CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | 🟡 진행 중 |
+| CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | ✅ `2f89b17` |
 | CKG-2 | `SearchFTS`에 native filter (`language`, path) | High | 중간 | ⬜ |
 | CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ⬜ |
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⬜ |
@@ -20,7 +20,19 @@
 | CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
 | CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
 
-### CKG-1 세부 — `SearchFTS` 점수 반환
+### CKG-1 세부 — `SearchFTS` 점수 반환 ✅ `2f89b17`
+
+**구현 요약:**
+- `internal/persist/search_hit.go` — `SearchHit{Node, Score, RawScore}` 타입 + `normalizeSearchHits` 헬퍼
+- `StoreReader.SearchFTS` 시그니처 `[]SearchHit` 로 변경
+- SQLite: `-bm25(nodes_fts)` (sign-flip), `ORDER BY raw_score DESC`
+- PG: `ts_rank(search_vector, plainto_tsquery)`, `ORDER BY raw_score DESC`
+- `Search()` 시그니처 유지 — 내부 `nodesFromHits` 어댑터로 호환
+- `llmSafeStoreReader.SearchFTS` — AMBIGUOUS 필터 후 점수 보존
+- 회귀 테스트 3종: ScoreMonotonic / ScoreRangeNormalized / SingleHitScoreOne
+
+**다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go:149-155` 가짜 점수 제거 가능.
+
 
 **현황:**
 - `StoreReader.SearchFTS(q, limit) ([]types.Node, error)` — `internal/persist/store_interface.go:81`
