@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/0xmhha/code-knowledge-graph/pkg/store"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // Compile-time guard: a nil store.Reader must satisfy the alias. If someone
@@ -11,6 +12,52 @@ import (
 // updating the public surface, this stops compiling here — preventing the
 // breakage from silently shipping to external consumers.
 var _ store.Reader = (store.Reader)(nil)
+
+// Compile-time guard: every value type that an external caller could
+// touch via Reader must be reachable through pkg/store. If any of these
+// alias declarations stops compiling, an external consumer has lost the
+// ability to use Reader without falling back to internal/persist (which
+// they cannot reach by the Go `internal/` rule). See CKG-6.
+var (
+	_ store.SearchHit         = store.SearchHit{}
+	_ store.SearchFTSOptions  = store.SearchFTSOptions{}
+	_ store.FindSymbolOptions = store.FindSymbolOptions{}
+	_                         = store.ErrInvalidMetric
+)
+
+// TestPublicSurface_CanConstructOptions exercises the option types
+// from outside-the-module's perspective: a consumer constructs the
+// values it would pass to Reader.SearchFTS / Reader.FindSymbol using
+// only pkg/store and pkg/types imports. If a future internal change
+// breaks this construction path, an external sister-repo build also
+// breaks — this test catches it inside this module first.
+func TestPublicSurface_CanConstructOptions(t *testing.T) {
+	t.Helper()
+
+	sfts := store.SearchFTSOptions{Language: "go"}
+	if sfts.Language != "go" {
+		t.Errorf("SearchFTSOptions zero-value or alias misbehaves")
+	}
+
+	fs := store.FindSymbolOptions{
+		Language: "go",
+		Kinds:    []types.NodeType{types.NodeFunction, types.NodeInterface},
+	}
+	if fs.Language != "go" || len(fs.Kinds) != 2 {
+		t.Errorf("FindSymbolOptions field access failed: Language=%q Kinds=%v",
+			fs.Language, fs.Kinds)
+	}
+
+	// SearchHit is a result, not a request — construct a fake instance
+	// to confirm both Node and Score fields are reachable externally.
+	hit := store.SearchHit{
+		Node:  types.Node{ID: "fake000000000001", Type: types.NodeFunction},
+		Score: 1.0,
+	}
+	if hit.Node.ID == "" || hit.Score == 0 {
+		t.Errorf("SearchHit field access failed")
+	}
+}
 
 // TestOpenReadOnly_Missing_FailsOnUse asserts that a missing DB eventually
 // surfaces an error — either eagerly at OpenReadOnly or lazily on first
