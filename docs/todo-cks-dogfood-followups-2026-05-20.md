@@ -148,5 +148,15 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 ## E. 크로스 레포 동조
 
-- [ ] **E1** ckv 리포 companion `followups-from-cks-dogfood-2026-05-19.md` 작성
-- [ ] **E2** cks 측 워크어라운드 제거 PR (CKG-1, CKG-2 구현 후)
+- [x] **E1** ckv companion 문서 확인 ✅ — ckv `docs/followups-from-cks-dogfood-2026-05-19.md` 이미 존재 (CKV-1~7, 7 항목). CKV-1은 cks-side 이슈로 재배정되어 ckv 측에서 close (commit `42bb7f2`). 나머지 6 항목은 ckv 작업자 별도 진행 중. ckg 측 추가 액션 없음.
+
+  **ckg 변경의 ckv-side 영향 (이번 세션 누적):**
+  - CKG-1/2/4/6/7: SQL graph DB 경로 — ckv vector engine과 별개. **영향 없음**.
+  - CKG-5: `find_callers/callees` default 1→2. cks composer가 ckg에서 더 많은 노드를 가져와 ckv에 *추가 query*를 보낼 가능성 있음. **간접 영향 가능** — 다음 cks dogfood 측정에서 ckv latency/recall 변동 관찰 권장.
+  - D1/D2/D3: 내부 lint/format. **ckv 영향 없음**.
+
+- [ ] **E2** cks 측 워크어라운드 제거 PR (CKG-1, CKG-2, CKG-4 구현 후)
+  - `internal/ckgclient/real.go:149-155` 가짜 점수 (`1-i/(N+1)`) → `SearchHit.Score` 사용
+  - `FilterOverfetchRatio=3` over-fetch + client-side language filter → `SearchFTSOptions{Language}` 푸시다운
+  - `arch_explain` intent N round-trips → `FindSymbolOptions{Kinds: [...]}` 1 query
+  - CKG-6/7 결과: self-shim `persist.StoreReader` alias 제거 → `pkg/store` 직접 import + `store.GetManifest()` 헬퍼 사용
