@@ -35,7 +35,7 @@ func registerFindSymbol(s *server.MCPServer, store persist.StoreReader) {
 		lang := req.GetString("language", "")
 		exact := req.GetBool("exact", true)
 		incl := req.GetBool("include_blobs", false)
-		out, err := store.FindSymbol(name, lang, exact)
+		out, err := store.FindSymbol(name, exact, persist.FindSymbolOptions{Language: lang})
 		if err != nil {
 			return nil, err
 		}

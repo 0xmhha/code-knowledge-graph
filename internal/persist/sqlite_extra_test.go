@@ -654,7 +654,7 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 func TestFindSymbol_ExactMatch(t *testing.T) {
 	s := newFixtureStore(t)
 
-	nodes, err := s.FindSymbol("mypkg.FuncA", "", true)
+	nodes, err := s.FindSymbol("mypkg.FuncA", true, persist.FindSymbolOptions{})
 	if err != nil {
 		t.Fatalf("FindSymbol exact: %v", err)
 	}
@@ -667,7 +667,7 @@ func TestFindSymbol_SuffixMatch(t *testing.T) {
 	s := newFixtureStore(t)
 
 	// Suffix match: "FuncB" should hit "mypkg.FuncB".
-	nodes, err := s.FindSymbol("FuncB", "", false)
+	nodes, err := s.FindSymbol("FuncB", false, persist.FindSymbolOptions{})
 	if err != nil {
 		t.Fatalf("FindSymbol suffix: %v", err)
 	}
@@ -683,7 +683,7 @@ func TestFindSymbol_SuffixMatch(t *testing.T) {
 func TestFindSymbol_WithLanguageFilter(t *testing.T) {
 	s := newFixtureStore(t)
 
-	nodes, err := s.FindSymbol("FuncA", "go", false)
+	nodes, err := s.FindSymbol("FuncA", false, persist.FindSymbolOptions{Language: "go"})
 	if err != nil {
 		t.Fatalf("FindSymbol+lang: %v", err)
 	}
@@ -700,7 +700,7 @@ func TestFindSymbol_WithLanguageFilter(t *testing.T) {
 func TestFindSymbol_NoMatch(t *testing.T) {
 	s := newFixtureStore(t)
 
-	nodes, err := s.FindSymbol("DoesNotExist", "", true)
+	nodes, err := s.FindSymbol("DoesNotExist", true, persist.FindSymbolOptions{})
 	if err != nil {
 		t.Fatalf("FindSymbol no-match: %v", err)
 	}

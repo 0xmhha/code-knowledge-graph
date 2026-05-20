@@ -92,7 +92,7 @@ func TestLLMSafeStoreReader_FilterAt_AllMethods(t *testing.T) {
 	safe := newLLMSafeStoreReader(fake)
 
 	// FindSymbol — exercise the filtered read path.
-	out, err := safe.FindSymbol("", "", true)
+	out, err := safe.FindSymbol("", true, persist.FindSymbolOptions{})
 	if err != nil {
 		t.Fatalf("FindSymbol: %v", err)
 	}
@@ -171,7 +171,9 @@ func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
 		run  func() ([]types.Node, error)
 	}
 	calls := []call{
-		{"FindSymbol", func() ([]types.Node, error) { return safe.FindSymbol("Foo", "", false) }},
+		{"FindSymbol", func() ([]types.Node, error) {
+			return safe.FindSymbol("Foo", false, persist.FindSymbolOptions{})
+		}},
 		{"NodesByIDs", func() ([]types.Node, error) { return safe.NodesByIDs([]string{"h_amb", "c_amb", "fn"}) }},
 		{"QueryNodes", func() ([]types.Node, error) { return safe.QueryNodes("", 100) }},
 		{"TopNodes", func() ([]types.Node, error) { return safe.TopNodes("pagerank", 100) }},
@@ -266,7 +268,7 @@ type fakeStore struct {
 	edges               []types.Edge
 }
 
-func (f *fakeStore) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
+func (f *fakeStore) FindSymbol(name string, exact bool, _ persist.FindSymbolOptions) ([]types.Node, error) {
 	return f.nodes, nil
 }
 

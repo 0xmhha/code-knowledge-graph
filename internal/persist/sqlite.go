@@ -904,9 +904,14 @@ func scanEdges(rows *sql.Rows) ([]types.Edge, error) {
 
 // FindSymbol returns nodes whose qualified_name matches name. When exact is
 // true, only equality matches are returned; when false, a LIKE '%.<name>'
-// suffix match is also accepted (so "Foo" hits "pkg.Foo"). lang optionally
-// filters by language. Capped at 100 rows to bound MCP response size.
-func (s *sqliteStore) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
+// suffix match is also accepted (so "Foo" hits "pkg.Foo"). Capped at 100
+// rows to bound MCP response size.
+//
+// opts.Language pushes a `language = ?` predicate when non-empty.
+// opts.Kinds pushes a `type IN (...)` predicate when non-empty — CKG-4
+// fix that removes cks Stage 2's N round-trips for `arch_explain` intent
+// (one query per requested SymbolKind). Empty Kinds returns every type.
+func (s *sqliteStore) FindSymbol(name string, exact bool, opts FindSymbolOptions) ([]types.Node, error) {
 	args := []any{}
 	q := `SELECT ` + nodeColumns + ` FROM nodes WHERE 1=1 `
 	if exact {
@@ -916,9 +921,15 @@ func (s *sqliteStore) FindSymbol(name, lang string, exact bool) ([]types.Node, e
 		q += `AND (qualified_name = ? OR qualified_name LIKE ?) `
 		args = append(args, name, "%."+name)
 	}
-	if lang != "" {
+	if opts.Language != "" {
 		q += `AND language = ? `
-		args = append(args, lang)
+		args = append(args, opts.Language)
+	}
+	if len(opts.Kinds) > 0 {
+		q += `AND type IN (` + placeholders(len(opts.Kinds)) + `) `
+		for _, k := range opts.Kinds {
+			args = append(args, string(k))
+		}
 	}
 	q += `LIMIT 100`
 	rows, err := s.db.Query(q, args...)
@@ -940,7 +951,7 @@ func (s *sqliteStore) FindSymbol(name, lang string, exact bool) ([]types.Node, e
 // find_callers / find_callees to actual call edges and skip the
 // containment / definition relationships that share the same Store.
 func (s *sqliteStore) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
-	roots, err := s.FindSymbol(qname, "", true)
+	roots, err := s.FindSymbol(qname, true, FindSymbolOptions{})
 	if err != nil {
 		return nil, nil, err
 	}

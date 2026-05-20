@@ -25,7 +25,7 @@ func (m *mockStoreReader) GetManifest() (Manifest, error) {
 	return Manifest{}, nil
 }
 func (m *mockStoreReader) LoadHierarchy(_ string) ([]HierarchyRow, error) { return nil, nil }
-func (m *mockStoreReader) FindSymbol(_, _ string, _ bool) ([]types.Node, error) {
+func (m *mockStoreReader) FindSymbol(_ string, _ bool, _ FindSymbolOptions) ([]types.Node, error) {
 	return nil, nil
 }
 func (m *mockStoreReader) NodesByIDs(_ []string) ([]types.Node, error) { return nil, nil }

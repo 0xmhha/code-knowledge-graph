@@ -171,7 +171,7 @@ func TestImpact_FileSeed(t *testing.T) {
 	// Find the actual file_path stored for Greet — buildpipe uses
 	// repo-relative paths and the prefix differs across hosts. We
 	// look it up via FindSymbol so the test is path-agnostic.
-	symNodes, err := store.FindSymbol("a.Greet", "", true)
+	symNodes, err := store.FindSymbol("a.Greet", true, persist.FindSymbolOptions{})
 	if err != nil {
 		t.Fatalf("FindSymbol: %v", err)
 	}

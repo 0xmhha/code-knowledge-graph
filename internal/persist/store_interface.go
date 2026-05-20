@@ -39,7 +39,9 @@ type StoreReader interface {
 	LoadHierarchy(kind string) ([]HierarchyRow, error)
 
 	// Node queries
-	FindSymbol(name, lang string, exact bool) ([]types.Node, error)
+	// FindSymbol returns nodes matching name (exact or LIKE-suffix per `exact`).
+	// See FindSymbolOptions for filter push-down (Language, Kinds).
+	FindSymbol(name string, exact bool, opts FindSymbolOptions) ([]types.Node, error)
 	NodesByIDs(ids []string) ([]types.Node, error)
 	QueryNodes(parent string, limit int) ([]types.Node, error)
 	// TopNodes returns the top-N nodes ranked by metric, descending.

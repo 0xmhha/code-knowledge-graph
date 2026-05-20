@@ -41,8 +41,8 @@ func newLLMSafeStoreReader(store persist.StoreReader) persist.StoreReader {
 	return &llmSafeStoreReader{StoreReader: store}
 }
 
-func (s *llmSafeStoreReader) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
-	out, err := s.StoreReader.FindSymbol(name, lang, exact)
+func (s *llmSafeStoreReader) FindSymbol(name string, exact bool, opts persist.FindSymbolOptions) ([]types.Node, error) {
+	out, err := s.StoreReader.FindSymbol(name, exact, opts)
 	return filterLLMSafe(out), err
 }
 

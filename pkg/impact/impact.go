@@ -282,7 +282,7 @@ func Compute(store persist.StoreReader, seedQname, seedFile string, opt Options)
 // as `not_found: true` in the response.
 func resolveSeeds(store persist.StoreReader, seedQname, seedFile string) ([]types.Node, *types.Node, error) {
 	if seedQname != "" {
-		nodes, err := store.FindSymbol(seedQname, "", true)
+		nodes, err := store.FindSymbol(seedQname, true, persist.FindSymbolOptions{})
 		if err != nil {
 			return nil, nil, err
 		}

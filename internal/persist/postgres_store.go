@@ -547,9 +547,13 @@ func (s *pgStore) RebuildFTS() error {
 // ──────────────────────────────────────────────────────────────────────────────
 
 // FindSymbol returns nodes whose qualified_name matches name. When exact is
-// false, a LIKE '%.<name>' suffix match is also accepted. lang optionally
-// filters by language. Capped at 100 rows (same as SQLite implementation).
-func (s *pgStore) FindSymbol(name, lang string, exact bool) ([]types.Node, error) {
+// false, a LIKE '%.<name>' suffix match is also accepted. Capped at 100
+// rows (same as SQLite implementation).
+//
+// opts.Language pushes a `language = $N` predicate when non-empty.
+// opts.Kinds pushes a `type IN ($N, $N+1, ...)` predicate when non-empty —
+// CKG-4 fix paralleling the SQLite path.
+func (s *pgStore) FindSymbol(name string, exact bool, opts FindSymbolOptions) ([]types.Node, error) {
 	args := []any{}
 	q := `SELECT ` + pgNodeColumns + ` FROM nodes WHERE 1=1 `
 	if exact {
@@ -559,9 +563,17 @@ func (s *pgStore) FindSymbol(name, lang string, exact bool) ([]types.Node, error
 		q += `AND (qualified_name = $1 OR qualified_name LIKE $2) `
 		args = append(args, name, "%."+name)
 	}
-	if lang != "" {
-		args = append(args, lang)
+	if opts.Language != "" {
+		args = append(args, opts.Language)
 		q += fmt.Sprintf(`AND language = $%d `, len(args))
+	}
+	if len(opts.Kinds) > 0 {
+		placeholders := make([]string, 0, len(opts.Kinds))
+		for _, k := range opts.Kinds {
+			args = append(args, string(k))
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		q += `AND type IN (` + strings.Join(placeholders, ",") + `) `
 	}
 	q += `LIMIT 100`
 	rows, err := s.pool.Query(background, q, args...)
@@ -786,7 +798,7 @@ func (s *pgStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 // NeighborhoodByQname implements BFS expansion from any node matching qname.
 // Delegates to the same shared helpers as the SQLite implementation.
 func (s *pgStore) NeighborhoodByQname(qname string, depth int, reverse bool, edgeTypes ...string) ([]types.Node, []types.Edge, error) {
-	roots, err := s.FindSymbol(qname, "", true)
+	roots, err := s.FindSymbol(qname, true, FindSymbolOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
