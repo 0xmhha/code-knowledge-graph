@@ -143,7 +143,7 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 ## D. 잔여 정리
 
-- [ ] **D1** viewer ESLint 4 warnings 정리 (`App.tsx:216`, `GraphCanvas.tsx:219`, `TicketIndex.tsx:144`, `usePersistedState.ts:89`)
+- [x] **D1** viewer ESLint 4 warnings 정리 ✅ `5348e53` — App.tsx unused-disable 제거, GraphCanvas.tsx + usePersistedState.ts에 의도 명시 disable, TicketIndex.tsx에 stable setter dep 추가
 - [ ] **D2** gofmt drift 재발 방지 (pre-commit hook 또는 CI gate)
 - [ ] **D3** Makefile에 `fmt` 타겟 추가 검토
 
