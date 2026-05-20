@@ -51,6 +51,55 @@ func TestFunctionTypedVar_PropagationMarker(t *testing.T) {
 	}
 }
 
+// W-C W8 V14 — function-of-function-pointer audit. A state-var
+// typed as `function(...) returns (function(...) returns (...))`
+// is itself a function pointer whose return value is another
+// function pointer. typeNameIsFunctionTyped checks the outer
+// type_name's direct children for parameter/return_parameter
+// nodes, so the marker fires for the outer level regardless of
+// what the return-parameter's inner type happens to be.
+//
+// V14 locks two properties:
+//
+//  1. The state-var IsFunctionTyped=true.
+//  2. A function declaring such a local has HasFunctionTypedVar=true.
+//
+// Without this lock, a future tightening of typeNameIsFunctionTyped
+// (e.g. requiring the return-parameter to NOT be a function type
+// so the outer becomes a "value-returning function only" form)
+// would silently drop coverage for higher-order-style Sol.
+func TestFunctionTypedVar_NestedReturnTypeFunctionPointer(t *testing.T) {
+	nodes, _ := parseResolveOneSol(t, "testdata/function_typed_var", "fn_pointer_nested.sol")
+
+	var field types.Node
+	for _, n := range nodes {
+		if n.QualifiedName == "Nested.higherOrder" && n.Type == types.NodeField {
+			field = n
+			break
+		}
+	}
+	if field.ID == "" {
+		t.Fatalf("Nested.higherOrder not indexed")
+	}
+	if !field.IsFunctionTyped {
+		t.Errorf("Nested.higherOrder IsFunctionTyped: got false, want true")
+	}
+
+	var fn types.Node
+	for _, n := range nodes {
+		if n.QualifiedName == "Nested.withNestedLocal" && n.Type == types.NodeFunction {
+			fn = n
+			break
+		}
+	}
+	if fn.ID == "" {
+		t.Fatalf("Nested.withNestedLocal not indexed")
+	}
+	if !fn.HasFunctionTypedVar {
+		t.Errorf("Nested.withNestedLocal HasFunctionTypedVar: got false, want true")
+	}
+}
+
 // W-C W8 V13 — mapping value as function pointer. The state-var
 // `mapping(address => function(...)) handlers` is emitted as a
 // NodeMapping (mapping's own node type) rather than NodeField,
