@@ -23,6 +23,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,6 +46,7 @@ func newBenchmarkCmd() *cobra.Command {
 	var graph string
 	var questions int
 	var depth int
+	var format string
 	cmd := &cobra.Command{
 		Use:   "benchmark",
 		Short: "Measure token reduction of graph queries vs reading the raw corpus",
@@ -101,8 +103,15 @@ work") rather than a precision benchmark.`,
 			if len(perQ) > 0 {
 				avgQT = totalQT / len(perQ)
 			}
-			printBenchmark(os.Stdout, manifest, corpusTokens, avgQT, perQ)
-			return nil
+			switch format {
+			case "json":
+				return emitBenchmarkJSON(os.Stdout, manifest, corpusTokens, avgQT, perQ)
+			case "text", "":
+				printBenchmark(os.Stdout, manifest, corpusTokens, avgQT, perQ)
+				return nil
+			default:
+				return fmt.Errorf("unknown --format %q (want text|json)", format)
+			}
 		},
 	}
 	cmd.Flags().StringVar(&graph, "graph", "", "graph directory (required)")
@@ -110,8 +119,46 @@ work") rather than a precision benchmark.`,
 		"number of top-PageRank god nodes to sample as proxy queries")
 	cmd.Flags().IntVar(&depth, "depth", 3,
 		"BFS hop depth per query (graphify defaults to 3 — wider blows up the subgraph; narrower under-represents the agent's typical traversal)")
+	cmd.Flags().StringVar(&format, "format", "text",
+		"output format: text|json. json is the machine-readable form consumed by 'make eval' for baseline diffing.")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
+}
+
+// benchmarkReport is the JSON-serialisable shape of the benchmark output.
+// Stable field names because eval/baseline/*.json diffs against this
+// shape across runs — renaming a field would break the regression gate.
+type benchmarkReport struct {
+	SrcRoot      string             `json:"src_root"`
+	SrcCommit    string             `json:"src_commit,omitempty"`
+	CorpusTokens int                `json:"corpus_tokens"`
+	AvgQueryTok  int                `json:"avg_query_tokens"`
+	Reduction    float64            `json:"reduction_ratio"`
+	PerQuery     []benchmarkPerQRow `json:"per_query"`
+}
+
+type benchmarkPerQRow struct {
+	QualifiedName string  `json:"qualified_name"`
+	Tokens        int     `json:"tokens"`
+	Reduction     float64 `json:"reduction_ratio"`
+}
+
+func emitBenchmarkJSON(w *os.File, m persist.Manifest, corpusTokens, avgQT int, perQ []queryStat) error {
+	rows := make([]benchmarkPerQRow, len(perQ))
+	for i, q := range perQ {
+		rows[i] = benchmarkPerQRow{QualifiedName: q.name, Tokens: q.tokens, Reduction: q.reduction}
+	}
+	report := benchmarkReport{
+		SrcRoot:      m.SrcRoot,
+		SrcCommit:    m.SrcCommit,
+		CorpusTokens: corpusTokens,
+		AvgQueryTok:  avgQT,
+		Reduction:    ratio(corpusTokens, avgQT),
+		PerQuery:     rows,
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(report)
 }
 
 type queryStat struct {

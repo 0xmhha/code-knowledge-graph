@@ -54,3 +54,8 @@ __pycache__/
 /internal/server/web_assets/404.html
 /internal/server/web_assets/index.txt
 .ckg-data/
+# `make eval` writes here. The .ckg-data dump is rebuild material
+# (gitignore'd) and results/ is per-run output (gitignore'd); only
+# eval/baseline/*.json is the committed regression snapshot.
+eval/.ckg-data/
+eval/results/

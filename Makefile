@@ -1,4 +1,4 @@
-.PHONY: all build viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean
+.PHONY: all build viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update
 
 GO ?= go
 
@@ -80,6 +80,61 @@ fmt-check:
 install-hooks:
 	@git config core.hooksPath .githooks
 	@echo "git hooks path set to .githooks (pre-commit will run fmt-check)"
+
+# eval: LLM-free regression baseline measurement (CKG-EV1 Phase 1).
+#
+# Self-indexes this repo (Go only) and runs three deterministic probes
+# against the resulting graph:
+#
+#   1. validate  — schema invariants, dangling edges. PASS = exit 0 +
+#                  zero Issues across registered validators.
+#   2. benchmark — token-reduction ratio vs grep-everything baseline.
+#                  Watch for >20% drop in reduction_ratio between runs.
+#   3. bench-mcp --depth-sweep — p50/p95/p99 latency for the eight
+#                  MCP traversal probes at depth=1 and depth=2.
+#
+# Output: eval/results/latest/{validate,benchmark,bench-mcp}.json.
+# Compare with eval/baseline/ (committed snapshot) to detect regressions.
+#
+# Why no LLM here: ckg eval (the LLM-driven baseline) costs API calls and
+# runs in minutes, not seconds. The three probes above run in <2 minutes
+# end-to-end with no external dependencies — cheap enough to gate every
+# PR if/when CI integration lands.
+eval: build-no-viewer
+	@mkdir -p eval/results/latest
+	@echo "=== ckg eval: step 1/4 — self-index ==="
+	./bin/ckg build --src=. --out=eval/.ckg-data --lang=go
+	@echo
+	@echo "=== ckg eval: step 2/4 — validate (schema integrity) ==="
+	./bin/ckg validate --graph=eval/.ckg-data --format=json > eval/results/latest/validate.json
+	@echo "  → eval/results/latest/validate.json"
+	@echo
+	@echo "=== ckg eval: step 3/4 — benchmark (token reduction) ==="
+	./bin/ckg benchmark --graph=eval/.ckg-data --format=json > eval/results/latest/benchmark.json
+	@echo "  → eval/results/latest/benchmark.json"
+	@echo
+	@echo "=== ckg eval: step 4/4 — bench-mcp (latency, depth sweep) ==="
+	./bin/ckg bench-mcp --graph=eval/.ckg-data --depth-sweep --iterations=50 \
+	    --output=eval/results/latest/bench-mcp.json
+	@echo
+	@echo "=== Summary ==="
+	@if [ -d eval/baseline ]; then \
+	    echo "Compare:        diff -ur eval/baseline eval/results/latest"; \
+	    echo "Update baseline: make eval-baseline-update   (after reviewing the diff)"; \
+	else \
+	    echo "No baseline yet. Inspect eval/results/latest/*.json, then:"; \
+	    echo "  make eval-baseline-update"; \
+	fi
+
+# eval-baseline-update: promote the latest run to the committed baseline.
+# Intentionally a separate manual step — accidentally overwriting the
+# baseline would silently mask regressions on the next run.
+eval-baseline-update:
+	@[ -d eval/results/latest ] || { echo "Run 'make eval' first"; exit 1; }
+	@rm -rf eval/baseline
+	@cp -R eval/results/latest eval/baseline
+	@echo "eval/baseline/ refreshed from eval/results/latest/"
+	@echo "Commit the change to lock the new baseline."
 
 # lint-viewer: ESLint over web/viewer-next/. The primary concern is
 # react-hooks/rules-of-hooks — viewer once shipped a regression where a
