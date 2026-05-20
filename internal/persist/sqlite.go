@@ -638,8 +638,13 @@ func (s *sqliteStore) GetBlob(id string) ([]byte, error) {
 // the "higher is better" convention shared with the PostgreSQL backend.
 // Score is then min-max normalized to [0, 1] within the result set by
 // normalizeSearchHits — see SearchHit doc for the consumer contract.
-func (s *sqliteStore) SearchFTS(q string, limit int) ([]SearchHit, error) {
-	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
+//
+// opts.Language pushes a `n.language = ?` predicate into the WHERE clause
+// when non-empty. Filtering at the SQL layer (rather than client-side after
+// over-fetching) is the CKG-2 fix that removes cks's FilterOverfetchRatio=3
+// workaround.
+func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]SearchHit, error) {
+	sql := `SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
 		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
@@ -647,9 +652,16 @@ func (s *sqliteStore) SearchFTS(q string, limit int) ([]SearchHit, error) {
 		-bm25(nodes_fts) AS raw_score
 		FROM nodes_fts f
 		JOIN nodes n ON n.rowid = f.rowid
-		WHERE nodes_fts MATCH ?
-		ORDER BY raw_score DESC
-		LIMIT ?`, q, limit)
+		WHERE nodes_fts MATCH ?`
+	args := []any{q}
+	if opts.Language != "" {
+		sql += ` AND n.language = ?`
+		args = append(args, opts.Language)
+	}
+	sql += ` ORDER BY raw_score DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.Query(sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}
@@ -677,7 +689,7 @@ func (s *sqliteStore) Search(q string, limit int) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit)
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, SearchFTSOptions{})
 	if err != nil {
 		return nil, err
 	}

@@ -80,7 +80,8 @@ type StoreReader interface {
 	Search(q string, limit int) ([]types.Node, error)
 	// SearchFTS returns FTS matches with BM25-derived relevance scores.
 	// See SearchHit for the meaning of Score (normalized) vs RawScore.
-	SearchFTS(q string, limit int) ([]SearchHit, error)
+	// See SearchFTSOptions for filter push-down (currently Language only).
+	SearchFTS(q string, limit int, opts SearchFTSOptions) ([]SearchHit, error)
 
 	// Source bodies
 	GetBlob(id string) ([]byte, error)

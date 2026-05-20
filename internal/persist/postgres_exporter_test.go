@@ -61,8 +61,10 @@ func (m *mockStoreReader) NeighborhoodByQname(_ string, _ int, _ bool, _ ...stri
 func (m *mockStoreReader) SubgraphByQname(_ string, _ int) ([]types.Node, []types.Edge, error) {
 	return nil, nil, nil
 }
-func (m *mockStoreReader) Search(_ string, _ int) ([]types.Node, error)   { return nil, nil }
-func (m *mockStoreReader) SearchFTS(_ string, _ int) ([]SearchHit, error) { return nil, nil }
+func (m *mockStoreReader) Search(_ string, _ int) ([]types.Node, error) { return nil, nil }
+func (m *mockStoreReader) SearchFTS(_ string, _ int, _ SearchFTSOptions) ([]SearchHit, error) {
+	return nil, nil
+}
 func (m *mockStoreReader) GetBlob(id string) ([]byte, error) {
 	b, ok := m.blobs[id]
 	if !ok {

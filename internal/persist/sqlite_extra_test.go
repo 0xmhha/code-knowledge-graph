@@ -605,7 +605,7 @@ func TestSearchFTS_Hit(t *testing.T) {
 	s := newFixtureStore(t)
 
 	// "FuncA" is stored in the name column and in doc_comment.
-	hits, err := s.SearchFTS("FuncA", 10)
+	hits, err := s.SearchFTS("FuncA", 10, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
@@ -624,7 +624,7 @@ func TestSearchFTS_Hit(t *testing.T) {
 func TestSearchFTS_NoMatch(t *testing.T) {
 	s := newFixtureStore(t)
 
-	hits, err := s.SearchFTS("zzzzzz_no_match", 10)
+	hits, err := s.SearchFTS("zzzzzz_no_match", 10, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
@@ -638,7 +638,7 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 
 	// "mypkg" matches the name of Package and the qualified_name prefix of A and B.
 	// The limit=1 should cap results.
-	hits, err := s.SearchFTS("mypkg*", 1)
+	hits, err := s.SearchFTS("mypkg*", 1, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS(limit=1): %v", err)
 	}

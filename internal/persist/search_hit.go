@@ -2,6 +2,24 @@ package persist
 
 import "github.com/0xmhha/code-knowledge-graph/pkg/types"
 
+// SearchFTSOptions configures filter push-down for StoreReader.SearchFTS.
+// Zero value means "no filter" — every match passes through.
+//
+// Filters that the persistence layer cannot or chooses not to push down
+// (e.g. path globs cheap on the client) are deliberately absent. Adding
+// them later is a non-breaking change because struct fields default to
+// zero on omission.
+//
+// See docs/followups-from-cks-dogfood-2026-05-19.md item CKG-2 for the
+// downstream motivation: cks currently over-fetches by FilterOverfetchRatio=3
+// and post-filters client-side on Language, which caps recall when filters
+// drop most of a small page.
+type SearchFTSOptions struct {
+	// Language pushes a WHERE language = ? predicate into the SQL.
+	// Empty string disables the predicate (no language filter).
+	Language string
+}
+
 // SearchHit pairs a node with its full-text search relevance score.
 //
 // Returned by StoreReader.SearchFTS so downstream rerankers can

@@ -177,7 +177,7 @@ func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
 		{"TopNodes", func() ([]types.Node, error) { return safe.TopNodes("pagerank", 100) }},
 		{"Search", func() ([]types.Node, error) { return safe.Search("anything", 100) }},
 		{"SearchFTS", func() ([]types.Node, error) {
-			hits, err := safe.SearchFTS("anything", 100)
+			hits, err := safe.SearchFTS("anything", 100, persist.SearchFTSOptions{})
 			if err != nil {
 				return nil, err
 			}
@@ -304,11 +304,13 @@ func (f *fakeStore) Search(q string, limit int) ([]types.Node, error) {
 	return f.nodes, nil
 }
 
-func (f *fakeStore) SearchFTS(q string, limit int) ([]persist.SearchHit, error) {
+func (f *fakeStore) SearchFTS(q string, limit int, _ persist.SearchFTSOptions) ([]persist.SearchHit, error) {
 	out := make([]persist.SearchHit, len(f.nodes))
 	for i, n := range f.nodes {
 		// Synthetic uniform score — fake store is for routing/leak tests,
-		// not relevance ordering.
+		// not relevance ordering. The options argument is ignored for the
+		// same reason: language filter has no meaning over an in-memory
+		// list of test doubles.
 		out[i] = persist.SearchHit{Node: n, Score: 1.0, RawScore: 1.0}
 	}
 	return out, nil

@@ -917,7 +917,7 @@ func (s *pgStore) Search(q string, limit int) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit)
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, SearchFTSOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -934,20 +934,32 @@ func (s *pgStore) Search(q string, limit int) ([]types.Node, error) {
 // backend's -bm25() output; cross-backend comparison of RawScore is unsafe.
 // Score is then min-max normalized to [0, 1] within the result set by
 // normalizeSearchHits.
-func (s *pgStore) SearchFTS(q string, limit int) ([]SearchHit, error) {
+//
+// opts.Language pushes a `language = $N` predicate into the WHERE clause
+// when non-empty — CKG-2 filter push-down so cks no longer has to
+// over-fetch and filter client-side.
+func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]SearchHit, error) {
 	// plainto_tsquery is safe for arbitrary input (no special syntax needed).
 	// rewriteFTSQuery already strips FTS5-specific sigils that don't apply to PG;
 	// for PG we use plainto_tsquery unconditionally for robustness.
 	// Strip the trailing '*' that rewriteFTSQuery appends — plainto_tsquery
 	// handles prefix matching internally via lexeme stemming.
 	qclean := strings.TrimRight(q, "*")
-	rows, err := s.pool.Query(background,
-		`SELECT `+pgNodeColumns+`,
+	sql := `SELECT ` + pgNodeColumns + `,
             ts_rank(search_vector, plainto_tsquery('english', $1)) AS raw_score
         FROM nodes
-        WHERE search_vector @@ plainto_tsquery('english', $1)
-        ORDER BY raw_score DESC
-        LIMIT $2`, qclean, limit)
+        WHERE search_vector @@ plainto_tsquery('english', $1)`
+	args := []any{qclean}
+	next := 2
+	if opts.Language != "" {
+		sql += fmt.Sprintf(` AND language = $%d`, next)
+		args = append(args, opts.Language)
+		next++
+	}
+	sql += fmt.Sprintf(` ORDER BY raw_score DESC LIMIT $%d`, next)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(background, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}

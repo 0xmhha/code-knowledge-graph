@@ -86,8 +86,8 @@ func (s *llmSafeStoreReader) Search(q string, limit int) ([]types.Node, error) {
 	return filterLLMSafe(out), err
 }
 
-func (s *llmSafeStoreReader) SearchFTS(q string, limit int) ([]persist.SearchHit, error) {
-	hits, err := s.StoreReader.SearchFTS(q, limit)
+func (s *llmSafeStoreReader) SearchFTS(q string, limit int, opts persist.SearchFTSOptions) ([]persist.SearchHit, error) {
+	hits, err := s.StoreReader.SearchFTS(q, limit, opts)
 	if err != nil {
 		return nil, err
 	}

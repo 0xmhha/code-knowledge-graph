@@ -5,6 +5,7 @@ import (
 
 	server "github.com/mark3labs/mcp-go/server"
 
+	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -85,7 +86,7 @@ func TestAttachBlobsIncludeFalse(t *testing.T) {
 	store := newFixtureStore(t)
 
 	// Retrieve any nodes from the fixture to exercise the real code path.
-	hits, err := store.SearchFTS("Greet", 5)
+	hits, err := store.SearchFTS("Greet", 5, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestAttachBlobsIncludeFalse(t *testing.T) {
 func TestAttachBlobsIncludeTrue(t *testing.T) {
 	store := newFixtureStore(t)
 
-	hits, err := store.SearchFTS("Greet", 5)
+	hits, err := store.SearchFTS("Greet", 5, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}

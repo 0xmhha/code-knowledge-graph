@@ -72,7 +72,7 @@ func newScoreFixtureStore(t *testing.T) persist.Store {
 func TestSearchFTS_ScoreMonotonic(t *testing.T) {
 	s := newScoreFixtureStore(t)
 
-	hits, err := s.SearchFTS("QueryToken", 10)
+	hits, err := s.SearchFTS("QueryToken", 10, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSearchFTS_ScoreMonotonic(t *testing.T) {
 func TestSearchFTS_ScoreRangeNormalized(t *testing.T) {
 	s := newScoreFixtureStore(t)
 
-	hits, err := s.SearchFTS("QueryToken", 10)
+	hits, err := s.SearchFTS("QueryToken", 10, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
@@ -114,6 +114,113 @@ func TestSearchFTS_ScoreRangeNormalized(t *testing.T) {
 		if h.Score < 0.0 || h.Score > 1.0 {
 			t.Errorf("hits[%d].Score = %v, want in [0,1]", i, h.Score)
 		}
+	}
+}
+
+// newLangFilterFixtureStore inserts three nodes that all match a single
+// FTS token but belong to different languages, so opts.Language can be
+// exercised in isolation from BM25 ranking.
+func newLangFilterFixtureStore(t *testing.T) persist.Store {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "langfilter.db")
+	s, err := persist.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	nodes := []types.Node{
+		{
+			ID: "lfgo000000000001", Type: types.NodeFunction,
+			Name: "Marker", QualifiedName: "pgo.Marker",
+			FilePath: "pgo/a.go", Language: "go",
+			Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "lfts000000000001", Type: types.NodeFunction,
+			Name: "Marker", QualifiedName: "pts.Marker",
+			FilePath: "pts/a.ts", Language: "ts",
+			Confidence: types.ConfExtracted,
+		},
+		{
+			ID: "lfsol00000000001", Type: types.NodeFunction,
+			Name: "Marker", QualifiedName: "psol.Marker",
+			FilePath: "psol/a.sol", Language: "sol",
+			Confidence: types.ConfExtracted,
+		},
+	}
+	if err := s.InsertNodes(nodes); err != nil {
+		t.Fatalf("InsertNodes: %v", err)
+	}
+	if err := s.RebuildFTS(); err != nil {
+		t.Fatalf("RebuildFTS: %v", err)
+	}
+	return s
+}
+
+// TestSearchFTS_LanguagePushdown locks the CKG-2 contract: when
+// opts.Language is set, the SQL predicate drops rows from other
+// languages BEFORE the LIMIT applies — so cks no longer needs to
+// over-fetch (FilterOverfetchRatio=3) and post-filter client-side.
+func TestSearchFTS_LanguagePushdown(t *testing.T) {
+	s := newLangFilterFixtureStore(t)
+
+	cases := []struct {
+		lang   string
+		wantID string
+	}{
+		{"go", "lfgo000000000001"},
+		{"ts", "lfts000000000001"},
+		{"sol", "lfsol00000000001"},
+	}
+	for _, c := range cases {
+		hits, err := s.SearchFTS("Marker", 10, persist.SearchFTSOptions{Language: c.lang})
+		if err != nil {
+			t.Fatalf("SearchFTS(lang=%s): %v", c.lang, err)
+		}
+		if len(hits) != 1 {
+			t.Errorf("lang=%s: got %d hits, want 1", c.lang, len(hits))
+			continue
+		}
+		if hits[0].Node.ID != c.wantID {
+			t.Errorf("lang=%s: got node %q, want %q", c.lang, hits[0].Node.ID, c.wantID)
+		}
+		if hits[0].Node.Language != c.lang {
+			t.Errorf("lang=%s: returned node has language %q", c.lang, hits[0].Node.Language)
+		}
+	}
+}
+
+// TestSearchFTS_LanguageEmptyMatchesAll asserts that the zero value of
+// SearchFTSOptions disables the filter — backward-compatible behavior
+// for the Search() adapter and any caller that doesn't care about
+// language.
+func TestSearchFTS_LanguageEmptyMatchesAll(t *testing.T) {
+	s := newLangFilterFixtureStore(t)
+
+	hits, err := s.SearchFTS("Marker", 10, persist.SearchFTSOptions{})
+	if err != nil {
+		t.Fatalf("SearchFTS: %v", err)
+	}
+	if len(hits) != 3 {
+		t.Errorf("got %d hits without language filter, want 3", len(hits))
+	}
+}
+
+// TestSearchFTS_LanguageNoMatch ensures a language with zero matching
+// rows returns empty (not the unfiltered result set or an error).
+func TestSearchFTS_LanguageNoMatch(t *testing.T) {
+	s := newLangFilterFixtureStore(t)
+
+	hits, err := s.SearchFTS("Marker", 10, persist.SearchFTSOptions{Language: "rust"})
+	if err != nil {
+		t.Fatalf("SearchFTS: %v", err)
+	}
+	if len(hits) != 0 {
+		t.Errorf("got %d hits for language=rust, want 0", len(hits))
 	}
 }
 
@@ -126,7 +233,7 @@ func TestSearchFTS_SingleHitScoreOne(t *testing.T) {
 	s := newScoreFixtureStore(t)
 
 	// "Unrelated" matches only the weakNode.
-	hits, err := s.SearchFTS("Unrelated", 10)
+	hits, err := s.SearchFTS("Unrelated", 10, persist.SearchFTSOptions{})
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
