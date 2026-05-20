@@ -150,7 +150,11 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - benchmark: 132.75× reduction (avg 4,432 tok/query vs 588,365 tok corpus)
   - bench-mcp: 8 probes errors=0, p99 ceiling 130 ms (impact_of_change_d2)
 
-- [ ] **EV1 Phase 2** Gold-set retrieval accuracy — 미리 정의된 query → expected node IDs, recall/precision 계산. LLM 없이 검색 정확도 측정. `eval/tasks/*.yaml` 형식 확장 또는 신규 fixture.
+- [x] **EV1 Phase 2** Gold-set retrieval accuracy ✅ `7679410` — `internal/eval/retrieval/` 패키지 + `ckg eval-retrieval` CLI + `eval/retrieval/*.yaml` 5 fixture (find_callers x2 / find_callees x1 / find_symbol x1 / search_text x1). Synthetic-index 사용 (코드 변경 시 expected 안정성). `make eval` step 5/5에 통합. 첫 baseline: 5/5 passed, aggregate R=1.00 P=0.60 F1=0.75.
+
+  **lockdown 발견:** R04 fixture 작성 중 SQLite LIKE의 ASCII case-insensitive 매치 동작 발견 → `api.Handler.vault` (소문자 field) 가 `Vault` 검색에 매치됨. 의도된 동작이라 fixture에 명시적 expected로 포함, 향후 case-sensitive 회귀 시 fail.
+
+  **다음 ratchet 후보:** R05 recall_min을 0.66 → 1.0 (SQLite/PG FTS 토큰화 parity 확인 후), precision 게이트 강화 (statement-node 제외 필터 추가 후).
 - [ ] **EV1 Phase 3** CI 통합 — `make eval` 결과를 PR gate로. 단, eval은 self-index 빌드 시간이 있어 lint/test보다 느림 — nightly 또는 `[eval]` 트리거 라벨 검토 필요.
 
 ## G. 미해결 / 후속 세션 작업
