@@ -18,7 +18,7 @@
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⏸️ 보류 (cks 시나리오 필요) |
 | CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ✅ `c80b1c5` `b3db16f` `b308c1c` |
 | CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ✅ `78edfc5` |
-| CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
+| CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ✅ `d487fbe` |
 
 ### CKG-1 세부 — `SearchFTS` 점수 반환 ✅ `2f89b17`
 
@@ -125,9 +125,17 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 **다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go:1-50`의 자작 `persist.StoreReader` alias 제거 → `github.com/0xmhha/code-knowledge-graph/pkg/store` 직접 import로 교체.
 
-### CKG-7
+### CKG-7 세부 — `Manifest` 축소 mirror ✅ `d487fbe`
 
-- **CKG-7**: `Manifest` 핵심 필드(commit hash, schema version, index timestamp)만 `pkg/store`로 재노출 — 전체 alias 아닌 *축소 mirror struct*
+**구현 요약:**
+- `pkg/store.Manifest` (3 필드만: `CommitHash`, `SchemaVersion`, `IndexTimestamp`)
+- `pkg/store.GetManifest(r Reader) (Manifest, error)` 헬퍼 — internal → public 변환 봉인
+- `projectManifest` (package-private) — 매핑 단일 진실 점, unit-testable
+- 회귀 테스트: 변환 정확성(internal package test) + zero-value + 외부 사용성
+
+**Mirror vs alias 선택 근거:** `persist.Manifest`는 incremental-cache 내부 필드(`Files`, `StalenessFiles`, `StalenessMTimeSum`, `SrcRoot`) 포함. alias하면 cks가 cache 필드에 silently 의존 → 다음 cache 메커니즘 진화 시 외부 호환성 부채로 작용. mirror가 *경계 보존*.
+
+**다운스트림 액션 (E2 후속):** cks `ManifestSnapshot` mirror struct 제거, `store.Manifest`로 교체. `store.GetManifest(reader)` 한 줄 호출로 대체 가능.
 
 ## C. W-C 회귀 가드 시리즈
 
