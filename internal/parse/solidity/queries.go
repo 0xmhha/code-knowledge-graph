@@ -14,11 +14,11 @@ package solidity
 //   - `modifier_invocation` has no fields; the modifier name is the first
 //     `identifier` named child.
 const (
-	queryContract    = `(contract_declaration name: (identifier) @name) @decl`
-	queryLibrary     = `(library_declaration name: (identifier) @name) @decl`
-	queryInterface   = `(interface_declaration name: (identifier) @name) @decl`
-	queryFunction    = `(function_definition name: (identifier) @name) @decl`
-	queryModifier    = `(modifier_definition name: (identifier) @name) @decl`
+	queryContract  = `(contract_declaration name: (identifier) @name) @decl`
+	queryLibrary   = `(library_declaration name: (identifier) @name) @decl`
+	queryInterface = `(interface_declaration name: (identifier) @name) @decl`
+	queryFunction  = `(function_definition name: (identifier) @name) @decl`
+	queryModifier  = `(modifier_definition name: (identifier) @name) @decl`
 	// W-C W6 V1.23 (2026-05-12): constructor_definition has no `name`
 	// field — only `body` (function_body) + direct `parameter` children
 	// + optional modifier_invocation. We synthesise "constructor" as the
@@ -30,9 +30,9 @@ const (
 	// source token at the declaration's StartByte to pick the synthetic
 	// identifier ("fallback" or "receive").
 	queryFallbackReceive = `(fallback_receive_definition) @decl`
-	queryEvent       = `(event_definition name: (identifier) @name) @decl`
-	queryStruct      = `(struct_declaration name: (identifier) @name) @decl`
-	queryEnum        = `(enum_declaration name: (identifier) @name) @decl`
+	queryEvent           = `(event_definition name: (identifier) @name) @decl`
+	queryStruct          = `(struct_declaration name: (identifier) @name) @decl`
+	queryEnum            = `(enum_declaration name: (identifier) @name) @decl`
 	// TODO(T19+): queryStateVar replaced by queryStateVarAll + runStateVarDecl
 	// (mapping detection unified into one visitor pass).
 	// queryStateVar = `(state_variable_declaration name: (identifier) @name) @decl`

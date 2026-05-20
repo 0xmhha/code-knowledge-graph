@@ -94,7 +94,7 @@ func (m *mockStoreReader) AllNodes() ([]types.Node, error) {
 	}
 	return out, nil
 }
-func (m *mockStoreReader) AllEdges() ([]types.Edge, error) { return nil, nil }
+func (m *mockStoreReader) AllEdges() ([]types.Edge, error)           { return nil, nil }
 func (m *mockStoreReader) AmbiguousMetaNodes() ([]types.Node, error) { return nil, nil }
 
 // Compile-time check: mockStoreReader must satisfy StoreReader.

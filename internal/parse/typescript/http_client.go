@@ -8,16 +8,16 @@
 //
 //  1. fetch('/api/x')              → method=GET (default)
 //  2. fetch('/api/x', { method: 'POST' })
-//                                  → method extracted from options object
+//     → method extracted from options object
 //  3. axios.get('/api/x', ...)     → method=GET
 //     axios.post / put / delete / patch / head    → same pattern
 //  4. axios('/api/x', { method, url })            → method from options
 //     axios({ method, url })                      → both from options
 //     axios.request({ method, url })              → same
 //  5. useSWR('/api/x', fetcher)                   → method=* (any) per
-//                                                   §6.9 "method unknown"
+//     §6.9 "method unknown"
 //  6. useQuery({ url: '/api/x' })  → method=* (any). queryKey['/api/x'] is
-//                                    skipped — too ambiguous in V0.
+//     skipped — too ambiguous in V0.
 //
 // Each detection emits an AMBIGUOUS placeholder Endpoint node + an
 // `http_calls` edge from the enclosing TS Function to the placeholder. The

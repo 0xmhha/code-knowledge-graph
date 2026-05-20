@@ -14,9 +14,9 @@
 // are flagged INFERRED with a "<computed>" sentinel):
 //
 //  1. Express / Koa:    `app.get('/path', handler)`,
-//                       `router.post('/path', ...)`, etc.
+//     `router.post('/path', ...)`, etc.
 //  2. Fastify:          `fastify.get('/path', ...)`,
-//                       `fastify.route({ method, url, handler })`
+//     `fastify.route({ method, url, handler })`
 //  3. Hono:             `app.get('/path', c => ...)` (fluent API)
 //  4. Next.js App Router: file path `app/api/.../route.ts` with
 //     `export async function GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS`.

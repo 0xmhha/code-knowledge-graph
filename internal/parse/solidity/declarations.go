@@ -758,8 +758,10 @@ func (v *declVisitor) runModifierMeta() {
 // V1.28 V0 approach bucketed `import_name` and `alias` separately
 // and zipped them at the end, which mis-paired heterogeneous
 // statements like `import {SafeMath, Address as A}`:
-//   buckets: importNames=[SafeMath, Address], aliases=[A]
-//   zip:     A ↔ SafeMath  (WRONG — A actually aliases Address)
+//
+//	buckets: importNames=[SafeMath, Address], aliases=[A]
+//	zip:     A ↔ SafeMath  (WRONG — A actually aliases Address)
+//
 // The fix: walk identifier children in source order, keep the most
 // recent `import_name` in a one-slot buffer, and pair it with the
 // next `alias` when one appears. An `import_name` with no following

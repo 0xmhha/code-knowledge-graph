@@ -65,10 +65,10 @@ func TestAllowedTools(t *testing.T) {
 
 func TestSystemPrompt(t *testing.T) {
 	cases := []struct {
-		name        string
-		b           eval.Baseline
-		wantSubstr  string
-		wantEmpty   bool
+		name       string
+		b          eval.Baseline
+		wantSubstr string
+		wantEmpty  bool
 	}{
 		{
 			name:       "alpha contains raw source mention",

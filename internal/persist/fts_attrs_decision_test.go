@@ -13,21 +13,21 @@ import (
 // with HasExternalCall=true. V10 audited that option and
 // declined it for two reasons:
 //
-//   1. JSON noise. The blob contains keys like
-//      "has_external_call" alongside the boolean values. Adding
-//      attrs to FTS would expose those keys to user-facing
-//      search results — typing "external" would match every
-//      node with HasExternalCall=false too (the key is present
-//      in the JSON whether the value is true or false until the
-//      omitempty optimisation kicks in for false). Worse,
-//      typing "function" matches every fn-typed node AND every
-//      node whose JSON mentions "has_function_*" keys.
+//  1. JSON noise. The blob contains keys like
+//     "has_external_call" alongside the boolean values. Adding
+//     attrs to FTS would expose those keys to user-facing
+//     search results — typing "external" would match every
+//     node with HasExternalCall=false too (the key is present
+//     in the JSON whether the value is true or false until the
+//     omitempty optimisation kicks in for false). Worse,
+//     typing "function" matches every fn-typed node AND every
+//     node whose JSON mentions "has_function_*" keys.
 //
-//   2. Marker queries want boolean semantics. "Show me every
-//      callable with HasExternalCall=true" is a filter, not a
-//      relevance-ranked search. A direct SQL query
-//      (json_extract(attrs, '$.has_external_call') = 1) serves
-//      it better than FTS5 ranking would.
+//  2. Marker queries want boolean semantics. "Show me every
+//     callable with HasExternalCall=true" is a filter, not a
+//     relevance-ranked search. A direct SQL query
+//     (json_extract(attrs, '$.has_external_call') = 1) serves
+//     it better than FTS5 ranking would.
 //
 // This audit locks the decision by asserting the schema's FTS5
 // virtual table only carries the four original columns. If a

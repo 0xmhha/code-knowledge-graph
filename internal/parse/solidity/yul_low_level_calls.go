@@ -229,11 +229,11 @@ func collectYulLetBindings(n *sitter.Node, src []byte, out map[string]bool) {
 // extractYulReceiverName reads the Sol-identifier text from a Yul
 // argument node. Two shapes count:
 //
-//   yul_path     — its first named child is a yul_identifier
-//                   whose text is the leading Sol identifier
-//                   (`a` in `a.b.c`). V0 ignores nested-path
-//                   segments and resolves on the leading name only.
-//   yul_identifier — bare Sol identifier without any dotted path.
+//	yul_path     — its first named child is a yul_identifier
+//	                whose text is the leading Sol identifier
+//	                (`a` in `a.b.c`). V0 ignores nested-path
+//	                segments and resolves on the leading name only.
+//	yul_identifier — bare Sol identifier without any dotted path.
 //
 // Anything else (numeric literal, nested yul_function_call,
 // hex literal) drops as unresolvable at the V0 layer.

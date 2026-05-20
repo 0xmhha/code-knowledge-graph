@@ -23,11 +23,11 @@ func TestAssemblyMarker_HasAssembly(t *testing.T) {
 	nodes, _ := parseResolveOneSol(t, "testdata/assembly_marker", "inline_assembly.sol")
 
 	want := map[string]bool{
-		"Proxy.delegate":    true,
-		"Proxy.readSlot":    true,
-		"Proxy.plain":       false,
-		"Proxy.guard":       true,
-		"Proxy.plainGuard":  false,
+		"Proxy.delegate":   true,
+		"Proxy.readSlot":   true,
+		"Proxy.plain":      false,
+		"Proxy.guard":      true,
+		"Proxy.plainGuard": false,
 	}
 
 	got := map[string]bool{}

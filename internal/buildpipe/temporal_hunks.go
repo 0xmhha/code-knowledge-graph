@@ -5,22 +5,22 @@
 //   - Encoding (§11.1):  gzip stdlib, ~70% size reduction on diff text.
 //   - Dedup    (§11.2):  none in H1; keep chronology of rebased hunks.
 //   - Reach    (§11.3):  H1 only collects HEAD-reachable hunks
-//                        (Confidence='EXTRACTED'). A future PR adds
-//                        unreachable collection (Confidence='AMBIGUOUS')
-//                        via reflog/fsck — H3's EvidencePack assembler
-//                        MUST filter to EXTRACTED so the LLM never sees
-//                        force-pushed-away code paths.
+//     (Confidence='EXTRACTED'). A future PR adds
+//     unreachable collection (Confidence='AMBIGUOUS')
+//     via reflog/fsck — H3's EvidencePack assembler
+//     MUST filter to EXTRACTED so the LLM never sees
+//     force-pushed-away code paths.
 //   - Lang     (§11.4):  hunk inherits its target file's extension when
-//                        in {go, ts, sol}; everything else becomes 'git'.
+//     in {go, ts, sol}; everything else becomes 'git'.
 //   - Cap      (§11.6):  64KB patch cap. Larger patches are stored as
-//                        first 32KB + truncation marker + last 32KB.
-//                        Compression is applied AFTER truncation.
+//     first 32KB + truncation marker + last 32KB.
+//     Compression is applied AFTER truncation.
 //   - Manifest (§11.8):  Hunk node IDs are NOT recorded in the per-file
-//                        manifest entries (they live outside file-level
-//                        cache invalidation; emitTemporalEdges runs them
-//                        wholesale on every build). isMetaNodeType is the
-//                        single source of truth that buildFileEntries +
-//                        computeColdFileEntries + extractBlobs share.
+//     manifest entries (they live outside file-level
+//     cache invalidation; emitTemporalEdges runs them
+//     wholesale on every build). isMetaNodeType is the
+//     single source of truth that buildFileEntries +
+//     computeColdFileEntries + extractBlobs share.
 package buildpipe
 
 import (
@@ -484,4 +484,3 @@ func emitModifiesEdges(g *graph.Graph) {
 func BuildModifiesEdges(nodes []types.Node) []types.Edge {
 	return hunkmodifies.BuildEdges(nodes)
 }
-

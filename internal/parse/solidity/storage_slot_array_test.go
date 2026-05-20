@@ -16,13 +16,13 @@ func TestStorageSlot_FixedArrayPacking(t *testing.T) {
 	nodes, _ := parseResolveOneSol(t, "testdata/storage_slot_packing", "array_packed.sol")
 
 	want := map[string]int{
-		"ArrayPacked.a": 0,  // uint8[4] -> 1 slot
-		"ArrayPacked.b": 1,  // new slot after array
-		"ArrayPacked.c": 2,  // uint16[16] -> 32 bytes exactly
+		"ArrayPacked.a": 0, // uint8[4] -> 1 slot
+		"ArrayPacked.b": 1, // new slot after array
+		"ArrayPacked.c": 2, // uint16[16] -> 32 bytes exactly
 		"ArrayPacked.d": 3,
-		"ArrayPacked.e": 4,  // uint8[33] -> 2 slots (4, 5)
+		"ArrayPacked.e": 4, // uint8[33] -> 2 slots (4, 5)
 		"ArrayPacked.f": 6,
-		"ArrayPacked.g": 7,  // uint256[2] -> 2 slots (7, 8)
+		"ArrayPacked.g": 7, // uint256[2] -> 2 slots (7, 8)
 		"ArrayPacked.h": 9,
 		"ArrayPacked.i": 10, // uint8[4][2] -> 8 bytes in 1 slot
 		"ArrayPacked.j": 11,

@@ -54,17 +54,17 @@ const hunkCommitsDefault = 200
 // the file appears as a deletion of the old path + an addition of the
 // new path, so SHA × FilePath × Index uniquely identifies any hunk.
 type HunkInfo struct {
-	SHA       string
-	FilePath  string
-	Index     int
-	OldStart  int
-	OldLines  int
-	NewStart  int
-	NewLines  int
-	Added     int
-	Removed   int
-	Binary    bool
-	Patch     []byte
+	SHA      string
+	FilePath string
+	Index    int
+	OldStart int
+	OldLines int
+	NewStart int
+	NewLines int
+	Added    int
+	Removed  int
+	Binary   bool
+	Patch    []byte
 }
 
 // LoadHunks runs `git log -p` over the most-recent maxCommits HEAD-reachable
@@ -150,12 +150,12 @@ func parseHunkStream(r io.Reader) ([]HunkInfo, error) {
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
 	var (
-		out          []HunkInfo
-		currentSHA   string
-		currentFile  string
+		out           []HunkInfo
+		currentSHA    string
+		currentFile   string
 		hunkIdxByFile map[string]int
-		current      *HunkInfo
-		buf          bytes.Buffer
+		current       *HunkInfo
+		buf           bytes.Buffer
 	)
 
 	resetCommit := func(sha string) {

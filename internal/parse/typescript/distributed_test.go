@@ -194,10 +194,10 @@ func TestTSDistributed_NamedFunctionExpression_Resolves(t *testing.T) {
 		file             string
 		wantAnonymousMax int // arrow-function handler count only
 	}{
-		{"testdata/distributed/express.ts", 2},                       // 2 arrow handlers (DELETE /admin/:id, PATCH dyn)
-		{"testdata/distributed/fastify.ts", 0},                       // no arrow handlers
-		{"testdata/distributed/hono.ts", 1},                          // 1 arrow handler (POST /api/hello)
-		{"testdata/distributed/nextjs/app/api/users/route.ts", 0},    // file-based routing — no inline handlers
+		{"testdata/distributed/express.ts", 2},                    // 2 arrow handlers (DELETE /admin/:id, PATCH dyn)
+		{"testdata/distributed/fastify.ts", 0},                    // no arrow handlers
+		{"testdata/distributed/hono.ts", 1},                       // 1 arrow handler (POST /api/hello)
+		{"testdata/distributed/nextjs/app/api/users/route.ts", 0}, // file-based routing — no inline handlers
 	}
 	p := tsp.New(".")
 	for _, c := range cases {

@@ -110,4 +110,3 @@ func pathAwareHead(repoRoot, relPath string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
-

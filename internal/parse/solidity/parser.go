@@ -35,8 +35,8 @@ type Parser struct {
 	// every file's sizes; ParseFile merges its local map here under
 	// structMu so Resolve can read a complete table when correcting
 	// NodeField SlotIndex for cross-file references.
-	structMu     sync.Mutex
-	structSizes  map[string]int
+	structMu    sync.Mutex
+	structSizes map[string]int
 }
 
 // New returns a Parser rooted at srcRoot (used for relative file paths).

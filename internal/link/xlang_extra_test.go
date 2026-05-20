@@ -23,9 +23,9 @@ func TestPickBestPrefersHighScore(t *testing.T) {
 	}
 
 	cases := []struct {
-		name      string
+		name       string
 		candidates []types.Node
-		wantDst   string
+		wantDst    string
 	}{
 		{
 			name: "single_contracts_match",

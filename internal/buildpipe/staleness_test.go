@@ -24,11 +24,11 @@ func TestSetStaleness_PathAwareGit(t *testing.T) {
 		message string
 	}
 	cases := []struct {
-		name              string
-		steps             []step // in order
-		srcSubdir         string // src_root relative to repo root
-		expectMethod      string
-		expectRelPath     string
+		name               string
+		steps              []step // in order
+		srcSubdir          string // src_root relative to repo root
+		expectMethod       string
+		expectRelPath      string
 		expectCommitOfStep int // 1-indexed step that the recorded SrcCommit must equal
 	}{
 		{
@@ -55,8 +55,8 @@ func TestSetStaleness_PathAwareGit(t *testing.T) {
 		{
 			name: "src_root is sub-dir; later commit inside sub DOES advance recorded SHA",
 			steps: []step{
-				{"sub/a.go", "package sub\n", "add sub"},                  // step 1
-				{"other/b.go", "package other\n", "other"},                // step 2
+				{"sub/a.go", "package sub\n", "add sub"},                   // step 1
+				{"other/b.go", "package other\n", "other"},                 // step 2
 				{"sub/a.go", "package sub\n// edited\n", "edit sub again"}, // step 3
 			},
 			srcSubdir:          "sub",

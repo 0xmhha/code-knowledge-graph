@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
-	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	sol "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
+	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )

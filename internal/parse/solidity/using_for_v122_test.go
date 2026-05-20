@@ -59,4 +59,3 @@ func TestUsingForV122_ModifierLocal(t *testing.T) {
 		t.Errorf("EdgeCalls (V1.22 modifier local) mismatch:\n got=%v\nwant=%v", got, want)
 	}
 }
-

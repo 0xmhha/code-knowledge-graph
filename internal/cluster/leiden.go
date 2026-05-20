@@ -6,12 +6,12 @@
 // graphs (V0 only treats edge multiplicity).
 //
 // Three nested phases per outer iteration:
-//   1. Local moving — for each node, move it to the neighboring community
-//      that maximizes ΔQ (modularity gain).
-//   2. Refinement — within each community, restart with singletons and
-//      re-aggregate to guarantee well-connectedness.
-//   3. Aggregation — collapse each refined community into a single super-node
-//      and recurse.
+//  1. Local moving — for each node, move it to the neighboring community
+//     that maximizes ΔQ (modularity gain).
+//  2. Refinement — within each community, restart with singletons and
+//     re-aggregate to guarantee well-connectedness.
+//  3. Aggregation — collapse each refined community into a single super-node
+//     and recurse.
 //
 // Stops when no node move yields ΔQ > 0 across an entire pass.
 package cluster

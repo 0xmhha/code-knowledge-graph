@@ -30,16 +30,16 @@ type TopicTree struct {
 // Adaptive-split thresholds (graphify-inspired — cluster.py:55-58):
 //
 //   - oversizedFraction:  communities larger than this fraction of the
-//                         total participant set get re-Leidened. Caps
-//                         the worst-case "single mega-community contains
-//                         half the codebase" output.
+//     total participant set get re-Leidened. Caps
+//     the worst-case "single mega-community contains
+//     half the codebase" output.
 //   - oversizedMinSize:   absolute lower bound — don't split tiny
-//                         partitions even if they happen to sit above
-//                         the fraction (small graphs).
+//     partitions even if they happen to sit above
+//     the fraction (small graphs).
 //   - diffuseCohesion:    cohesion < threshold + size >= diffuseMinSize
-//                         flags a community whose members exist together
-//                         only because they all touch a doc-hub or test
-//                         fixture, not because they form a real subsystem.
+//     flags a community whose members exist together
+//     only because they all touch a doc-hub or test
+//     fixture, not because they form a real subsystem.
 const (
 	oversizedFraction = 0.25
 	oversizedMinSize  = 10

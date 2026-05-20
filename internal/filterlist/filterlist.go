@@ -53,10 +53,10 @@ func Load(path string) (*FilterList, error) {
 // Allow reports whether relPath (slash-separated, relative to srcRoot)
 // passes the filter. Decision rule:
 //
-//	1. exclude match  → reject (exclude trumps include)
-//	2. include empty  → accept
-//	3. include match  → accept
-//	4. otherwise      → reject
+//  1. exclude match  → reject (exclude trumps include)
+//  2. include empty  → accept
+//  3. include match  → accept
+//  4. otherwise      → reject
 func (f *FilterList) Allow(relPath string) bool {
 	if f == nil {
 		return true

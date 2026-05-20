@@ -8,18 +8,18 @@
 //
 // Algorithm (mirrors docs/design/hunk-graph.md §5.2):
 //
-//   1. Build per-hunk virtual document = subject + decompressed patch
-//      + modifies-qnames.
-//   2. BM25-score against intent → top 50 hunks.
-//   3. If seed_qname set: filter to hunks reaching seed via the
-//      modifies edge directly OR via one hop on the G3 call graph
-//      (calls/invokes). Take top-K survivors.
-//   4. Group by parent commit; attach all hunks the commit contains
-//      (the adjacent edge means the Agent reads the full change).
-//   5. Decorate each hunk with its `modifies` neighbours' metadata
-//      (qname, type, file_path, start/end lines — no body bytes).
-//   6. Order commits by author timestamp DESC; stop emitting once
-//      cumulative patch text exceeds budget_tokens.
+//  1. Build per-hunk virtual document = subject + decompressed patch
+//     + modifies-qnames.
+//  2. BM25-score against intent → top 50 hunks.
+//  3. If seed_qname set: filter to hunks reaching seed via the
+//     modifies edge directly OR via one hop on the G3 call graph
+//     (calls/invokes). Take top-K survivors.
+//  4. Group by parent commit; attach all hunks the commit contains
+//     (the adjacent edge means the Agent reads the full change).
+//  5. Decorate each hunk with its `modifies` neighbours' metadata
+//     (qname, type, file_path, start/end lines — no body bytes).
+//  6. Order commits by author timestamp DESC; stop emitting once
+//     cumulative patch text exceeds budget_tokens.
 //
 // §11.3 retrieval boundary: only EXTRACTED-confidence Hunks and
 // Commits enter the corpus. AMBIGUOUS rows (the unreachable-history

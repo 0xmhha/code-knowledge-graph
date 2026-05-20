@@ -194,4 +194,3 @@ func TestBuildPack_RealGitFixture(t *testing.T) {
 		}
 	}
 }
-

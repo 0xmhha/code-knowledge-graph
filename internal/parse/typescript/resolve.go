@@ -16,10 +16,10 @@ import (
 //     mean a same-file `Foo()` is overwhelmingly the local Foo.
 //
 //  2. **Confidence reflects ambiguity**.
-//      - exactly one candidate (after the locality filter) → INFERRED.
-//      - 2+ candidates → AMBIGUOUS, picking the highest-PageRank as
-//        the dst so the edge still points somewhere reasonable, but
-//        flagged so downstream consumers can de-rank or re-review.
+//     - exactly one candidate (after the locality filter) → INFERRED.
+//     - 2+ candidates → AMBIGUOUS, picking the highest-PageRank as
+//     the dst so the edge still points somewhere reasonable, but
+//     flagged so downstream consumers can de-rank or re-review.
 //
 //  3. **No cross-axis pollution**. Only Function / Method / Class
 //     definitions populate the byName index — Imports / Decorators /

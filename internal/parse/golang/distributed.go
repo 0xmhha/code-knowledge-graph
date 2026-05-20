@@ -296,7 +296,7 @@ func isNetHTTPType(t gotypes.Type) bool {
 //   - Selector:                  `srv.HandleUsers`           → typesInfo lookup
 //   - Type-conversion wrapper:   `http.HandlerFunc(handler)` → unwrap then recurse
 //   - Function literal:          `func(w, r) {...}`          → "" (skip — V0
-//                                doesn't synthesise anonymous Function nodes)
+//     doesn't synthesise anonymous Function nodes)
 func (v *declVisitor) resolveHTTPHandlerArg(arg ast.Expr) string {
 	// Unwrap an explicit type-conversion call like `http.HandlerFunc(h)` —
 	// idiomatic for `http.Handle` registration. The inner expression is the
@@ -762,11 +762,11 @@ func (v *declVisitor) maybeEmitHTTPClientCall(parentFuncID string, call *ast.Cal
 //   - http.Verb(...)              — receiver Ident "http", Sel one of Get/Post/PostForm/Head
 //   - http.NewRequest{,WithContext}(method, url, ...) — first string-literal arg is method
 //   - <recv>.Verb(...)            — receiver value (presumed *http.Client or compatible),
-//                                   Sel one of Get/Post/PostForm/Head; matched leniently
-//                                   to support common wrappers (chi.Client, retryablehttp.Client).
+//     Sel one of Get/Post/PostForm/Head; matched leniently
+//     to support common wrappers (chi.Client, retryablehttp.Client).
 //   - <recv>.Do(req)              — receiver value, Sel "Do"; SKIPPED in V0 because the
-//                                   request object's method/url require flow analysis.
-//                                   Documented limitation.
+//     request object's method/url require flow analysis.
+//     Documented limitation.
 func classifyHTTPClientCall(call *ast.CallExpr) (method string, urlArg ast.Expr, ok bool) {
 	sel, isSel := call.Fun.(*ast.SelectorExpr)
 	if !isSel {
@@ -915,4 +915,3 @@ func (v *declVisitor) upsertHTTPClientPlaceholder(method, path string, startPos,
 	})
 	return id
 }
-

@@ -22,16 +22,17 @@ import (
 //
 // Supported (correct size returned):
 //
-//   bool               → 1
-//   address, address payable → 20
-//   uintN  (N ∈ 8..256, N % 8 == 0) → N/8
-//   intN   (N ∈ 8..256, N % 8 == 0) → N/8
-//   uint, int          → 32 (aliases for uint256 / int256)
-//   bytesN (N ∈ 1..32) → N
+//	bool               → 1
+//	address, address payable → 20
+//	uintN  (N ∈ 8..256, N % 8 == 0) → N/8
+//	intN   (N ∈ 8..256, N % 8 == 0) → N/8
+//	uint, int          → 32 (aliases for uint256 / int256)
+//	bytesN (N ∈ 1..32) → N
 //
 // Defaults to 32 (full slot, conservative) for:
-//   bytes (dynamic) / string / arrays / structs / mappings /
-//   user-defined types / anything not in the above list.
+//
+//	bytes (dynamic) / string / arrays / structs / mappings /
+//	user-defined types / anything not in the above list.
 func solTypeSize(sig string) int {
 	if size, ok := solValueTypeSize(sig); ok {
 		return size

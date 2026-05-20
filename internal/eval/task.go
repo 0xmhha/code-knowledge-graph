@@ -14,8 +14,8 @@ import (
 // Task mirrors the eval/tasks/*.yaml schema (spec §9.3).
 type Task struct {
 	ID           string   `yaml:"id"`
-	Corpus       string   `yaml:"corpus"`        // "synthetic" | "real" | absolute path
-	CorpusPath   string   `yaml:"corpus_path"`   // optional override
+	Corpus       string   `yaml:"corpus"`      // "synthetic" | "real" | absolute path
+	CorpusPath   string   `yaml:"corpus_path"` // optional override
 	Description  string   `yaml:"description"`
 	ExpectedKind string   `yaml:"expected_kind"` // "symbol_set" | "code_patch" | "rubric"
 	Expected     Expected `yaml:"expected"`
@@ -26,9 +26,9 @@ type Expected struct {
 	// symbol_set kind
 	Symbols []string `yaml:"symbols,omitempty"`
 	// code_patch kind
-	MustUseSymbols      []string `yaml:"must_use_symbols,omitempty"`
-	MustCall            []string `yaml:"must_call,omitempty"`
-	MustNotBreakSig     bool     `yaml:"must_not_break_signature,omitempty"`
+	MustUseSymbols  []string `yaml:"must_use_symbols,omitempty"`
+	MustCall        []string `yaml:"must_call,omitempty"`
+	MustNotBreakSig bool     `yaml:"must_not_break_signature,omitempty"`
 	// rubric kind
 	Rubric []string `yaml:"rubric,omitempty"`
 }

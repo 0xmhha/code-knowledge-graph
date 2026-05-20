@@ -119,7 +119,7 @@ func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
 // Flow (G6 v4 + C1 reverse-reference invalidation):
 //  1. DROP temporal + xlang edges from DB — they are always rebuilt and
 //     would otherwise duplicate or stale.
-//  1.5. C1: query reverse-dirty cached files BEFORE deleting dirty nodes.
+//     1.5. C1: query reverse-dirty cached files BEFORE deleting dirty nodes.
 //     Cached files whose pending_refs target qnames in dirty/removed files
 //     need their pending_refs re-resolved (their edges to dirty nodes were
 //     cascade-deleted). Non-reverse-dirty files skip PendingRefsByFilePath
@@ -864,4 +864,3 @@ func buildFileEntries(decisions CacheDecisions, nodes []types.Node, edges []type
 	}
 	return out
 }
-

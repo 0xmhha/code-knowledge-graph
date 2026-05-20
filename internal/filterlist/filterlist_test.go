@@ -34,11 +34,11 @@ func TestAllow_ExcludeOverridesInclude(t *testing.T) {
 		Exclude: []string{"**/testdata/**", "**/*_test.go"},
 	}
 	cases := map[string]bool{
-		"internal/parse/golang/parser.go":           true,
-		"internal/parse/golang/parser_test.go":      false,
-		"internal/parse/golang/testdata/sample.go":  false,
-		"internal/parse/golang/testdata/x/y/z.go":   false,
-		"cmd/ckg/build.go":                          false,
+		"internal/parse/golang/parser.go":          true,
+		"internal/parse/golang/parser_test.go":     false,
+		"internal/parse/golang/testdata/sample.go": false,
+		"internal/parse/golang/testdata/x/y/z.go":  false,
+		"cmd/ckg/build.go":                         false,
 	}
 	for path, want := range cases {
 		if got := f.Allow(path); got != want {

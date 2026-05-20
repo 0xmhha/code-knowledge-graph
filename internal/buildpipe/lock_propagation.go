@@ -42,7 +42,7 @@ const lockPropagationMaxDepth = 5
 //  3. For each lock-holding function f with held mutex set H:
 //     - DFS from f up to lockPropagationMaxDepth via callgraph adjacency.
 //     - At every reachable callee c, for every field in funcFields[c], emit
-//       accessed_under_lock(field, mutex) for each mutex in H.
+//     accessed_under_lock(field, mutex) for each mutex in H.
 //  4. Dedup against existing edges and within this pass (W-A §5.0 Q6):
 //     priority EXTRACTED > INFERRED > AMBIGUOUS. Existing intra-function
 //     edges (INFERRED) survive — we only add new (field, mutex) pairs.

@@ -46,14 +46,14 @@ type Manifest struct {
 // schema_version (see internal/buildpipe/cache.go ComputeCacheKey) so any
 // upstream change correctly invalidates the entry.
 type FileEntry struct {
-	Path          string  `json:"path"`           // srcRoot-relative slash form
-	Language      string  `json:"language"`       // "go" | "ts" | "sol"
-	SHA256        string  `json:"sha256"`         // hex of file content
-	CacheKey      string  `json:"cache_key"`      // hex of full key
-	MTime         int64   `json:"mtime"`          // unix nanoseconds (fast path)
-	NodeIDs       []string `json:"node_ids"`      // IDs this file produced
-	EdgeIDs       []int64 `json:"edge_ids"`       // edge row IDs
-	ParserVersion string  `json:"parser_version"` // see ComputeCacheKey
+	Path          string   `json:"path"`           // srcRoot-relative slash form
+	Language      string   `json:"language"`       // "go" | "ts" | "sol"
+	SHA256        string   `json:"sha256"`         // hex of file content
+	CacheKey      string   `json:"cache_key"`      // hex of full key
+	MTime         int64    `json:"mtime"`          // unix nanoseconds (fast path)
+	NodeIDs       []string `json:"node_ids"`       // IDs this file produced
+	EdgeIDs       []int64  `json:"edge_ids"`       // edge row IDs
+	ParserVersion string   `json:"parser_version"` // see ComputeCacheKey
 }
 
 // SetManifest replaces existing manifest rows with fields from m.

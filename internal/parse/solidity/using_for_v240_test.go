@@ -23,6 +23,7 @@ import (
 // multi-binding. Each method exists in exactly one library:
 //   - LibA.tag → resolveBindingLib finds tag on LibA
 //   - LibB.bump → resolveBindingLib finds bump on LibB
+//
 // Cross-file resolution → ConfInferred.
 func TestUsingForV240_CrossFileMultiBinding(t *testing.T) {
 	dir := filepath.Join("testdata", "using_for_v240")

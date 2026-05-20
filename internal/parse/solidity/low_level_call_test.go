@@ -78,12 +78,12 @@ func TestLowLevelCall_StateVarReceiver(t *testing.T) {
 
 	// (c) Surround-safety: IFoo, IFoo.bar, Proxy, 3 functions index.
 	wantNodes := map[string]bool{
-		"IFoo":                   false,
-		"IFoo.bar":               false,
-		"Proxy":                  false,
-		"Proxy.viaCall":          false,
-		"Proxy.viaDelegatecall":  false,
-		"Proxy.viaStaticcall":    false,
+		"IFoo":                  false,
+		"IFoo.bar":              false,
+		"Proxy":                 false,
+		"Proxy.viaCall":         false,
+		"Proxy.viaDelegatecall": false,
+		"Proxy.viaStaticcall":   false,
 	}
 	for _, n := range nodes {
 		if _, ok := wantNodes[n.QualifiedName]; ok {

@@ -600,4 +600,3 @@ func signatureForRPC(reqType string, reqStream bool, respType string, respStream
 	}
 	return "(" + left + ") returns (" + right + ")"
 }
-

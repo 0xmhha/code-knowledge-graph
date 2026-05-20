@@ -188,7 +188,7 @@ func applySchema(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) erro
 // per known language and union the results. This is correct and avoids the two
 // bugs in the old two-pass approach:
 //   - Pass 1 used QueryNodes("", 0) which SQLite interprets as LIMIT 0 (zero rows).
-//   - Pass 2 used DistinctFilePaths("") which only returns rows with language=''.
+//   - Pass 2 used DistinctFilePaths("") which only returns rows with language=”.
 //
 // Package nodes always have a file_path in the SQLite schema (schema.sql line 11),
 // so they are covered by the NodesByFilePath scan and Pass 1 is unnecessary.

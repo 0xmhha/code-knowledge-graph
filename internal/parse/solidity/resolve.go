@@ -15,18 +15,19 @@ import (
 // keep narrow signatures. The sixth lookup (funcID → contractID)
 // reuses the existing containerIDByFuncID map from W-C W2 review M1+M3.
 //
-//   bindingMap:         contractID → (typeName | "*") → libraryName
-//   stateVarTypes:      contractID → varName → typeName (NodeField.Signature)
-//   paramTypeMap:       funcID → paramName → typeName (V1.1)
-//   funcReturnTypeMap:  funcID → first-return typeName (V1.3)
-//   structFieldTypeMap: structName → fieldName → fieldType (V1.10 —
-//                                 struct-field receiver dispatch needs
-//                                 the field's declared type as the
-//                                 binding lookup key).
-//   localVarTypeMap:    funcID → localVarName → typeName (V1.15 —
-//                                 function-local variable receiver
-//                                 dispatch; resolver fallback after
-//                                 stateVarTypes → paramTypes).
+//	bindingMap:         contractID → (typeName | "*") → libraryName
+//	stateVarTypes:      contractID → varName → typeName (NodeField.Signature)
+//	paramTypeMap:       funcID → paramName → typeName (V1.1)
+//	funcReturnTypeMap:  funcID → first-return typeName (V1.3)
+//	structFieldTypeMap: structName → fieldName → fieldType (V1.10 —
+//	                              struct-field receiver dispatch needs
+//	                              the field's declared type as the
+//	                              binding lookup key).
+//	localVarTypeMap:    funcID → localVarName → typeName (V1.15 —
+//	                              function-local variable receiver
+//	                              dispatch; resolver fallback after
+//	                              stateVarTypes → paramTypes).
+//
 // bindingMap (V2.2 onwards): contractID → (typeName | "*") → []libraryName.
 // Multi-value to support `using A for uint256; using B for uint256;`
 // where both libraries apply and each provides different methods. V0
@@ -2168,8 +2169,8 @@ func resolveUsingForTripleChainCallRef(
 //  2. Determine starting namespace:
 //     - same-contract: starting namespace = callerContainer.
 //     - cross-contract: receiverObj → receiverType
-//       (stateVarTypes → paramTypes fallback). starting namespace =
-//       receiverType.
+//     (stateVarTypes → paramTypes fallback). starting namespace =
+//     receiverType.
 //  3. For each fn_i in segs (left-to-right):
 //     - `<currentNamespace>.<fn_i>` → fnFuncID (funcByQName).
 //     - fnFuncID → returnType_i (funcReturnTypes).

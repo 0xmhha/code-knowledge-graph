@@ -16,11 +16,11 @@ import (
 // the live staleness check is asserted.
 func TestComputeStaleness_PathAware(t *testing.T) {
 	cases := []struct {
-		name              string
-		repoMutation      func(t *testing.T, repo string) // happens AFTER initial commit
-		srcSubdir         string
-		expectStale       bool
-		expectCurrentNon  bool // current commit must be non-empty
+		name             string
+		repoMutation     func(t *testing.T, repo string) // happens AFTER initial commit
+		srcSubdir        string
+		expectStale      bool
+		expectCurrentNon bool // current commit must be non-empty
 	}{
 		{
 			name:             "no further commits → not stale",

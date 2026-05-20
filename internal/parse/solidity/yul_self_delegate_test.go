@@ -19,8 +19,8 @@ func TestYulSelfDelegatecallDeadMarker(t *testing.T) {
 		lowLevel, dead bool
 	}
 	want := map[string]pair{
-		"YulSelfDelegate.deadYulDelegate":  {lowLevel: true, dead: true},
-		"YulSelfDelegate.normalYulCall":    {lowLevel: true, dead: false},
+		"YulSelfDelegate.deadYulDelegate": {lowLevel: true, dead: true},
+		"YulSelfDelegate.normalYulCall":   {lowLevel: true, dead: false},
 	}
 	got := map[string]pair{}
 	for _, n := range nodes {

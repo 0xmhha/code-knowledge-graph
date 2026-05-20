@@ -80,4 +80,3 @@ func newLogger(verbose bool, logFile string) (*slog.Logger, func(), error) {
 	cleanup := func() { _ = f.Close() }
 	return slog.New(h), cleanup, nil
 }
-

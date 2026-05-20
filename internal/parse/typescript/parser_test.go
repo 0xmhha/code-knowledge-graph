@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
-	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 	tsp "github.com/0xmhha/code-knowledge-graph/internal/parse/typescript"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 type golden struct {

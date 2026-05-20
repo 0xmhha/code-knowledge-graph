@@ -102,7 +102,7 @@ func TestBuildPack_AmbiguousFiltered(t *testing.T) {
 	store := &fakeStore{
 		nodes: []types.Node{
 			{ID: "c1", Type: types.NodeCommit, QualifiedName: "commit:cccc",
-				Signature: "1700000300: panic-revert: kill the bad commit",
+				Signature:  "1700000300: panic-revert: kill the bad commit",
 				Confidence: types.ConfAmbiguous},
 			{ID: "h1", Type: types.NodeHunk, QualifiedName: "hunk:cccc:bad.go:0",
 				FilePath: "bad.go", StartLine: 1, EndLine: 5,
@@ -649,11 +649,11 @@ func TestBuildPack_IssueIDNoMatch(t *testing.T) {
 // TestParseHunkSHA covers the qname-format parser's edge cases.
 func TestParseHunkSHA(t *testing.T) {
 	cases := map[string]string{
-		"hunk:abc123:file.go:0":                          "abc123",
+		"hunk:abc123:file.go:0": "abc123",
 		"hunk:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:dir/x.ts:42": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"hunk:":                                          "",
-		"":                                               "",
-		"commit:abc":                                     "",
+		"hunk:":      "",
+		"":           "",
+		"commit:abc": "",
 	}
 	for in, want := range cases {
 		if got := parseHunkSHA(in); got != want {

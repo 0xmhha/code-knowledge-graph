@@ -13,8 +13,9 @@ type Counter struct {
 }
 
 // Inc demonstrates the defer-Unlock pattern. Expected lock edges:
-//   acquires_lock(Counter.Inc -> Counter.mu)
-//   releases_lock(Counter.Inc -> Counter.mu)   // from defer
+//
+//	acquires_lock(Counter.Inc -> Counter.mu)
+//	releases_lock(Counter.Inc -> Counter.mu)   // from defer
 func (c *Counter) Inc() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

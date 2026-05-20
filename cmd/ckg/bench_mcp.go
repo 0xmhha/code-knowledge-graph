@@ -230,4 +230,3 @@ func runMCPBench(handler mcpserver.ToolHandlerFunc, probe mcpProbe, iterations, 
 	r.P99Ms = percentile(durs, 99)
 	return r
 }
-

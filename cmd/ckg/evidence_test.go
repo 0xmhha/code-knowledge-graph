@@ -36,11 +36,11 @@ func TestRenderEvidenceText(t *testing.T) {
 	out := buf.String()
 	for _, want := range []string{
 		"1 commit(s):",
-		"aaaa1111aaaa",  // truncated SHA
-		"[GH-42]",        // issue badge
+		"aaaa1111aaaa", // truncated SHA
+		"[GH-42]",      // issue badge
 		"fix: panel jitter",
 		"Panel.tsx L10-14:",
-		"+new",            // patch body
+		"+new", // patch body
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q\n--- got ---\n%s", want, out)

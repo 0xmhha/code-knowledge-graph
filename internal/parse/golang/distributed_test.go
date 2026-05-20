@@ -23,10 +23,10 @@ func TestDistributed_HTTP_Endpoints(t *testing.T) {
 	// net/http dispatches all verbs to the same handler. The "GET /scoped"
 	// case exercises Go 1.22+ method-prefixed pattern parsing.
 	wantRoutes := map[string]bool{
-		"http:* /users":   false,
-		"http:* /admin":   false,
-		"http:* /health":  false,
-		"http:* /ping":    false, // anonymous handler — endpoint still emitted
+		"http:* /users":    false,
+		"http:* /admin":    false,
+		"http:* /health":   false,
+		"http:* /ping":     false, // anonymous handler — endpoint still emitted
 		"http:GET /scoped": false, // Go 1.22+ method-prefixed pattern
 	}
 	for _, n := range endpoints {

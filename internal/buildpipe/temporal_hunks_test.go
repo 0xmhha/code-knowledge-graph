@@ -110,12 +110,12 @@ func TestBuildHunkNodes_StableIDs(t *testing.T) {
 func TestBuildHunkNodes_LanguageInference(t *testing.T) {
 	commitIDs := map[string]string{"a": "commitA000000aaa"}
 	cases := map[string]string{
-		"main.go":         "go",
-		"sub/x.ts":        "ts",
-		"comp.tsx":        "ts",
-		"contracts/y.sol": "sol",
-		"docs/README.md":  "git",
-		"k8s/deploy.yaml": "git",
+		"main.go":          "go",
+		"sub/x.ts":         "ts",
+		"comp.tsx":         "ts",
+		"contracts/y.sol":  "sol",
+		"docs/README.md":   "git",
+		"k8s/deploy.yaml":  "git",
 		"protos/api.proto": "git",
 	}
 	for path, wantLang := range cases {

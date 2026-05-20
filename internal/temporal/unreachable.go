@@ -2,14 +2,14 @@
 // exist in the local git object store but are NOT reachable from HEAD.
 // Those commits live in two surfaces:
 //
-//   1. `git reflog --all --pretty=%H`        — local HEAD/branch movement
-//      records. Captures force-pushed-away SHAs that haven't been GC'd
-//      yet (default 90 days). Misses commits that landed via fetch but
-//      were never moved into a ref's history.
+//  1. `git reflog --all --pretty=%H`        — local HEAD/branch movement
+//     records. Captures force-pushed-away SHAs that haven't been GC'd
+//     yet (default 90 days). Misses commits that landed via fetch but
+//     were never moved into a ref's history.
 //
-//   2. `git fsck --no-reflogs --unreachable` — dangling objects that
-//      no ref or reflog points at. Catches the second category above
-//      and any commit explicitly excluded from a fetch's tip walk.
+//  2. `git fsck --no-reflogs --unreachable` — dangling objects that
+//     no ref or reflog points at. Catches the second category above
+//     and any commit explicitly excluded from a fetch's tip walk.
 //
 // Together: a near-complete view of the local object store's
 // "history humans rolled back". Used to populate the schema-1.8

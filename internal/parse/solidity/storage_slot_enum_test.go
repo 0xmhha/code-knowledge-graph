@@ -15,10 +15,11 @@ import (
 // with 1-byte sizing.
 //
 // Expected layout under V14:
-//   head  -> slot 0, byte 0
-//   role1 -> slot 0, byte 1 (uint8 enum)
-//   role2 -> slot 0, byte 2 (uint8 enum)
-//   tail  -> slot 1        (uint256 needs full slot)
+//
+//	head  -> slot 0, byte 0
+//	role1 -> slot 0, byte 1 (uint8 enum)
+//	role2 -> slot 0, byte 2 (uint8 enum)
+//	tail  -> slot 1        (uint256 needs full slot)
 func TestStorageSlot_EnumConservativePacking(t *testing.T) {
 	nodes, _ := parseResolveOneSol(t,
 		"testdata/storage_slot_packing", "enum_packing.sol")

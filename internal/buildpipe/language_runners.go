@@ -302,4 +302,3 @@ func convertABI(in map[string][]solp.ABISig) map[string][]link.ABISig {
 	}
 	return out
 }
-

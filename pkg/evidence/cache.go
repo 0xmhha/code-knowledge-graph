@@ -9,6 +9,7 @@
 //   - the indexed `hunkCorpus` (per-SHA / per-hunk maps),
 //   - the bm25.Scorer with the corpus pre-indexed (the expensive step
 //     that materialises term-frequency stats across all docs),
+//
 // keyed by (manifest.BuildTimestamp + manifest.SrcCommit). Any rebuild
 // drifts the key and the next call rebuilds the index lazily.
 //
@@ -37,9 +38,9 @@ import (
 // invalidates itself when the underlying graph.db rebuilds.
 type Cache struct {
 	mu     sync.RWMutex
-	key    string         // BuildTimestamp + "|" + SrcCommit
-	corpus *hunkCorpus    // post-indexCorpus
-	scorer bm25.Scorer    // post-Index over the per-hunk virtual docs
+	key    string      // BuildTimestamp + "|" + SrcCommit
+	corpus *hunkCorpus // post-indexCorpus
+	scorer bm25.Scorer // post-Index over the per-hunk virtual docs
 	docs   []bm25.Document
 
 	// manifestMu guards the small TTL-based manifest mini-cache.

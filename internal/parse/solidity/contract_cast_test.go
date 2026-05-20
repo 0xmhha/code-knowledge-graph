@@ -85,11 +85,11 @@ func TestContractCast_Dispatch(t *testing.T) {
 
 	// Surround-safety: every declaration indexes.
 	wantNodes := map[string]bool{
-		"Vault":           false,
-		"Vault.deposit":   false,
-		"Vault.withdraw":  false,
-		"Caller":          false,
-		"Caller.forward":  false,
+		"Vault":          false,
+		"Vault.deposit":  false,
+		"Vault.withdraw": false,
+		"Caller":         false,
+		"Caller.forward": false,
 	}
 	for _, n := range nodes {
 		if _, ok := wantNodes[n.QualifiedName]; ok {

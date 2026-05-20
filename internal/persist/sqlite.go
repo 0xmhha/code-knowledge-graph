@@ -340,7 +340,7 @@ func (s *sqliteStore) RebuildFTS() error {
 // file inclusion set against an authoritative reference (e.g. the Go build
 // system's go/packages.Load output). Empty slice when no rows match.
 //
-// The `file_path != ''` predicate is defensive — currently every node-emitting
+// The `file_path != ”` predicate is defensive — currently every node-emitting
 // site populates FilePath unconditionally — but kept so that introducing a
 // new node type (e.g. cross-file aggregator) without a file_path won't
 // silently inflate the audit set with empty-string paths.

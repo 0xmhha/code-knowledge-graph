@@ -4,8 +4,8 @@
 //
 //   - IfStmt     ← `if_statement`
 //   - LoopStmt   ← `for_statement` / `for_in_statement` / `for_of_statement`
-//                  / `while_statement` / `do_statement`
-//                  (SubKind = "for" / "for-in" / "for-of" / "while" / "do")
+//     / `while_statement` / `do_statement`
+//     (SubKind = "for" / "for-in" / "for-of" / "while" / "do")
 //   - SwitchStmt ← `switch_statement`
 //   - ReturnStmt ← `return_statement`
 //   - CallSite   ← `call_expression`

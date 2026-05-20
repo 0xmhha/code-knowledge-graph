@@ -5,9 +5,9 @@
 //
 // The CLI mirrors the /api/evidence query shape:
 //
-//   ckg evidence --graph DIR [--intent TEXT] [--issue ID]
-//                [--seed-qname QNAME] [-k N] [--budget N] [--offset N]
-//                [--format json|text]
+//	ckg evidence --graph DIR [--intent TEXT] [--issue ID]
+//	             [--seed-qname QNAME] [-k N] [--budget N] [--offset N]
+//	             [--format json|text]
 //
 // At least one of --intent or --issue is required (matches the server-
 // side check). text format emits a compact human-readable summary

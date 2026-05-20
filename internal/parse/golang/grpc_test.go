@@ -149,7 +149,7 @@ func TestGRPC_ClientCalls(t *testing.T) {
 		}
 	}
 	if serverEndpoint == nil {
-		t.Error("server-side grpc:UserService.GetUser (language=go) Endpoint missing — "+
+		t.Error("server-side grpc:UserService.GetUser (language=go) Endpoint missing — " +
 			"server pass did not emit it independent of the client side")
 	} else if serverEndpoint.Confidence != types.ConfExtracted {
 		t.Errorf("server-side grpc:UserService.GetUser confidence=%q, want EXTRACTED",

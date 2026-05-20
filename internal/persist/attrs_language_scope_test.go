@@ -19,18 +19,18 @@ import (
 // V12 audits and locks the design choice. Two alternative
 // directions exist:
 //
-//   1. Promote a subset of markers to language-agnostic
-//      semantics. e.g. HasAssembly could mirror Go's `import
-//      "unsafe"` users or TS's `//@ts-ignore` populations.
-//      Each markers carries Sol-specific semantics today and
-//      cross-language reuse would need fresh per-language
-//      detection — out of scope for V12.
+//  1. Promote a subset of markers to language-agnostic
+//     semantics. e.g. HasAssembly could mirror Go's `import
+//     "unsafe"` users or TS's `//@ts-ignore` populations.
+//     Each markers carries Sol-specific semantics today and
+//     cross-language reuse would need fresh per-language
+//     detection — out of scope for V12.
 //
-//   2. Add language-specific markers under a polymorphic
-//      payload (e.g. attrs JSON with a "language" tag).
-//      Increases payload size and adds branch logic at every
-//      read site for marginal gain. Better served by separate
-//      Node fields with their own omitempty tags.
+//  2. Add language-specific markers under a polymorphic
+//     payload (e.g. attrs JSON with a "language" tag).
+//     Increases payload size and adds branch logic at every
+//     read site for marginal gain. Better served by separate
+//     Node fields with their own omitempty tags.
 //
 // V12 keeps the current design: nodeAttrs fields are Sol
 // markers; Go/TS nodes serialise to "" and round-trip cleanly

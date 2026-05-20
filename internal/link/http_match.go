@@ -78,7 +78,7 @@ func MatchHTTPClients(nodes []types.Node, edges []types.Edge) ([]types.Node, []t
 	result := HTTPMatchResult{}
 
 	// (1) Bucket Endpoint nodes by qname split into real vs placeholder.
-	realByQName := map[string]string{}  // qname -> real Endpoint ID
+	realByQName := map[string]string{}   // qname -> real Endpoint ID
 	placeholderByID := map[string]bool{} // placeholder Endpoint IDs
 	placeholderQNameByID := map[string]string{}
 	for i := range nodes {

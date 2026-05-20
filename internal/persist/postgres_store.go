@@ -41,9 +41,9 @@ var (
 // by trigger — which mirrors the SQLite FTS5 content-table model: the caller
 // explicitly calls RebuildFTS() after all inserts.
 //
-// topic_tree.parent_id is TEXT NOT NULL DEFAULT '' (PostgreSQL forbids NULL in
-// PRIMARY KEY components). Callers that pass nil parent → '' on insert, and
-// read '' → "" on scan.
+// topic_tree.parent_id is TEXT NOT NULL DEFAULT ” (PostgreSQL forbids NULL in
+// PRIMARY KEY components). Callers that pass nil parent → ” on insert, and
+// read ” → "" on scan.
 const pgStoreSchema = `
 CREATE TABLE IF NOT EXISTS nodes (
     id             TEXT PRIMARY KEY,
@@ -413,7 +413,7 @@ func (s *pgStore) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) e
 
 // InsertTopicTree persists multi-resolution Leiden communities. Existing rows
 // are dropped first so a full rebuild doesn't accumulate stale communities.
-// nil parent_id maps to '' (PG PRIMARY KEY cannot contain NULL).
+// nil parent_id maps to ” (PG PRIMARY KEY cannot contain NULL).
 func (s *pgStore) InsertTopicTree(t TopicTreeInput) error {
 	if s.ro {
 		panic("pgStore: InsertTopicTree called on read-only store")
@@ -1041,7 +1041,7 @@ func (s *pgStore) BlobsByFilePath(path string) (map[string][]byte, error) {
 }
 
 // PendingRefsByFilePath returns pending_refs rows for the given file_path.
-// dispatch_kind (schema 1.7) is COALESCE'd to '' so pre-1.7 NULL rows scan
+// dispatch_kind (schema 1.7) is COALESCE'd to ” so pre-1.7 NULL rows scan
 // cleanly when an older PG dump is replayed against this binary.
 func (s *pgStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error) {
 	if path == "" {
@@ -1277,7 +1277,7 @@ func scanPGNodes(rows pgx.Rows) ([]types.Node, error) {
 
 // scanPGEdges drains pgx.Rows for edge queries (file_path/line are COALESCE'd
 // in the SELECT, so direct scan into value types is safe). dispatch_kind
-// (schema 1.7) is the trailing column; COALESCE'd to '' in callers so
+// (schema 1.7) is the trailing column; COALESCE'd to ” in callers so
 // pre-1.7 NULL rows scan cleanly.
 func scanPGEdges(rows pgx.Rows) ([]types.Edge, error) {
 	var out []types.Edge

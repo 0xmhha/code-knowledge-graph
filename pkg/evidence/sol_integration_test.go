@@ -14,14 +14,14 @@ import (
 // contract-type cast, W9 storage slot, W10 inline-assembly marker)
 // has added several Sol-specific fields on Node and Edge:
 //
-//   Node.SubKind       — W4 contract subkind + W7.2 storage location
-//                         on NodeField ("storage_public", "immutable", ...)
-//   Node.SlotIndex     — W9 V0 per-contract slot counter on NodeField
-//   Node.HasAssembly   — W10 V0 presence flag on NodeFunction / NodeModifier
-//   Edge.DispatchKind  — W3 / W7.1 / W8 / etc. dispatch metadata
-//                         ("interface_method", "low_level_call",
-//                          "contract_cast", ...)
-//   Edge.Order         — W7.3 multi-modifier source order
+//	Node.SubKind       — W4 contract subkind + W7.2 storage location
+//	                      on NodeField ("storage_public", "immutable", ...)
+//	Node.SlotIndex     — W9 V0 per-contract slot counter on NodeField
+//	Node.HasAssembly   — W10 V0 presence flag on NodeFunction / NodeModifier
+//	Edge.DispatchKind  — W3 / W7.1 / W8 / etc. dispatch metadata
+//	                      ("interface_method", "low_level_call",
+//	                       "contract_cast", ...)
+//	Edge.Order         — W7.3 multi-modifier source order
 //
 // None of these reach the EvidencePack output (BuildPack assembles
 // Commit / Hunk subset, not Function / Field / Edge). But the evidence
@@ -32,14 +32,14 @@ import (
 // field (with realistic non-zero values) plus a known-issue commit
 // subject, then runs BuildPack and locks the surface invariants:
 //
-//   1. BuildPack succeeds without panic when W-C fields are populated.
-//   2. AMBIGUOUS leak check holds (existing §11.3 boundary).
-//   3. Sol-shaped commit subjects flow through H4 issue extraction
-//      end to end (the Pack still surfaces the underlying hunks for
-//      commits with extractable issue IDs).
-//   4. The Pack's deterministic ordering by commit timestamp survives
-//      a heterogeneous mix of EXTRACTED / INFERRED / AMBIGUOUS upstream
-//      confidences (only the first two land in hits).
+//  1. BuildPack succeeds without panic when W-C fields are populated.
+//  2. AMBIGUOUS leak check holds (existing §11.3 boundary).
+//  3. Sol-shaped commit subjects flow through H4 issue extraction
+//     end to end (the Pack still surfaces the underlying hunks for
+//     commits with extractable issue IDs).
+//  4. The Pack's deterministic ordering by commit timestamp survives
+//     a heterogeneous mix of EXTRACTED / INFERRED / AMBIGUOUS upstream
+//     confidences (only the first two land in hits).
 func TestBuildPack_SolGraphRegression(t *testing.T) {
 	store := &fakeStore{
 		nodes: []types.Node{
@@ -145,9 +145,9 @@ func TestBuildPack_SolGraphRegression(t *testing.T) {
 	}
 
 	pack, err := BuildPack(store, Options{
-		Intent:        "Sol storage layout slot",
-		K:             10,
-		BudgetTokens:  4000,
+		Intent:       "Sol storage layout slot",
+		K:            10,
+		BudgetTokens: 4000,
 	})
 	if err != nil {
 		t.Fatalf("BuildPack: %v", err)

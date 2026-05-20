@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	sol "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	"github.com/0xmhha/code-knowledge-graph/internal/parse"
+	sol "github.com/0xmhha/code-knowledge-graph/internal/parse/solidity"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 

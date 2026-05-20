@@ -82,7 +82,7 @@ func TestRunGo_ExtraInDB(t *testing.T) {
 	// the assertion holds regardless of host OS / GOARCH.
 	root := t.TempDir()
 	writeGoModule(t, root, "mod", "example.test/mod", map[string]string{
-		"main.go": "package main\nfunc main(){}\n",
+		"main.go":  "package main\nfunc main(){}\n",
 		"never.go": "//go:build never\n\npackage main\n",
 	})
 	// detect.Walk would have indexed never.go; go/packages excludes it.

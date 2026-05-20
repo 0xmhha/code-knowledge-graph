@@ -13,8 +13,8 @@ import (
 //
 //  1. Two distinct EdgeUsesFor edges are emitted with no
 //     duplication and no cross-pollination:
-//       - Outer  -> Inner
-//       - Caller -> Outer
+//     - Outer  -> Inner
+//     - Caller -> Outer
 //  2. Both targets resolve as NodeContract (libraries are stored
 //     as NodeContract + SubKind="library" — the V11/V13 lookup
 //     paths apply uniformly).

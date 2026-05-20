@@ -92,10 +92,10 @@ func TestExternalCallCast_SelfReferenceMarker(t *testing.T) {
 		external, selfReentrant bool
 	}
 	want := map[string]pair{
-		"SelfCaster.reentrant":      {external: false, selfReentrant: true},
-		"SelfCaster.addressSelf":    {external: false, selfReentrant: true},
-		"SelfCaster.externalRelay":  {external: true, selfReentrant: false},
-		"SelfCaster.noop":           {external: false, selfReentrant: false},
+		"SelfCaster.reentrant":     {external: false, selfReentrant: true},
+		"SelfCaster.addressSelf":   {external: false, selfReentrant: true},
+		"SelfCaster.externalRelay": {external: true, selfReentrant: false},
+		"SelfCaster.noop":          {external: false, selfReentrant: false},
 	}
 	got := map[string]pair{}
 	for _, n := range nodes {

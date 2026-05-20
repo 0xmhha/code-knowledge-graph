@@ -18,9 +18,9 @@ import (
 //   - Unknown node/edge types. Schema bumps are catastrophic if a parser
 //     emits a type the persist layer doesn't recognise.
 //   - Edge-type semantic invariants (V1 baseline):
-//     - implements src must be a Struct or TypeAlias, dst must be Interface
-//     - listens_on src must be Function/Method, dst must be Endpoint
-//     - calls/invokes src and dst must be Function/Method
+//   - implements src must be a Struct or TypeAlias, dst must be Interface
+//   - listens_on src must be Function/Method, dst must be Endpoint
+//   - calls/invokes src and dst must be Function/Method
 //
 // The validator is deterministic, fast, and dependency-free — safe to run
 // on every build. Findings inform Citation Enforcement and the LLM
@@ -122,15 +122,15 @@ func (v *SchemaValidator) Validate(ctx context.Context, g *graph.Graph, store pe
 		if d.Src {
 			report.Issues = append(report.Issues, Issue{
 				Severity: SeverityError, Code: "dangling-src",
-				Message:  "edge src does not match any node",
-				EdgeKey:  key, FilePath: d.Edge.FilePath,
+				Message: "edge src does not match any node",
+				EdgeKey: key, FilePath: d.Edge.FilePath,
 			})
 		}
 		if d.Dst {
 			report.Issues = append(report.Issues, Issue{
 				Severity: SeverityError, Code: "dangling-dst",
-				Message:  "edge dst does not match any node",
-				EdgeKey:  key, FilePath: d.Edge.FilePath,
+				Message: "edge dst does not match any node",
+				EdgeKey: key, FilePath: d.Edge.FilePath,
 			})
 		}
 	}

@@ -66,6 +66,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 //     then any other proto's package.
 //   - fully-qualified (".pkg.sub.EchoRequest" or "pkg.sub.EchoRequest"):
 //     resolves by exact qname match.
+//
 // We try the package-prefixed form first, then bare-name fallback. Multiple
 // candidates are kept ordered (deterministic — sorted by ID) and the first
 // wins. Ambiguity beyond that is tagged AMBIGUOUS so audits can surface it.

@@ -11,29 +11,29 @@ import (
 func TestExtractIssueIDs_FourPatterns(t *testing.T) {
 	cases := map[string][]string{
 		// GitHub bare hash
-		"Fixes #123":                                    {"GH-123"},
-		"Closes #45 and reopens #67":                    {"GH-45", "GH-67"},
-		"feat: panel re-mount fix (#80)":                {"GH-80"},
+		"Fixes #123":                     {"GH-123"},
+		"Closes #45 and reopens #67":     {"GH-45", "GH-67"},
+		"feat: panel re-mount fix (#80)": {"GH-80"},
 		// Bracketed Linear/Jira/internal style
-		"[INGEST-401] retry budget rework":              {"INGEST-401"},
-		"[ABC-456] follow-up to [DEF-789]":              {"ABC-456", "DEF-789"},
+		"[INGEST-401] retry budget rework": {"INGEST-401"},
+		"[ABC-456] follow-up to [DEF-789]": {"ABC-456", "DEF-789"},
 		// Bare Jira-style at line start
-		"INGEST-789: kafka backpressure":                {"INGEST-789"},
-		"WEM-12345: hardfork bootstrap":                 {"WEM-12345"},
+		"INGEST-789: kafka backpressure": {"INGEST-789"},
+		"WEM-12345: hardfork bootstrap":  {"WEM-12345"},
 		// URL form
-		"Closes https://github.com/foo/bar/issues/42":   {"GH-foo/bar#42"},
+		"Closes https://github.com/foo/bar/issues/42":    {"GH-foo/bar#42"},
 		"merge https://github.com/etcd-io/etcd/issues/9": {"GH-etcd-io/etcd#9"},
 		// Mixed: multiple patterns in one subject
 		// WEM-3 is mid-line so the Jira-prefix regex (line-start only)
 		// correctly skips it — matching it would also catch noise like
 		// "version SOME-123 mentioned" mid-sentence.
-		"Fixes #1 and [ABC-2] per WEM-3: deadline":      {"ABC-2", "GH-1"},
+		"Fixes #1 and [ABC-2] per WEM-3: deadline": {"ABC-2", "GH-1"},
 		// No patterns — returns nil, not zero-length slice
-		"refactor RPC client to be context-aware":        nil,
-		"":                                               nil,
+		"refactor RPC client to be context-aware": nil,
+		"": nil,
 		// False-positive guards
-		"version 1.0#123 release":                        nil, // no separator before #
-		"abc INGEST-7 trailing":                          nil, // not at line start
+		"version 1.0#123 release": nil, // no separator before #
+		"abc INGEST-7 trailing":   nil, // not at line start
 	}
 	for subject, want := range cases {
 		got := ExtractIssueIDs(subject)
@@ -124,8 +124,8 @@ func TestExtractIssueIDs_CorpusPrecisionRecall(t *testing.T) {
 		// Negative cases — should yield nothing.
 		{"refactor RPC client to be context-aware", nil},
 		{"chore: update go.mod", nil},
-		{"version 1.0#123 release", nil}, // no separator before #
-		{"abc INGEST-7 trailing", nil},   // not at line start
+		{"version 1.0#123 release", nil},          // no separator before #
+		{"abc INGEST-7 trailing", nil},            // not at line start
 		{"check the docs at /api/users#123", nil}, // path fragment is not a separator
 		// Real-world subjects (from open-source projects, anonymised).
 		{"feat(api): rate limiter (closes #543, fixes #544)", []string{"GH-543", "GH-544"}},
@@ -200,7 +200,7 @@ func TestDecodeIssueIDs_NonIssueDocComment(t *testing.T) {
 	cases := []string{
 		"// regular function comment",
 		"Some doc with a #123 reference",
-		"issues",  // missing colon
+		"issues",      // missing colon
 		"issue:ABC-1", // singular prefix
 	}
 	for _, in := range cases {

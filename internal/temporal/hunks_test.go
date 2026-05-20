@@ -15,10 +15,10 @@ import (
 // the build pipeline must tolerate without aborting.
 func TestParseHunkHeader_Variants(t *testing.T) {
 	cases := []struct {
-		name                                     string
-		line                                     string
-		oldS, oldL, newS, newL                   int
-		ok                                       bool
+		name                   string
+		line                   string
+		oldS, oldL, newS, newL int
+		ok                     bool
 	}{
 		{"canonical", "@@ -10,5 +12,7 @@ func Foo()", 10, 5, 12, 7, true},
 		{"length omitted", "@@ -42 +42 @@", 42, 1, 42, 1, true},
@@ -48,12 +48,12 @@ func TestParseHunkHeader_Variants(t *testing.T) {
 // in the --- header but the diff --git line still has matching paths.
 func TestParseDiffGitPath_Variants(t *testing.T) {
 	cases := map[string]string{
-		"diff --git a/main.go b/main.go":              "main.go",
+		"diff --git a/main.go b/main.go":                 "main.go",
 		"diff --git a/sub/dir/file.ts b/sub/dir/file.ts": "sub/dir/file.ts",
-		"diff --git a/with-dash b/with-dash":          "with-dash",
-		"diff --git a/x b/y":                          "y", // post-rename name
-		"diff --git \"a/with space\" \"b/with space\"": "with space",
-		"garbage no path":                             "",
+		"diff --git a/with-dash b/with-dash":             "with-dash",
+		"diff --git a/x b/y":                             "y", // post-rename name
+		"diff --git \"a/with space\" \"b/with space\"":   "with space",
+		"garbage no path":                                "",
 	}
 	for line, want := range cases {
 		got := parseDiffGitPath(line)

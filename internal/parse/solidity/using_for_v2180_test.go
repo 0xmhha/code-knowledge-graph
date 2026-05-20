@@ -56,10 +56,10 @@ func TestUsingForV2180_FileLevelUsingGlobal(t *testing.T) {
 	// (c) Surround-safety: SafeMath, SafeMath.add, Vault, Vault.compute
 	// all still index.
 	want := map[string]bool{
-		"SafeMath":       false,
-		"SafeMath.add":   false,
-		"Vault":          false,
-		"Vault.compute":  false,
+		"SafeMath":      false,
+		"SafeMath.add":  false,
+		"Vault":         false,
+		"Vault.compute": false,
 	}
 	for _, n := range nodes {
 		if _, ok := want[n.QualifiedName]; ok {

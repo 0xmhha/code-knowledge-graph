@@ -4,16 +4,16 @@
 // Expected emit (per call site below, all under the enclosing function):
 //
 //   - CallGetUser            → grpc_calls → grpc:UserService.GetUser
-//                              (same-file server registered this Endpoint,
-//                              so the client edge resolves to the real
-//                              language="go" Endpoint, not a placeholder)
+//     (same-file server registered this Endpoint,
+//     so the client edge resolves to the real
+//     language="go" Endpoint, not a placeholder)
 //   - CallListUsers          → grpc_calls → grpc:UserService.ListUsers
-//                              (same as GetUser — real Endpoint reuse)
+//     (same as GetUser — real Endpoint reuse)
 //   - CallEcho               → grpc_calls → grpc:EchoService.Echo
-//                              (real Endpoint, same-file registration)
+//     (real Endpoint, same-file registration)
 //   - CallExternalService    → grpc_calls → grpc:ExternalService.DoSomething
-//                              (no server registration in fixture →
-//                              AMBIGUOUS placeholder Endpoint retained)
+//     (no server registration in fixture →
+//     AMBIGUOUS placeholder Endpoint retained)
 //   - NonGRPCCallSkipped     → no edge (variable is not a gRPC stub)
 package distributed_fixture
 

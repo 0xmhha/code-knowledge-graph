@@ -10,9 +10,9 @@ import (
 // struct, Middle wraps Inner + uint256 -> 3 slots, Outer wraps
 // Middle + uint8 -> 4 slots. The state-var declaration order:
 //
-//   head    : uint8       slot 0
-//   wrapped : Outer       slot 1 (struct boundary -> 4 slots)
-//   tail    : uint8       slot 5 (fresh slot after struct)
+//	head    : uint8       slot 0
+//	wrapped : Outer       slot 1 (struct boundary -> 4 slots)
+//	tail    : uint8       slot 5 (fresh slot after struct)
 //
 // computeStructSizes runs a fixed-point loop: Inner is sized
 // first (no struct deps), then Middle (depends on Inner), then

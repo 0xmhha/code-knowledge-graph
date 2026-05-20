@@ -4,19 +4,19 @@
 // but adapted to CKG's richer node/edge schema:
 //
 //   - Corpus baseline:  sum of source-file bytes for the indexed languages,
-//                       converted to tokens via the standard ~4 chars-per-
-//                       token heuristic (matches OpenAI/Anthropic averages
-//                       for English+code; fine for ratio reporting).
+//     converted to tokens via the standard ~4 chars-per-
+//     token heuristic (matches OpenAI/Anthropic averages
+//     for English+code; fine for ratio reporting).
 //
 //   - Graph-query cost: pick the top-N god nodes as proxy "questions",
-//                       BFS k=3 hops from each, render the subgraph as
-//                       a compact text answer (`Symbol → Symbol` chains),
-//                       and count the resulting tokens.
+//     BFS k=3 hops from each, render the subgraph as
+//     a compact text answer (`Symbol → Symbol` chains),
+//     and count the resulting tokens.
 //
 //   - Reduction ratio:  corpus_tokens / avg(query_tokens). A 100x ratio
-//                       means the graph reaches the same answer using
-//                       1% of the tokens a naive grep-everything pass
-//                       would consume.
+//     means the graph reaches the same answer using
+//     1% of the tokens a naive grep-everything pass
+//     would consume.
 //
 // The numbers are approximate by design — point estimates for the
 // "is the graph worth the build cost" decision, not precision metrics.

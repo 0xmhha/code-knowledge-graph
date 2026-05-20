@@ -44,16 +44,17 @@ func (o Options) withDefaults() Options {
 }
 
 // BuildContext is the shared smart-retrieval algorithm:
-//   (a) Search   — top 30 candidates via the store's smart router.
-//   (b) Expand   — 1-hop neighbours via QueryEdgesForNodes.
-//   (c) Score    — 0.5 BM25 + 0.3 PageRank + 0.2 Usage. BM25 uses pkg/bm25
-//                  Okapi with code-aware tokenization (replaces the old
-//                  1/(rank+1) placeholder).
-//   (d) Diversify — V0: top-30 cap. Per-cluster diversity is V1+.
-//   (e) Pack     — top MaxBodies get full source; next ≤15 get sig+doc.
-//   (f) Cite     — every emitted item gets file_path + start_line. Items
-//                  missing either generate a warning record so callers
-//                  can audit citation coverage.
+//
+//	(a) Search   — top 30 candidates via the store's smart router.
+//	(b) Expand   — 1-hop neighbours via QueryEdgesForNodes.
+//	(c) Score    — 0.5 BM25 + 0.3 PageRank + 0.2 Usage. BM25 uses pkg/bm25
+//	               Okapi with code-aware tokenization (replaces the old
+//	               1/(rank+1) placeholder).
+//	(d) Diversify — V0: top-30 cap. Per-cluster diversity is V1+.
+//	(e) Pack     — top MaxBodies get full source; next ≤15 get sig+doc.
+//	(f) Cite     — every emitted item gets file_path + start_line. Items
+//	               missing either generate a warning record so callers
+//	               can audit citation coverage.
 func BuildContext(store persist.StoreReader, query string, opt Options) (map[string]any, error) {
 	opt = opt.withDefaults()
 

@@ -14,19 +14,19 @@ import (
 // reduce DB size on large repos. V11 audited that option and
 // declined it for two reasons:
 //
-//   1. Payload is small. A typical marker set (booleans +
-//      SlotIndex + maybe YulBuiltins slice) marshals to
-//      50-150 bytes. gzip's frame header alone is ~10-20 bytes
-//      so the compression ratio on individual rows is poor;
-//      large repos win more from index-side optimisations than
-//      from per-row compression.
+//  1. Payload is small. A typical marker set (booleans +
+//     SlotIndex + maybe YulBuiltins slice) marshals to
+//     50-150 bytes. gzip's frame header alone is ~10-20 bytes
+//     so the compression ratio on individual rows is poor;
+//     large repos win more from index-side optimisations than
+//     from per-row compression.
 //
-//   2. Read path frequency. QueryNodes / NodesByFilePath /
-//      FTS5 search join all read attrs. Every read would pay
-//      a decompress hit. The boot-time viewer JSON export
-//      (~2-4MB total attrs payload) is the largest single
-//      consumer and benefits from the compression-friendly
-//      omitempty JSON encoding more than from gzip.
+//  2. Read path frequency. QueryNodes / NodesByFilePath /
+//     FTS5 search join all read attrs. Every read would pay
+//     a decompress hit. The boot-time viewer JSON export
+//     (~2-4MB total attrs payload) is the largest single
+//     consumer and benefits from the compression-friendly
+//     omitempty JSON encoding more than from gzip.
 //
 // This audit asserts the on-disk form stays TEXT (plain JSON)
 // rather than BYTEA / BLOB or a compressed wrapper format. If a

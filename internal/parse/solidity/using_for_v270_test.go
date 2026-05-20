@@ -43,9 +43,10 @@ import (
 //     operator suffix is the discriminator vs. V2.6.
 //
 // Contrast table:
-//   V2.5 file-level   + operator-form     → 0 edges (scope)
-//   V2.6 contract-sc. + free-function     → 1 edge  (incidental)
-//   V2.7 contract-sc. + operator-form     → 0 edges (AST shape)
+//
+//	V2.5 file-level   + operator-form     → 0 edges (scope)
+//	V2.6 contract-sc. + free-function     → 1 edge  (incidental)
+//	V2.7 contract-sc. + operator-form     → 0 edges (AST shape)
 //
 // Surround-safety: the function `Math.add`, library `Math`, and
 // contract `Calc` (with `Calc.compute`) must all still index;
