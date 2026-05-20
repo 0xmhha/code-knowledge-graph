@@ -13,7 +13,7 @@
 | # | 항목 | 영향 | 표면 | 상태 |
 |---|---|---|---|---|
 | CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | ✅ `2f89b17` |
-| CKG-2 | `SearchFTS`에 native filter (`language`, path) | High | 중간 | ⬜ |
+| CKG-2 | `SearchFTS`에 native filter (language) | High | 중간 | ✅ `570e5ec` |
 | CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ⬜ |
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⬜ |
 | CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ⬜ |
@@ -50,16 +50,18 @@
 - sqlite + postgres 양쪽 동작 일치
 - 회귀 테스트: 동일 쿼리에서 강한 매치가 약한 매치보다 높은 점수
 
-### CKG-2 세부 — native filter pushdown
+### CKG-2 세부 — native filter pushdown ✅ `570e5ec`
 
-**현황:**
-- cks가 `FilterOverfetchRatio=3`으로 over-fetch 후 client-side에서 language/path 필터
-- 필터로 대다수가 떨어지면 작은 page 한계로 recall 손실
+**구현 요약:**
+- `SearchFTSOptions{Language string}` 추가 (`internal/persist/search_hit.go`)
+- `StoreReader.SearchFTS(q, limit, opts)` 시그니처 확장
+- SQLite/PostgreSQL 모두 동적 SQL — `opts.Language != ""` 일 때만 WHERE 추가
+- `Search()` 어댑터는 `SearchFTSOptions{}` 전달, 기존 호출자 7곳 무영향
+- path glob은 client-side 유지 (CKG-2 follow-up 문서 권장)
+- 회귀 테스트 3종: LanguagePushdown / LanguageEmptyMatchesAll / LanguageNoMatch
 
-**Acceptance:**
-- `language` 인자는 SQL `WHERE`로 push-down (sqlite/postgres 양쪽)
-- path glob은 client-side 유지 OK (비싼 LIKE 회피)
-- cks 측 over-fetch 로직 제거 가능한 형태
+**다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go`의 `FilterOverfetchRatio=3` over-fetch + client-side language filter 제거 가능. path glob은 그대로 유지.
+
 
 ### CKG-4 세부 — multi-kind symbol lookup
 
