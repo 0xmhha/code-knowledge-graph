@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | CKG-1 | `SearchFTS`에 BM25 score/rank 반환 | High | 작음 | ✅ `2f89b17` |
 | CKG-2 | `SearchFTS`에 native filter (language) | High | 중간 | ✅ `570e5ec` |
-| CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ⬜ |
+| CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ✅ `d34a2eb` |
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⬜ |
 | CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ⬜ |
 | CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
@@ -63,14 +63,18 @@
 **다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go`의 `FilterOverfetchRatio=3` over-fetch + client-side language filter 제거 가능. path glob은 그대로 유지.
 
 
-### CKG-4 세부 — multi-kind symbol lookup
+### CKG-4 세부 — multi-kind symbol lookup ✅ `d34a2eb`
 
-**현황:**
-- cks Stage 2가 `arch_explain` intent에서 N round-trip (fns + types + interfaces)
+**구현 요약:**
+- `FindSymbolOptions{Language, Kinds []types.NodeType}` 추가
+- `FindSymbol(name, exact, opts)`로 시그니처 재배치 — `lang`을 Options로 이동
+- SQLite: 기존 `placeholders(n)` 헬퍼 재사용해 `type IN (?, ?, ...)` 조립
+- PostgreSQL: `$N` placeholder 인라인 생성
+- 빈 `Kinds` → 원래 WHERE plan 유지 (planner cost regression 없음)
+- 회귀 테스트 4종: KindsSingle / KindsMultiple / KindsEmptyMatchesAll / KindsNoMatch
 
-**Acceptance:**
-- `kinds []SymbolKind` 인자 수용
-- 결과에 kind 태그 (Citation key 기준 dedupe 가능)
+**다운스트림 액션 (E2 후속):** cks Stage 2 `arch_explain` 의도에서 N round-trip → 1 query로 단축 가능. dedupe는 Citation key 기준 클라이언트 측 유지.
+
 
 ### CKG-3 / 5 / 6 / 7
 
