@@ -33,23 +33,6 @@
 
 **다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go:149-155` 가짜 점수 제거 가능.
 
-
-**현황:**
-- `StoreReader.SearchFTS(q, limit) ([]types.Node, error)` — `internal/persist/store_interface.go:81`
-- 구현 3곳: `sqlite.go:634`, `postgres_store.go:926`, `mcp/h3_filter.go:89` (LLM-safe wrapper)
-- 호출자(non-test): `mcp/h3_filter.go:90` 1곳
-- 테스트 mock 1곳: `postgres_exporter_test.go:65`
-
-**다운스트림 통증:**
-- cks `internal/ckgclient/real.go:149-155`이 `1 - i/(N+1)` 가짜 점수 생성
-- 강한 단일 매치와 약한 5개 매치를 구분 불가 → cks 측 `fix: rerank by max(hit.Score)` 워크어라운드
-
-**Acceptance:**
-- 점수가 호출자에서 의미 있게 비교 가능 (단조성 보장)
-- 기존 `SearchFTS` 호출자 무파괴 또는 명시적 마이그레이션 경로
-- sqlite + postgres 양쪽 동작 일치
-- 회귀 테스트: 동일 쿼리에서 강한 매치가 약한 매치보다 높은 점수
-
 ### CKG-2 세부 — native filter pushdown ✅ `570e5ec`
 
 **구현 요약:**
@@ -137,10 +120,6 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 **다운스트림 액션 (E2 후속):** cks `ManifestSnapshot` mirror struct 제거, `store.Manifest`로 교체. `store.GetManifest(reader)` 한 줄 호출로 대체 가능.
 
-## C. W-C 회귀 가드 시리즈
-
-- [ ] **C1** 다음 invariant 후보 발굴 (현재 V14~V16까지 누적)
-
 ## D. 잔여 정리
 
 - [x] **D1** viewer ESLint 4 warnings 정리 ✅ `5348e53` — App.tsx unused-disable 제거, GraphCanvas.tsx + usePersistedState.ts에 의도 명시 disable, TicketIndex.tsx에 stable setter dep 추가
@@ -160,3 +139,21 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - `FilterOverfetchRatio=3` over-fetch + client-side language filter → `SearchFTSOptions{Language}` 푸시다운
   - `arch_explain` intent N round-trips → `FindSymbolOptions{Kinds: [...]}` 1 query
   - CKG-6/7 결과: self-shim `persist.StoreReader` alias 제거 → `pkg/store` 직접 import + `store.GetManifest()` 헬퍼 사용
+
+## F. 보안 / 평가 인프라 (2026-05-20 사용자 신규 지시)
+
+- [x] **V1** viewer npm audit fix ✅ `c3cff0c` — `next` (high) + `brace-expansion` (moderate) transitive 업데이트, package.json 미변경, 0 vulnerabilities.
+- [x] **EV1 Phase 1** LLM-free `make eval` + baseline ✅ `648ee59` — `ckg benchmark --format json` 추가 + Makefile `eval`/`eval-baseline-update` 타겟 + `eval/baseline/` 첫 measurement. validate / benchmark / bench-mcp 3종 measurement.
+
+  **첫 baseline (사용자가 푸시 후 노드 카운트는 코드 변경에 따라 달라짐):**
+  - validate: 0 issues
+  - benchmark: 132.75× reduction (avg 4,432 tok/query vs 588,365 tok corpus)
+  - bench-mcp: 8 probes errors=0, p99 ceiling 130 ms (impact_of_change_d2)
+
+- [ ] **EV1 Phase 2** Gold-set retrieval accuracy — 미리 정의된 query → expected node IDs, recall/precision 계산. LLM 없이 검색 정확도 측정. `eval/tasks/*.yaml` 형식 확장 또는 신규 fixture.
+- [ ] **EV1 Phase 3** CI 통합 — `make eval` 결과를 PR gate로. 단, eval은 self-index 빌드 시간이 있어 lint/test보다 느림 — nightly 또는 `[eval]` 트리거 라벨 검토 필요.
+
+## G. 미해결 / 후속 세션 작업
+
+- [ ] **C1** W-C 회귀 가드 시리즈 다음 invariant 후보 발굴 (현재 V14~V16까지 누적) — 발견적 작업, 별도 세션
+- [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
