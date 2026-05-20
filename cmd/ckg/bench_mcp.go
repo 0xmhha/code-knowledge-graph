@@ -34,9 +34,49 @@ import (
 // would send via tools/call so the handler exercises every code
 // path it sees in production (param parsing, schema defaulting,
 // store reads, response serialization).
+//
+// Name is the *label* used in output (and in the benchResult.Endpoint
+// field). Tool is the *handler key* — the MCP tool to invoke. They
+// usually match; they diverge only when the same tool needs to be
+// benched multiple times with different arguments (e.g. depth-sweep)
+// and the report needs distinct rows per variant.
 type mcpProbe struct {
 	Name string
+	Tool string // empty → defaults to Name (backwards-compatible)
 	Args map[string]any
+}
+
+// handlerKey returns the tool name to look up in the handler map.
+func (p mcpProbe) handlerKey() string {
+	if p.Tool != "" {
+		return p.Tool
+	}
+	return p.Name
+}
+
+// depthSweepProbes drives the four traversal tools at depth=1 AND
+// depth=2 so a single bench run produces side-by-side latency data.
+// Used to answer CKG-5: is depth=2 acceptable as the default for
+// find_callers / find_callees (currently 1), or should the consumer
+// raise it per-query?
+//
+// Returns nil when seedQname is empty (no Function in the graph).
+// Each row in the resulting benchResult carries a `_d1` / `_d2`
+// suffix so the JSON output can be diffed without name collisions.
+func depthSweepProbes(seedQname string) []mcpProbe {
+	if seedQname == "" {
+		return nil
+	}
+	return []mcpProbe{
+		{Name: "find_callers_d1", Tool: "find_callers", Args: map[string]any{"qname": seedQname, "depth": 1.0}},
+		{Name: "find_callers_d2", Tool: "find_callers", Args: map[string]any{"qname": seedQname, "depth": 2.0}},
+		{Name: "find_callees_d1", Tool: "find_callees", Args: map[string]any{"qname": seedQname, "depth": 1.0}},
+		{Name: "find_callees_d2", Tool: "find_callees", Args: map[string]any{"qname": seedQname, "depth": 2.0}},
+		{Name: "get_subgraph_d1", Tool: "get_subgraph", Args: map[string]any{"seed_qname": seedQname, "depth": 1.0}},
+		{Name: "get_subgraph_d2", Tool: "get_subgraph", Args: map[string]any{"seed_qname": seedQname, "depth": 2.0}},
+		{Name: "impact_of_change_d1", Tool: "impact_of_change", Args: map[string]any{"seed_qname": seedQname, "depth": 1.0}},
+		{Name: "impact_of_change_d2", Tool: "impact_of_change", Args: map[string]any{"seed_qname": seedQname, "depth": 2.0}},
+	}
 }
 
 // defaultMCPProbes covers the eight registered tools with realistic
@@ -70,6 +110,7 @@ func newBenchMCPCmd() *cobra.Command {
 		iterations  int
 		concurrency int
 		output      string
+		depthSweep  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "bench-mcp",
@@ -102,7 +143,15 @@ get_context_for_task / evidence_for_intent) always run.`,
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "ckg bench-mcp: no Function seed; skipping callers/callees/subgraph/impact probes\n")
 			}
-			probes := defaultMCPProbes(seed)
+			var probes []mcpProbe
+			if depthSweep {
+				probes = depthSweepProbes(seed)
+				if len(probes) == 0 {
+					return fmt.Errorf("--depth-sweep requested but no Function seed found in graph")
+				}
+			} else {
+				probes = defaultMCPProbes(seed)
+			}
 			_, handlers := mcp.NewBenchHandlers(store)
 
 			fmt.Fprintf(os.Stderr, "bench-mcp: graph=%s iters=%d concurrency=%d probes=%d\n",
@@ -110,7 +159,7 @@ get_context_for_task / evidence_for_intent) always run.`,
 
 			results := make([]benchResult, 0, len(probes))
 			for _, p := range probes {
-				h, ok := handlers[p.Name]
+				h, ok := handlers[p.handlerKey()]
 				if !ok {
 					fmt.Fprintf(os.Stderr, "  %-26s SKIP (handler not registered)\n", p.Name)
 					continue
@@ -154,6 +203,8 @@ get_context_for_task / evidence_for_intent) always run.`,
 		"parallel workers driving each probe (≤ 64)")
 	cmd.Flags().StringVar(&output, "output", "-",
 		"path for JSON output ('-' or '' for stdout)")
+	cmd.Flags().BoolVar(&depthSweep, "depth-sweep", false,
+		"replace the default probes with a depth=1 vs depth=2 sweep over the four traversal tools (CKG-5)")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
 }

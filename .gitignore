@@ -53,3 +53,4 @@ __pycache__/
 /internal/server/web_assets/404/
 /internal/server/web_assets/404.html
 /internal/server/web_assets/index.txt
+.ckg-data/

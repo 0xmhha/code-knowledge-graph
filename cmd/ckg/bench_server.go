@@ -194,11 +194,18 @@ port allocation or cleanup race; safe to invoke from CI.`,
 	return cmd
 }
 
-// pickFunctionSeed returns the qualified_name of the first Function
-// node in the graph. The bench harness uses it as the /api/impact
-// seed so we don't need a fixture-specific qname per graph.
+// pickFunctionSeed returns the qualified_name of a Function node from the
+// graph. The bench harness uses it as the /api/impact seed so we don't need
+// a fixture-specific qname per graph.
+//
+// QueryNodes("") was the original implementation but it returns top-level
+// Packages only (see internal/persist/sqlite.go QueryNodes contract), which
+// means the loop below would never find a Function. We switched to
+// TopNodes(pagerank) — the ranking is type-agnostic so Functions surface
+// naturally, and the top of the ranking is where the most interesting
+// bench seeds live anyway (hub functions exercise more of the graph).
 func pickFunctionSeed(store persist.StoreReader) (string, error) {
-	nodes, err := store.QueryNodes("", 200)
+	nodes, err := store.TopNodes("pagerank", 500)
 	if err != nil {
 		return "", err
 	}
