@@ -144,8 +144,7 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 ## D. 잔여 정리
 
 - [x] **D1** viewer ESLint 4 warnings 정리 ✅ `5348e53` — App.tsx unused-disable 제거, GraphCanvas.tsx + usePersistedState.ts에 의도 명시 disable, TicketIndex.tsx에 stable setter dep 추가
-- [ ] **D2** gofmt drift 재발 방지 (pre-commit hook 또는 CI gate)
-- [ ] **D3** Makefile에 `fmt` 타겟 추가 검토
+- [x] **D2 + D3** Makefile fmt/fmt-check + opt-in pre-commit hook ✅ `0c5dce1` — `make lint` deps에 `fmt-check` 포함되어 기존 CI가 자동으로 drift 차단, `.githooks/pre-commit`은 opt-in (`make install-hooks`)
 
 ## E. 크로스 레포 동조
 
