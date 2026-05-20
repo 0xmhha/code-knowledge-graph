@@ -605,14 +605,17 @@ func TestSearchFTS_Hit(t *testing.T) {
 	s := newFixtureStore(t)
 
 	// "FuncA" is stored in the name column and in doc_comment.
-	results, err := s.SearchFTS("FuncA", 10)
+	hits, err := s.SearchFTS("FuncA", 10)
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
-	if len(results) == 0 {
+	if len(hits) == 0 {
 		t.Fatal("expected at least 1 FTS hit for 'FuncA', got 0")
 	}
-	ids := nodeIDs(results)
+	ids := make([]string, len(hits))
+	for i, h := range hits {
+		ids[i] = h.Node.ID
+	}
 	if !containsID(ids, "funcA00000000000") {
 		t.Errorf("FTS hit set %v does not contain funcA", ids)
 	}
@@ -621,12 +624,12 @@ func TestSearchFTS_Hit(t *testing.T) {
 func TestSearchFTS_NoMatch(t *testing.T) {
 	s := newFixtureStore(t)
 
-	results, err := s.SearchFTS("zzzzzz_no_match", 10)
+	hits, err := s.SearchFTS("zzzzzz_no_match", 10)
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("expected 0 FTS hits for nonsense query, got %d", len(results))
+	if len(hits) != 0 {
+		t.Errorf("expected 0 FTS hits for nonsense query, got %d", len(hits))
 	}
 }
 
@@ -635,12 +638,12 @@ func TestSearchFTS_LimitRespected(t *testing.T) {
 
 	// "mypkg" matches the name of Package and the qualified_name prefix of A and B.
 	// The limit=1 should cap results.
-	results, err := s.SearchFTS("mypkg*", 1)
+	hits, err := s.SearchFTS("mypkg*", 1)
 	if err != nil {
 		t.Fatalf("SearchFTS(limit=1): %v", err)
 	}
-	if len(results) > 1 {
-		t.Errorf("limit=1 returned %d results", len(results))
+	if len(hits) > 1 {
+		t.Errorf("limit=1 returned %d results", len(hits))
 	}
 }
 

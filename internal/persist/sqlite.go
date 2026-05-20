@@ -626,25 +626,40 @@ func (s *sqliteStore) GetBlob(id string) ([]byte, error) {
 }
 
 // SearchFTS executes an FTS5 MATCH against nodes_fts and returns the joined
-// node rows. Caller is responsible for forming a valid FTS5 query string.
+// node rows with relevance scores. Caller is responsible for forming a valid
+// FTS5 query string.
 //
 // The projection is fully qualified with the n.* alias because nodes_fts
 // shares column names (name, qualified_name, signature, doc_comment) with
 // the nodes content table — bare references would be ambiguous.
-func (s *sqliteStore) SearchFTS(q string, limit int) ([]types.Node, error) {
+//
+// SQLite's bm25() returns a *negative* score where smaller (more negative)
+// means a stronger match. We sign-flip via `-bm25(...)` so RawScore follows
+// the "higher is better" convention shared with the PostgreSQL backend.
+// Score is then min-max normalized to [0, 1] within the result set by
+// normalizeSearchHits — see SearchHit doc for the consumer contract.
+func (s *sqliteStore) SearchFTS(q string, limit int) ([]SearchHit, error) {
 	rows, err := s.db.Query(`SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
 		COALESCE(n.complexity,0), n.in_degree, n.out_degree, n.pagerank, n.usage_score,
-		n.confidence, COALESCE(n.sub_kind,''), COALESCE(n.attrs,'')
+		n.confidence, COALESCE(n.sub_kind,''), COALESCE(n.attrs,''),
+		-bm25(nodes_fts) AS raw_score
 		FROM nodes_fts f
 		JOIN nodes n ON n.rowid = f.rowid
-		WHERE nodes_fts MATCH ? LIMIT ?`, q, limit)
+		WHERE nodes_fts MATCH ?
+		ORDER BY raw_score DESC
+		LIMIT ?`, q, limit)
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}
 	defer rows.Close()
-	return scanNodes(rows)
+	hits, err := scanSearchHits(rows)
+	if err != nil {
+		return nil, err
+	}
+	normalizeSearchHits(hits)
+	return hits, nil
 }
 
 // Search is the smart search front door used by the HTTP /api/search
@@ -662,7 +677,22 @@ func (s *sqliteStore) Search(q string, limit int) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	return s.SearchFTS(rewriteFTSQuery(q), limit)
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit)
+	if err != nil {
+		return nil, err
+	}
+	return nodesFromHits(hits), nil
+}
+
+// nodesFromHits unpacks SearchHit.Node so callers that don't care about
+// scores can keep their existing []types.Node contract. Order is preserved
+// from the input (SearchFTS already sorts by relevance).
+func nodesFromHits(hits []SearchHit) []types.Node {
+	out := make([]types.Node, len(hits))
+	for i, h := range hits {
+		out[i] = h.Node
+	}
+	return out
 }
 
 // hasNonASCII reports whether q contains any byte ≥ 0x80. Drives the
@@ -808,6 +838,33 @@ func scanNodes(rows *sql.Rows) ([]types.Node, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate node rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanSearchHits drains rows that project the standard nodeColumns set
+// followed by a trailing raw_score column (a float). Score is populated
+// later by normalizeSearchHits — leaving it zero here keeps the scan
+// branch-free.
+func scanSearchHits(rows *sql.Rows) ([]SearchHit, error) {
+	var out []SearchHit
+	for rows.Next() {
+		var n types.Node
+		var conf, attrs string
+		var raw float64
+		if err := rows.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
+			&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
+			&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
+			&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
+			&conf, &n.SubKind, &attrs, &raw); err != nil {
+			return nil, fmt.Errorf("scan search hit row: %w", err)
+		}
+		n.Confidence = types.Confidence(conf)
+		unmarshalNodeAttrs(attrs, &n)
+		out = append(out, SearchHit{Node: n, RawScore: raw})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search hit rows: %w", err)
 	}
 	return out, nil
 }

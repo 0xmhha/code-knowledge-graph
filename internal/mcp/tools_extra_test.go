@@ -85,12 +85,16 @@ func TestAttachBlobsIncludeFalse(t *testing.T) {
 	store := newFixtureStore(t)
 
 	// Retrieve any nodes from the fixture to exercise the real code path.
-	nodes, err := store.SearchFTS("Greet", 5)
+	hits, err := store.SearchFTS("Greet", 5)
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
-	if len(nodes) == 0 {
+	if len(hits) == 0 {
 		t.Skip("no nodes found in fixture; skipping attachBlobs test")
+	}
+	nodes := make([]types.Node, len(hits))
+	for i, h := range hits {
+		nodes[i] = h.Node
 	}
 
 	out := attachBlobs(store, nodes, false)
@@ -114,12 +118,16 @@ func TestAttachBlobsIncludeFalse(t *testing.T) {
 func TestAttachBlobsIncludeTrue(t *testing.T) {
 	store := newFixtureStore(t)
 
-	nodes, err := store.SearchFTS("Greet", 5)
+	hits, err := store.SearchFTS("Greet", 5)
 	if err != nil {
 		t.Fatalf("SearchFTS: %v", err)
 	}
-	if len(nodes) == 0 {
+	if len(hits) == 0 {
 		t.Skip("no nodes found in fixture; skipping attachBlobs include=true test")
+	}
+	nodes := make([]types.Node, len(hits))
+	for i, h := range hits {
+		nodes[i] = h.Node
 	}
 
 	out := attachBlobs(store, nodes, true)

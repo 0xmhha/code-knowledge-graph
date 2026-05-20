@@ -176,7 +176,17 @@ func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
 		{"QueryNodes", func() ([]types.Node, error) { return safe.QueryNodes("", 100) }},
 		{"TopNodes", func() ([]types.Node, error) { return safe.TopNodes("pagerank", 100) }},
 		{"Search", func() ([]types.Node, error) { return safe.Search("anything", 100) }},
-		{"SearchFTS", func() ([]types.Node, error) { return safe.SearchFTS("anything", 100) }},
+		{"SearchFTS", func() ([]types.Node, error) {
+			hits, err := safe.SearchFTS("anything", 100)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]types.Node, len(hits))
+			for i, h := range hits {
+				out[i] = h.Node
+			}
+			return out, nil
+		}},
 		{"NodesByFilePath", func() ([]types.Node, error) { return safe.NodesByFilePath("anywhere.go") }},
 		{"AllNodes", func() ([]types.Node, error) { return safe.AllNodes() }},
 	}
@@ -294,8 +304,14 @@ func (f *fakeStore) Search(q string, limit int) ([]types.Node, error) {
 	return f.nodes, nil
 }
 
-func (f *fakeStore) SearchFTS(q string, limit int) ([]types.Node, error) {
-	return f.nodes, nil
+func (f *fakeStore) SearchFTS(q string, limit int) ([]persist.SearchHit, error) {
+	out := make([]persist.SearchHit, len(f.nodes))
+	for i, n := range f.nodes {
+		// Synthetic uniform score — fake store is for routing/leak tests,
+		// not relevance ordering.
+		out[i] = persist.SearchHit{Node: n, Score: 1.0, RawScore: 1.0}
+	}
+	return out, nil
 }
 
 func (f *fakeStore) NodesByFilePath(path string) ([]types.Node, error) {

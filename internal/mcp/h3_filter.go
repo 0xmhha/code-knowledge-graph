@@ -86,9 +86,22 @@ func (s *llmSafeStoreReader) Search(q string, limit int) ([]types.Node, error) {
 	return filterLLMSafe(out), err
 }
 
-func (s *llmSafeStoreReader) SearchFTS(q string, limit int) ([]types.Node, error) {
-	out, err := s.StoreReader.SearchFTS(q, limit)
-	return filterLLMSafe(out), err
+func (s *llmSafeStoreReader) SearchFTS(q string, limit int) ([]persist.SearchHit, error) {
+	hits, err := s.StoreReader.SearchFTS(q, limit)
+	if err != nil {
+		return nil, err
+	}
+	// filterLLMSafe drops AMBIGUOUS meta-nodes; we re-pair the survivors
+	// with their original scores so downstream rerankers still see a
+	// usable ranking after the safety filter.
+	kept := make([]persist.SearchHit, 0, len(hits))
+	for _, h := range hits {
+		safe := filterLLMSafe([]types.Node{h.Node})
+		if len(safe) == 1 {
+			kept = append(kept, h)
+		}
+	}
+	return kept, nil
 }
 
 // GetBlob is the defensive backstop: even if a stale ID for an

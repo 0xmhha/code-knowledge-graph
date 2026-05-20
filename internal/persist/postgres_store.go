@@ -917,13 +917,24 @@ func (s *pgStore) Search(q string, limit int) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	return s.SearchFTS(rewriteFTSQuery(q), limit)
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit)
+	if err != nil {
+		return nil, err
+	}
+	return nodesFromHits(hits), nil
 }
 
-// SearchFTS executes a full-text search using the search_vector column.
-// Uses plainto_tsquery to safely handle arbitrary user input without syntax
-// errors (unlike to_tsquery which requires well-formed query syntax).
-func (s *pgStore) SearchFTS(q string, limit int) ([]types.Node, error) {
+// SearchFTS executes a full-text search using the search_vector column and
+// returns matches with relevance scores. Uses plainto_tsquery to safely
+// handle arbitrary user input without syntax errors (unlike to_tsquery which
+// requires well-formed query syntax).
+//
+// RawScore is ts_rank(search_vector, query) — a non-negative float where
+// higher means a stronger match. Note: this scale differs from the SQLite
+// backend's -bm25() output; cross-backend comparison of RawScore is unsafe.
+// Score is then min-max normalized to [0, 1] within the result set by
+// normalizeSearchHits.
+func (s *pgStore) SearchFTS(q string, limit int) ([]SearchHit, error) {
 	// plainto_tsquery is safe for arbitrary input (no special syntax needed).
 	// rewriteFTSQuery already strips FTS5-specific sigils that don't apply to PG;
 	// for PG we use plainto_tsquery unconditionally for robustness.
@@ -931,15 +942,22 @@ func (s *pgStore) SearchFTS(q string, limit int) ([]types.Node, error) {
 	// handles prefix matching internally via lexeme stemming.
 	qclean := strings.TrimRight(q, "*")
 	rows, err := s.pool.Query(background,
-		`SELECT `+pgNodeColumns+`
+		`SELECT `+pgNodeColumns+`,
+            ts_rank(search_vector, plainto_tsquery('english', $1)) AS raw_score
         FROM nodes
         WHERE search_vector @@ plainto_tsquery('english', $1)
+        ORDER BY raw_score DESC
         LIMIT $2`, qclean, limit)
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}
 	defer rows.Close()
-	return scanPGNodes(rows)
+	hits, err := scanPGSearchHits(rows)
+	if err != nil {
+		return nil, err
+	}
+	normalizeSearchHits(hits)
+	return hits, nil
 }
 
 // SearchSubstr is the CJK / non-tokenisable fallback. Uses ILIKE for
@@ -1271,6 +1289,33 @@ func scanPGNodes(rows pgx.Rows) ([]types.Node, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate node rows: %w", err)
+	}
+	return out, nil
+}
+
+// scanPGSearchHits drains pgx.Rows that project pgNodeColumns followed by
+// a trailing raw_score float (ts_rank output). Score is left zero here;
+// normalizeSearchHits fills it after the full result set is read.
+func scanPGSearchHits(rows pgx.Rows) ([]SearchHit, error) {
+	var out []SearchHit
+	for rows.Next() {
+		var n types.Node
+		var conf string
+		var raw float64
+		if err := rows.Scan(
+			&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
+			&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
+			&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
+			&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
+			&conf, &n.SubKind, &raw,
+		); err != nil {
+			return nil, fmt.Errorf("scan search hit row: %w", err)
+		}
+		n.Confidence = types.Confidence(conf)
+		out = append(out, SearchHit{Node: n, RawScore: raw})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate search hit rows: %w", err)
 	}
 	return out, nil
 }
