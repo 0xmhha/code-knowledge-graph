@@ -17,7 +17,7 @@
 | CKG-4 | Symbol lookup `kinds []SymbolKind` 다중 처리 | Mid | 중간 | ✅ `d34a2eb` |
 | CKG-3 | Cross-snapshot 정책 결정 | High | 가변 | ⏸️ 보류 (cks 시나리오 필요) |
 | CKG-5 | Traversal depth=2 측정 | Mid | 측정 | ✅ `c80b1c5` `b3db16f` `b308c1c` |
-| CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ⬜ |
+| CKG-6 | `pkg/store.Reader` 공개 surface 정리 | Mid | 작음 | ✅ `78edfc5` |
 | CKG-7 | `persist.Manifest` 일부 노출 | Low | 작음 | ⬜ |
 
 ### CKG-1 세부 — `SearchFTS` 점수 반환 ✅ `2f89b17`
@@ -113,10 +113,21 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 **다운스트림 액션 (E2 후속):** cks 다음 dogfood에서 `mcp-tool-handlers` / `stamp-integrity-lookup` recall 변동 확인. recall ceiling 0.67이 회복되면 ckg 측 default 변경 정당화됨.
 
-### CKG-6 / 7
+### CKG-6 세부 — `pkg/store` 공식 surface 확장 ✅ `78edfc5`
 
-- **CKG-6**: `pkg/store.Reader`가 공식 surface면 internal alias 위로 끌어올림
-- **CKG-7**: `Manifest` 핵심 필드만 `pkg/store`로 재노출
+**구현 요약:**
+- `pkg/store`에 `SearchHit`, `SearchFTSOptions`, `FindSymbolOptions`, `ErrInvalidMetric` alias 추가
+- 패키지 doc 강화 — 외부 사용자 가이드, "self-shim 금지" 명시
+- 컴파일 가드 + `TestPublicSurface_CanConstructOptions` — 외부 사용자 관점에서 옵션 구성 가능성 검증
+- `Manifest`는 의도적 제외 — CKG-7에서 *축소 mirror struct*로 별도 노출
+
+**근본 발견:** `pkg/store.Reader = persist.StoreReader` alias만으로는 부족했음 — Go에서 interface alias는 메서드 시그니처를 전이하지만, *반환 타입은 별도 노출* 필요. cks가 `[]SearchHit`를 받아도 그 타입을 이름붙일 수 없으면 mirror struct 만들 수밖에 없었던 이유.
+
+**다운스트림 액션 (E2 후속):** cks `internal/ckgclient/real.go:1-50`의 자작 `persist.StoreReader` alias 제거 → `github.com/0xmhha/code-knowledge-graph/pkg/store` 직접 import로 교체.
+
+### CKG-7
+
+- **CKG-7**: `Manifest` 핵심 필드(commit hash, schema version, index timestamp)만 `pkg/store`로 재노출 — 전체 alias 아닌 *축소 mirror struct*
 
 ## C. W-C 회귀 가드 시리즈
 
