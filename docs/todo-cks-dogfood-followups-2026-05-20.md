@@ -356,9 +356,17 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - `Hub(addr).onAction(x)` (V6 코멘트 명시): cast-receiver chain — V26과 같은 카테고리지만 *cast* shape. 별도 fixture로 lock 가능.
   - `getHub().onAction(x)` (V6 코멘트 명시): lower-case helper return → member access. V21와 동일 카테고리(*lower-case helper*) + V6 limitation 교집합.
 
-- [ ] **C16** W-C 다음 후보 (V26 이후):
+- [x] **C16 — W8 V27** ✅ cast-receiver + helper-return chain negative lock. V6 코멘트가 명시한 *세 가지 chained shape* 중 V26이 cover하지 않은 두 cell(`Hub(addr).onAction(x)`, `getHub().onAction(x)`)을 한 fixture에 통합. **V6 positive baseline (`h.onAction(x)`)을 reference row로 포함**해서 *negative cells가 receiver-shape variance에 specifically locked*임을 명시. Walker 0줄 변경. WALKER_SYMMETRY row 5를 *limitation family* 단위로 확장(V26+V27 묶음).
+
+  **V21 / V26 / V27 negative-lock family 완성:**
+  - V21: `getTarget(this).foo()` (high-level walker, lower-case helper)
+  - V26: `s.getCb()(x)` + `return s.getCb();` (V6 chained-invoke + V9 chained-return)
+  - V27: `Hub(addr).onAction(x)` + `getHub().onAction(x)` (V6 cast/helper receiver)
+
+  **V6 코멘트가 명시한 3 shapes 모두 lock 완료.** 미래 walker fix는 *batch flip* 필요.
+
+- [ ] **C17** W-C 다음 후보 (V27 이후):
   - **W9 V19**: library type-scope (probe 결과 모호 — negative case 가능성)
   - **W7.5**: modifier SubKind drift (cks scenario 후 design 결정)
-  - **W8 V27**: cast-receiver chain `Hub(addr).onAction(x)` negative lock (V26 sibling)
-  - **W8 V28**: helper-return chain `getHub().onAction(x)` negative lock (V21 + V26 교집합)
+  - **W8 V28**: V9 코멘트 grep 후 *추가 known limitation* 발견 시 추가 negative lock
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
