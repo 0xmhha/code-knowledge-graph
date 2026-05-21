@@ -350,8 +350,15 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   **Probe로 드러난 추가 drift (별도 작업 후보):**
   - **modifier SubKind = ""** (function W2는 SubKind=`virtual`/`override`/`virtual_override` set, modifier는 empty) — *intentional negative lock* 또는 *walker fix* 양자택일. consumer 측 활용 시나리오 정해진 뒤 진행.
 
-- [ ] **C15** W-C 다음 후보 (V25 이후):
-  - **W9 V19**: library type-scope (state-var 불가하지만 struct 정의 가능 — type slot 처리). probe 결과 모호 — 시나리오 자체가 negative case일 가능성.
-  - **W8**: function-typed state-var cross-contract param propagation
-  - **W7.5**: modifier SubKind drift (위 probe 결과 lock)
+- [x] **C15 — W8 V26** ✅ cross-contract fn-pointer chain negative lock. `s.getCb()(x)` chained invoke + `return s.getCb();` chained return — V6/V9가 *코멘트에 명시한 known limitation*. V21 패턴(`getTarget(this).foo()` negative lock)을 그대로 따라 *false negative를 명시적으로 잠금*. 미래 walker fix 시점에 *이 test가 깨지면서 positive lock으로 flip*. Walker 0줄 변경. WALKER_SYMMETRY drift catalogue row 5 추가.
+
+  **Probe로 드러난 추가 false negative cells:**
+  - `Hub(addr).onAction(x)` (V6 코멘트 명시): cast-receiver chain — V26과 같은 카테고리지만 *cast* shape. 별도 fixture로 lock 가능.
+  - `getHub().onAction(x)` (V6 코멘트 명시): lower-case helper return → member access. V21와 동일 카테고리(*lower-case helper*) + V6 limitation 교집합.
+
+- [ ] **C16** W-C 다음 후보 (V26 이후):
+  - **W9 V19**: library type-scope (probe 결과 모호 — negative case 가능성)
+  - **W7.5**: modifier SubKind drift (cks scenario 후 design 결정)
+  - **W8 V27**: cast-receiver chain `Hub(addr).onAction(x)` negative lock (V26 sibling)
+  - **W8 V28**: helper-return chain `getHub().onAction(x)` negative lock (V21 + V26 교집합)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션

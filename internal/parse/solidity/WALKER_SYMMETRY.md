@@ -142,6 +142,7 @@ series actually surfaced, not theoretical concerns.
 | 2 | self-receiver detection | Yul delegatecall (V10) | Yul call / staticcall (V23) | All three opcodes share `isYulSelfAddress` |
 | 3 | callable shape coverage gap | cast (V14/V15/V17 — 4 shapes) | high-level (V19 — only function body) | V24 added the constructor / receive / modifier cross-axis fixture so all four shapes are now locked on both walker columns |
 | 4 | explicit-list override branch coverage | function (W2 — tested) | modifier (`runModifierOverride.dispatchKindOverrideExplicit` — shipped without a lockdown test) | V25 added `testdata/modifier_composition/explicit_override.sol` with a diamond `override(A, B)` parent list; the test asserts both EdgeOverrides edges and that src/dst are NodeModifier |
+| 5 | chained cross-contract fn-pointer (known limitation) | V6 `matchStateVarMethodCall` — bare-identifier receivers only | `s.getCb()(x)` and `return s.getCb();` — V6/V9 documented as deferred | V26 negative-locks both cells in `testdata/function_typed_var/chained_cross_contract.sol`; any walker fix that flips either cell must flip the test value AND this catalogue entry simultaneously. Mirrors V21's negative-lock pattern for `HasHighLevelSelfCall` |
 
 If you fix a new drift, append a row. The catalogue itself is the lesson —
 *reading it before adding a walker is how the next drift gets prevented*.
