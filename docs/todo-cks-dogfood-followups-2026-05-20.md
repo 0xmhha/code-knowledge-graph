@@ -331,9 +331,22 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 - [x] **Meta — stale `.git/index.lock` 분석** ✅ `9a22242` `docs/stale-git-lock-analysis-2026-05-21.md`. 10+회 발생 패턴 진단, 4가지 가설(gitstatusd race 가장 유력), 6가지 해결책 옵션(B git-safe wrapper 권장, C 셸 탭 정리 free), 추적 테이블. ckg source 무영향, 사용자 환경 문제.
 
-- [ ] **C13** W-C 다음 axis — W10 self-call + W9 inheritance layout 양쪽 다 마무리. 다음 후보:
+- [x] **C13 — W10 V24** ✅ `d3f2724` high-level walker × shape cross-axis lockdown. WALKER_SYMMETRY.md의 3개 `?` 셀 close (constructor / receive / modifier). 한 fixture + 한 test로 *4 callable shape × 2 walker* matrix 완전 채움.
+
+  **W10 시리즈 완전 완결 (V14-V24, 11 commits):**
+  - V14-V17: shape × cast walker (5 shapes)
+  - V18 fix: low-level struct_expression hop
+  - V19 feat: HasHighLevelSelfCall marker
+  - V20 cross-axis: try × high-level
+  - V21 negative lock: chained-receiver false negative
+  - V22 fix: high-level struct_expression hop (V18 대칭)
+  - V23 fix: Yul call/staticcall self-receiver (V10 대칭)
+  - **V24 cross-axis: high-level × {constructor, receive, modifier} (V14/V15/V17 대칭)**
+
+  **WALKER_SYMMETRY.md drift catalogue 3 rows 모두 close.**
+
+- [ ] **C14** W-C 다음 후보:
   - **W9 V19**: library type-scope (state-var 불가하지만 struct 정의 가능 — type slot 처리)
   - **W7**: modifier composition variant (`override` + `virtual` + base call interaction)
   - **W8**: function-typed state-var cross-contract param propagation
-  - **High-level walker shape gap closure**: W10 V14-V17의 `?` 셀 — high-level walker가 constructor / fallback-receive / modifier scope에서도 작동 검증 (3 fixture)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
