@@ -240,10 +240,12 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - V18 (`8539446`): `.call{value:..., gas:...}` chained low-level (struct_expression hop)
   - V19 (`6995184`): high-level typed dispatch (new marker, isSelfRef 재귀 helper)
 
-- [ ] **C5** W-C 시리즈 다음 후보 — W10 self-call shape + syntax 양 axis 모두 cover. 다른 axis:
-  - **W10 V20+**: low-level + high-level *둘 다 부착되는 hybrid* 케이스 (예: `try IFoo(this).bar() { ... }` — V16 + V19 교차) — fixture 위주 작업, 0줄 코드
-  - **W10 V21+**: chained-receiver shape (`getTarget(this).foo()` — `isSelfRef`의 call_expression 재귀가 잡지 못하는 케이스)
-  - **W7 V***: modifier composition variant
+- [x] **C5 — W10 V20** ✅ `e009dff` try-wrapped high-level self-call cross-axis lockdown. V16 (try transparent walk) × V19 (HasHighLevelSelfCall) 조합이 *자동 propagate*되는지 검증. 0줄 코드 + fixture + test.
+
+- [ ] **C6** W-C 시리즈 다음 후보:
+  - **W10 V21**: chained-receiver `getTarget(this).foo()` — `isSelfRef`의 call_expression 재귀가 *lower-case identifier 휴리스틱* 때문에 거부. 의도된 false negative이지만 *명시적 lockdown* (negative assertion) 또는 *별도 marker* 분리 결정 필요.
+  - **W10 V22+ 다른 syntax**: high-level value-bearing dispatch (`this.foo{value: x}()` — call options on typed self-call), library function call (`L.foo(this)`)
+  - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
   - **W9 V***: inheritance-aware storage slot layout
   - **W8 V***: function-typed state-var cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
