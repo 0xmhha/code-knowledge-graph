@@ -220,19 +220,21 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 - [x] **C1 — W10 V16** ✅ `4fdce7d` try-statement self-cast 회귀 가드. `try { payable(this).call(...) }` 패턴이 enclosing function에 `HasSelfReentrantCall=true` 부착되는지 lockdown. tree-sitter query가 file 전체에서 member_expression을 잡고 walker가 try_statement를 transparent하게 통과해 function_definition에 도달 — 가설 검증 + 명시적 fixture로 회귀 가드.
 
-  **W10 self-cast 시리즈 누적 coverage (4-shape map 완성):**
-  - V14 (`89f86f5`): receive() / fallback()           — fallback_receive_definition
-  - V15 (`55bf70d`): constructor                       — constructor_definition
-  - V16 (`4fdce7d`): try_statement-wrapped fn body     — function_definition (transparent walk)
-  - V17 (`b1dd31a`): modifier body                     — modifier_definition
+  **W10 self-cast 시리즈 누적 coverage:**
+  - V14 (`89f86f5`): receive() / fallback()           — shape: fallback_receive_definition
+  - V15 (`55bf70d`): constructor                       — shape: constructor_definition
+  - V16 (`4fdce7d`): try_statement-wrapped fn body     — shape: function_definition (transparent walk)
+  - V17 (`b1dd31a`): modifier body                     — shape: modifier_definition
+  - **V18 (`8539446`): `.call{value:..., gas:...}` chained syntax** — *syntax*: struct_expression wrapper hop. **실제 false negative 수정** — 이전엔 modern Sol 0.7+ self-call이 silently 누락되었음 (V14-V17은 *지원되지 않는 syntax에 대해 잘못된 자신감*을 주고 있었음 — V18가 actual correctness 회복).
 
-  *모든 callable kind에 explicit invariant lock 완료.* nearestFunctionQnameAndStart의 accepted-kind 집합에서 하나라도 drop하는 refactor는 이 4개 test 중 하나로 fail.
+  *Shape axis는 V14-V17이 완결.* *Syntax axis는 V18이 가장 흔한 modern 패턴 처리*. 두 axis 모두 invariant lock.
 
-- [x] **C2 — W10 V17** ✅ `b1dd31a` modifier-scope self-cast 회귀 가드. V16과 동일 패턴 (0줄 코드 변경 + fixture + test). `modifier guard { _; payable(this).call(""); }`가 NodeModifier 행에 `HasSelfReentrantCall=true` 부착되는지 lockdown.
+- [x] **C2 — W10 V17** ✅ `b1dd31a` modifier-scope self-cast 회귀 가드.
+- [x] **C3 — W10 V18** ✅ `8539446` call-options chained syntax (`{value:..., gas:...}`) self-cast. *실제 코드 수정 + fixture + test*. tree-sitter parent chain probe로 wrapper 이름(`struct_expression`) 발견 후 walker에 hop 추가.
 
-- [ ] **C3** W-C 시리즈 다음 후보 — W10 self-cast는 완결. 다른 axis 후보:
-  - **W10 V18+**: 다른 self-cast 형태 (e.g. `new MyContract()` deployment, `IFoo(a).bar()` interface dispatch when `a == address(this)`)
-  - **W7 V*** : modifier composition (W7.3) 추가 invariant (override + virtual interaction)
-  - **W9 V***: inheritance-aware storage slot layout (cross-file already done V15/V16)
+- [ ] **C4** W-C 시리즈 다음 후보 — W10은 shape + 현대 syntax 완결. 다른 axis 후보:
+  - **W10 V19+ syntax**: interface dispatch (`IFoo(this).bar()`), contract-type cast (`MyC(this).foo()`), high-level `this.foo()` 직접 호출 (low-level 아닌 typed call도 self-reentrant 가능)
+  - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
+  - **W9 V***: inheritance-aware storage slot layout 변형
   - **W8 V***: function-typed state-var의 cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
