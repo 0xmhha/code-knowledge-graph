@@ -155,7 +155,66 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   **lockdown 발견:** R04 fixture 작성 중 SQLite LIKE의 ASCII case-insensitive 매치 동작 발견 → `api.Handler.vault` (소문자 field) 가 `Vault` 검색에 매치됨. 의도된 동작이라 fixture에 명시적 expected로 포함, 향후 case-sensitive 회귀 시 fail.
 
   **다음 ratchet 후보:** R05 recall_min을 0.66 → 1.0 (SQLite/PG FTS 토큰화 parity 확인 후), precision 게이트 강화 (statement-node 제외 필터 추가 후).
-- [ ] **EV1 Phase 3** CI 통합 — `make eval` 결과를 PR gate로. 단, eval은 self-index 빌드 시간이 있어 lint/test보다 느림 — nightly 또는 `[eval]` 트리거 라벨 검토 필요.
+- [ ] **EV1 Phase 3** CI 통합 — ⏸️ **보류** (2026-05-21).
+
+  **현재 차단 사유:** ci.yml 자동 편집이 보안 hook(`PreToolUse:Edit`)으로 차단됨. 작성된 워크플로 snippet은 *모든 `run:` 명령이 static command*이고 `github.event.*` 같은 untrusted 입력을 사용하지 않아 *실제 주입 위험은 없으나*, 자동 적용은 정책상 막혀 있어 **사용자 수동 적용**이 필요.
+
+  **재개 절차 (사용자 수동 적용):**
+  1. `.github/workflows/ci.yml`의 `smoke:` job 다음(파일 끝)에 아래 snippet 그대로 추가.
+  2. push → GitHub Actions 탭에서 `eval` job 실행 확인. 첫 실행은 baseline과 동일하므로 ✅ pass + artifact 생성.
+  3. 의도된 회귀 PR(예: 일부러 R01 expected를 잘못 적은 PR)로 gate 동작 검증.
+  4. 작업 완료 후 본 항목 ✅로 marking.
+
+  **권장 snippet (보관):**
+
+  ```yaml
+    eval:
+      # LLM-free regression gate (EV1 Phase 1+2):
+      #   1. ckg build (self-index of this repo)
+      #   2. ckg validate / benchmark / bench-mcp  — informational JSON
+      #      captured as the `eval-results` artifact for baseline diffing
+      #   3. ckg build (synthetic corpus) + ckg eval-retrieval
+      #      — fails the job when any fixture's recall / precision falls
+      #      below its committed threshold. This is the load-bearing gate.
+      #
+      # Parallel with test / lint / audit so a slow retrieval probe
+      # doesn't block fast-feedback signal. Single ubuntu runner is
+      # sufficient: the probes hit pure SQLite and the metrics are not
+      # OS-specific.
+      #
+      # All `run:` steps are static commands with no untrusted
+      # github.event.* interpolation, so workflow-injection guidance
+      # does not apply here.
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-go@v5
+          with: { go-version: '1.25' }
+        - run: make build-no-viewer
+        - run: make eval
+        - name: baseline drift (informational)
+          if: always()
+          run: |
+            if ! diff -ru eval/baseline eval/results/latest > /tmp/eval-drift.txt; then
+              echo "::warning::eval baseline drift detected (see job artifact for full diff)"
+              head -100 /tmp/eval-drift.txt
+            fi
+        - uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: eval-results
+            path: eval/results/latest/
+            retention-days: 14
+  ```
+
+  **설계 근거:**
+  - **Gate**: `make eval`의 5번째 step(`ckg eval-retrieval`)이 recall/precision threshold 위반 시 exit 1. job 자체가 fail → PR block.
+  - **Non-fatal drift step**: validate/benchmark/bench-mcp의 numeric 변동은 통계적 노이즈(timestamps, src_commit rotation). warning만 띄우고 진행. 실제 회귀 검출은 *retrieval gate*가 부담.
+  - **Artifact always**: `if: always()` — fail 시에도 JSON 보존 → 어떤 fixture가 어떤 expected를 잃었는지 console 없이 디버그 가능.
+  - **Runner**: ubuntu-latest 단일. eval probes는 OS 비의존(SQLite 자체 결정성), matrix 비용 무가치.
+  - **Job 의존성 없음**: lint/audit와 동급, smoke처럼 `needs: test` 사용 안 함. 빠른 실패 피드백.
+
+  **시간 비용 예상:** self-index ~30s + synthetic-index ~10s + bench-mcp 50 iters × 8 probes ~30s + 기타 ~10s = **~1-2분**. lint job(~30초)보다 느리지만 audit/smoke와 비슷 수준.
 
 ## G. 미해결 / 후속 세션 작업
 
