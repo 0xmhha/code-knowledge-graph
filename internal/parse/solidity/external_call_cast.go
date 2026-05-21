@@ -91,6 +91,29 @@ func (v *declVisitor) runExternalCallCastMarker() {
 			if parent != nil && parent.Kind() == "expression" {
 				parent = parent.Parent()
 			}
+			// W-C W10 V18 (2026-05-21): Sol 0.7+ writes value / gas
+			// overrides as `.call{value: x, gas: y}(...)`. In the
+			// tree-sitter grammar that wraps the `.call` member into a
+			// struct_expression (with another expression node above the
+			// struct on the parent chain) before reaching the outer
+			// call_expression. The chain is:
+			//
+			//   member_expression           (`payable(this).call`)
+			//   → expression
+			//   → struct_expression         (`.call{value: x}`)
+			//   → expression
+			//   → call_expression           (`.call{value: x}(args)`)
+			//
+			// Without these hops the walker bails at the call_expression
+			// check and the security marker silently disappears on every
+			// modern self-call — a false negative on the syntax cks
+			// consumers actually ship today.
+			if parent != nil && parent.Kind() == "struct_expression" {
+				parent = parent.Parent()
+				if parent != nil && parent.Kind() == "expression" {
+					parent = parent.Parent()
+				}
+			}
 			if parent == nil || parent.Kind() != "call_expression" {
 				continue
 			}
