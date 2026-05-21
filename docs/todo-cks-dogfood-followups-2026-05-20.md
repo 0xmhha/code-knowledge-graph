@@ -297,8 +297,25 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - *Parser* (Sol cast walker vs Yul inline assembly): V14-V22는 Sol측, V23은 Yul측
   - *Heuristic edge* (intentional false negative): chained-receiver — V21
 
-- [ ] **C9** W-C 시리즈 다음 axis — W10 self-call surface는 *Sol + Yul 양측 완결*. 다음 axis:
-  - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
-  - **W9 V***: inheritance-aware storage slot layout (W9 V15/V16에서 cross-file 처리; multi-inheritance offset, library/interface slot interaction 등 미커버)
-  - **W8 V***: function-typed state-var cross-contract assignment (callback propagation)
+- [x] **C9 — W9 V17** ✅ `3f22bb1` multi-inheritance storage slot offset lockdown. `contract C is A, B` 두-base 케이스에서 *W9 V1의 offset 누적*이 정확히 작동함을 explicit fixture로 잠금.
+
+  **W9 시리즈 누적 (commit table):**
+  | V | SHA | Type | 내용 |
+  |---|---|---|---|
+  | V0 | `1b51285` | feat | per-contract local slot index |
+  | V1 | `62a8f49` | feat | single-inheritance offset |
+  | V2 | `a9cf823` | feat | type-size aware packing |
+  | V3 | `6db83bd` | feat | mapping declaration slot |
+  | V6 | (resolve.go) | feat | cross-file re-pack |
+  | V15 | `d7df2ec` | lock | cross-file enum conservative |
+  | V16 | `f79deaa` | lock | cross-file struct conservative |
+  | V17 | `3f22bb1` | lock | multi-inheritance offset (two-base) |
+
+  **Slot model 명시 (V17 commit 참조):** base contract NodeField = own-scope slot. derived contract NodeField = inheritance-offset folded slot. cks 사용자가 *absolute slot in derived context* 필요 시 inheritance edges + slot count로 reconstruct.
+
+- [ ] **C10** W-C 다음 후보:
+  - **W9 V18**: diamond inheritance MRO offset (`contract D is B, C; B is A; C is A` — C3 linearization 정확성)
+  - **W9 V19**: library state-var slot — `library L` is *stateless*이므로 slot 0; ckg가 정확히 처리하는지 검증
+  - **W7**: modifier composition variant (`override` + `virtual` + base call)
+  - **W8**: function-typed state-var cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
