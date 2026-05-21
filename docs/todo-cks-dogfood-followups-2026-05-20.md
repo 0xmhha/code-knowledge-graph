@@ -218,5 +218,13 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 ## G. 미해결 / 후속 세션 작업
 
-- [ ] **C1** W-C 회귀 가드 시리즈 다음 invariant 후보 발굴 (현재 V14~V16까지 누적) — 발견적 작업, 별도 세션
+- [x] **C1 — W10 V16** ✅ `4fdce7d` try-statement self-cast 회귀 가드. `try { payable(this).call(...) }` 패턴이 enclosing function에 `HasSelfReentrantCall=true` 부착되는지 lockdown. tree-sitter query가 file 전체에서 member_expression을 잡고 walker가 try_statement를 transparent하게 통과해 function_definition에 도달 — 가설 검증 + 명시적 fixture로 회귀 가드.
+
+  **W10 self-cast 시리즈 누적 coverage:**
+  - V14 (`89f86f5`): receive() / fallback()
+  - V15 (`55bf70d`): constructor
+  - V16 (`4fdce7d`): try_statement-wrapped fn body
+  - **V17 후보**: modifier_definition 안의 self-cast. `modifier guard { _; payable(this).call(""); }` 같은. nearestFunctionQnameAndStart는 이미 modifier_definition을 인식하지만 *명시적 fixture 부재*. 다음 세션에서 같은 패턴(V15/V16 그대로 모방)으로 작업 가능.
+
+- [ ] **C2** W-C 다음 시리즈 후보 — modifier self-cast (V17), 또는 다른 invariant (try/catch nested call, abstract contract dispatch, delegatecall receiver 변형 등) — 다음 세션
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
