@@ -375,9 +375,16 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - V5 `tryComputeStructBytes`가 bytes/string/dynamic-array에 fallthrough (0, false). Struct가 structSizes에 등록 안 됨.
   - **PrimitiveOnly struct (V11 fixture와 동일 구조)도 *내 fixture에서 1 slot fallback*** — multi-contract namespace 또는 fixed-point ordering 이슈. V11은 single-contract라 cover. 실 codebase는 multi-contract이므로 *광범위 fallback 가능성*.
 
-- [ ] **C18** W-C 다음 후보 (V28 이후):
-  - **W9 V19**: library type-scope (probe 결과 모호)
-  - **W7.5**: modifier SubKind drift (cks scenario 후)
-  - **W9 V29 walker fix**: V28에서 드러난 *multi-contract namespace / reference-type member* 두 divergence 중 *하나* fix. 작업 범위 큰 편 (~20-50줄 walker change).
-  - **WALKER_SYMMETRY refactor**: 6 rows 누적, *카테고리별 그룹화* (cross-walker drift vs test-coverage gap vs characterization)
+- [x] **C18 — 방향 전환: T-04 Hallucination validator prototype** ✅ 사용자 질문(*"evaluation 부재로 불명확성 누적"*)에 응답 — W-C lockdown 시리즈에서 *evaluation infrastructure 강화*로 axis 전환. 발견: `internal/eval/`에 *LLM 인프라(LLMClient, APIClient, CLIClient) + 4-baseline 평가 시스템*이 이미 완비. 진짜 미충족은 *반복 사용 + bug discovery cycle*. HANDOFF.md T-04 P0 spec 구현: `internal/eval/hallucination_check.go::ValidateMentions(output, store)` — Found/QnameDiverged/Hallucinated 3-bucket 분류. 6 unit tests PASS. Walker 0줄 변경.
+
+  **V0 미해결 (V1+):**
+  - ckg eval CLI에 통합 (runner.go::runOne에 호출 wiring)
+  - 30-question 실 데이터 run + false-positive 율 측정
+  - file 경로 토큰 검증 (현재 symbol mention만)
+  - misspell 처리 (fuzzy matching)
+
+- [ ] **C19** W-C lockdown vs LLM eval *어느 방향 우선?* — 사용자 결정 사항:
+  - **(A) C18 V1 wiring**: hallucination check를 runner에 통합 → JSON 출력 → ckg eval 실 호출 + bug discovery cycle
+  - **(B) W-C 시리즈 재개**: W9 V29 walker fix, W7.5, W9 V19, WALKER_SYMMETRY refactor 등
+  - 권장: A — *사용자 명시 우려 (0% error 측정)*의 *직접적 다음 step*
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션

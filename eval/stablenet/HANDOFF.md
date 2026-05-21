@@ -150,28 +150,30 @@ if strings.Contains(tok, ".") && !strings.HasPrefix(tok, ".") && !strings.HasSuf
 
 **카테고리**: 측정 인프라 (신규)
 **우선**: P0 — 30-question 요구사항 지표 #3
+**상태**: **V0 prototype DONE (2026-05-21, C18)**
 
-### 현 상태
-없음.
+### V0 결과 (2026-05-21)
+- `internal/eval/hallucination_check.go` 추가, `ValidateMentions(output, store)` API
+- `extractSymbols` 재사용으로 토큰 추출 (scoreTask가 채점에 쓰는 것과 동일)
+- `store.FindSymbol(name, exact)` 로 bare-name (last dot-segment) 존재 확인
+- 분류 3 bucket: `Found` / `QnameDiverged` / `Hallucinated`
+- `QnameDiverged`: bare 이름은 store에 있지만 qname 매치 안 함 (`eth.NewBlockChain` vs `core.NewBlockChain`) — 수동 triage용, Rate 계산에는 반영 X
+- 6 unit tests PASS (AllFound / Hallucinated / QnameDiverged / CaseInsensitiveSweep / NilStore / DedupCaseInsensitive)
 
-### 해결 위치
-신규 — `internal/eval/hallucination_check.go`.
+### V0 미해결 (V1+ 작업으로 이전)
+- ckg eval CLI에 통합 X — `internal/eval/runner.go`의 `runOne`에서 호출하도록 wiring 필요
+- 결과 JSON에 hallucination metrics 추가
+- false-positive 율 측정 (실 30-question 셋으로 1회 run 필요)
+- file 경로 토큰의 filesystem / files 테이블 검증 (현재 symbol mention만 처리)
+- fuzzy matching: `NewBlockchain` vs `NewBlockChain` 같은 *케이스 차이가 아닌 misspell* 처리 — 현재는 hallucinated로 분류
 
-### 권장 접근
-1. 답 텍스트에서 토큰 추출 (extractSymbols 정규화 후 버전 재사용)
-2. 각 qname 후보:
-   - 그래프 nodes 테이블에 존재? (exists)
-   - file 경로 토큰: filesystem 또는 그래프 files 테이블에 존재?
-3. 카운트: total mentioned, exists, hallucinated
-4. hallucination_rate = hallucinated / total_mentioned
-
-### Acceptance criteria
-- LLM이 `eth.NewBlockchain` 같은 오타 또는 가상 함수명을 답하면 hallucination++
-- 30-question 셋에서 baseline별 hallucination 카운트 보고
-- false-positive 율 < 5% (실제 존재하는데 hallucination으로 잡는 케이스)
+### Acceptance criteria (재확인)
+- LLM이 `eth.NewBlockchain` 같은 *완전 가상 함수명* 답하면 hallucination++ — **PASS** (V0 unit test에서 검증)
+- 30-question 셋에서 baseline별 hallucination 카운트 보고 — **TODO** (V1 wiring 후)
+- false-positive 율 < 5% — **측정 안 됨** (V1 실 데이터 run 필요)
 
 ### 관련 자료
-- T-02 (extractSymbols 정규화)와 토큰 추출 로직 공유
+- T-02 (extractSymbols 정규화)와 토큰 추출 로직 공유 — `extractSymbols`를 V0가 그대로 재사용
 
 ---
 
