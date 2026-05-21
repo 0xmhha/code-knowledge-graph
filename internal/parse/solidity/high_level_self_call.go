@@ -73,11 +73,22 @@ func (v *declVisitor) runHighLevelSelfCallMarker() {
 			if parent != nil && parent.Kind() == "expression" {
 				parent = parent.Parent()
 			}
-			// High-level calls don't have a struct_expression options
-			// hop — `.foo{value:0}(args)` would still go through V18
-			// (the method name "call" would land it on low-level
-			// branch). For user-method invocations the parent is the
-			// direct call_expression.
+			// W-C W10 V22 (2026-05-21): high-level dispatch also
+			// admits the `.foo{value: x, gas: y}()` options shape —
+			// `this.target{value: 0}()` parses with the same
+			// struct_expression wrapper V18 traversed for the
+			// low-level path. Without this hop a typed self-call
+			// with explicit value / gas options silently loses
+			// HasHighLevelSelfCall while the equivalent
+			// `this.target()` (no options) gets it. The shape is
+			// common in payable workflows where the caller passes
+			// ETH along with the dispatch.
+			if parent != nil && parent.Kind() == "struct_expression" {
+				parent = parent.Parent()
+				if parent != nil && parent.Kind() == "expression" {
+					parent = parent.Parent()
+				}
+			}
 			if parent == nil || parent.Kind() != "call_expression" {
 				continue
 			}
