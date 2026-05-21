@@ -313,9 +313,17 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
   **Slot model 명시 (V17 commit 참조):** base contract NodeField = own-scope slot. derived contract NodeField = inheritance-offset folded slot. cks 사용자가 *absolute slot in derived context* 필요 시 inheritance edges + slot count로 reconstruct.
 
-- [ ] **C10** W-C 다음 후보:
-  - **W9 V18**: diamond inheritance MRO offset (`contract D is B, C; B is A; C is A` — C3 linearization 정확성)
-  - **W9 V19**: library state-var slot — `library L` is *stateless*이므로 slot 0; ckg가 정확히 처리하는지 검증
+- [x] **C10 — W9 V18** ✅ `5548dd5` diamond inheritance MRO offset lockdown. `c3_linearization.go`의 dedup이 *D.d = 3 (naive 4 아님)* 정확히 작동함을 explicit fixture로 잠금. *Upgradeable proxy collision* 회귀 직접 방어.
+
+  **W9 layout 시리즈 V17/V18 누적:**
+  - V17 (`3f22bb1`): two-base offset (`A, B` linear)
+  - V18 (`5548dd5`): diamond MRO dedup (`B, C ← A`)
+  - 두 fixture가 *base own-scope semantics* + *derived absolute-after-offset*의 비대칭을 *명시*
+
+- [ ] **C11** W-C 다음 후보:
+  - **W9 V19**: library state-var slot — `library L`은 *stateless*이므로 state-var 정의 불가. 다만 `library L { struct S { ... } }` 같은 type 정의는 가능. type-scope storage 처리 검증.
+  - **W9 V20**: deeper diamond (`E is D, C; D is B, A; C is A; B is A`) — C3 알고리즘의 *triangle 이상 패턴* 검증
   - **W7**: modifier composition variant (`override` + `virtual` + base call)
-  - **W8**: function-typed state-var cross-contract assignment
+  - **W8**: function-typed state-var cross-contract assignment (callback propagation)
+  - **C12 후보**: walker symmetry matrix meta tool — V22/V23에서 보인 cross-walker drift 자동 검출
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
