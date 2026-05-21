@@ -220,11 +220,19 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 - [x] **C1 — W10 V16** ✅ `4fdce7d` try-statement self-cast 회귀 가드. `try { payable(this).call(...) }` 패턴이 enclosing function에 `HasSelfReentrantCall=true` 부착되는지 lockdown. tree-sitter query가 file 전체에서 member_expression을 잡고 walker가 try_statement를 transparent하게 통과해 function_definition에 도달 — 가설 검증 + 명시적 fixture로 회귀 가드.
 
-  **W10 self-cast 시리즈 누적 coverage:**
-  - V14 (`89f86f5`): receive() / fallback()
-  - V15 (`55bf70d`): constructor
-  - V16 (`4fdce7d`): try_statement-wrapped fn body
-  - **V17 후보**: modifier_definition 안의 self-cast. `modifier guard { _; payable(this).call(""); }` 같은. nearestFunctionQnameAndStart는 이미 modifier_definition을 인식하지만 *명시적 fixture 부재*. 다음 세션에서 같은 패턴(V15/V16 그대로 모방)으로 작업 가능.
+  **W10 self-cast 시리즈 누적 coverage (4-shape map 완성):**
+  - V14 (`89f86f5`): receive() / fallback()           — fallback_receive_definition
+  - V15 (`55bf70d`): constructor                       — constructor_definition
+  - V16 (`4fdce7d`): try_statement-wrapped fn body     — function_definition (transparent walk)
+  - V17 (`b1dd31a`): modifier body                     — modifier_definition
 
-- [ ] **C2** W-C 다음 시리즈 후보 — modifier self-cast (V17), 또는 다른 invariant (try/catch nested call, abstract contract dispatch, delegatecall receiver 변형 등) — 다음 세션
+  *모든 callable kind에 explicit invariant lock 완료.* nearestFunctionQnameAndStart의 accepted-kind 집합에서 하나라도 drop하는 refactor는 이 4개 test 중 하나로 fail.
+
+- [x] **C2 — W10 V17** ✅ `b1dd31a` modifier-scope self-cast 회귀 가드. V16과 동일 패턴 (0줄 코드 변경 + fixture + test). `modifier guard { _; payable(this).call(""); }`가 NodeModifier 행에 `HasSelfReentrantCall=true` 부착되는지 lockdown.
+
+- [ ] **C3** W-C 시리즈 다음 후보 — W10 self-cast는 완결. 다른 axis 후보:
+  - **W10 V18+**: 다른 self-cast 형태 (e.g. `new MyContract()` deployment, `IFoo(a).bar()` interface dispatch when `a == address(this)`)
+  - **W7 V*** : modifier composition (W7.3) 추가 invariant (override + virtual interaction)
+  - **W9 V***: inheritance-aware storage slot layout (cross-file already done V15/V16)
+  - **W8 V***: function-typed state-var의 cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
