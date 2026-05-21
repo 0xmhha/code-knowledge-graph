@@ -242,9 +242,25 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
 - [x] **C5 — W10 V20** ✅ `e009dff` try-wrapped high-level self-call cross-axis lockdown. V16 (try transparent walk) × V19 (HasHighLevelSelfCall) 조합이 *자동 propagate*되는지 검증. 0줄 코드 + fixture + test.
 
-- [ ] **C6** W-C 시리즈 다음 후보:
-  - **W10 V21**: chained-receiver `getTarget(this).foo()` — `isSelfRef`의 call_expression 재귀가 *lower-case identifier 휴리스틱* 때문에 거부. 의도된 false negative이지만 *명시적 lockdown* (negative assertion) 또는 *별도 marker* 분리 결정 필요.
-  - **W10 V22+ 다른 syntax**: high-level value-bearing dispatch (`this.foo{value: x}()` — call options on typed self-call), library function call (`L.foo(this)`)
+- [x] **C6 — W10 V22** ✅ `1668afb` high-level call-options self-call. V19 walker에 V18 패턴(struct_expression hop) 추가. probe로 false negative 확인 → fix → lockdown.
+
+  **V18/V22 generalisation:** Low-level walker(V18)와 high-level walker(V22) 모두 *struct_expression을 transparent hop으로 처리*. 향후 새 call-options syntax 추가 시 *두 walker 모두에 hop 추가* 필요 — 두 test 파일(`call_options_self_cast_test.go` + `high_level_call_options_test.go`)이 drift 감지.
+
+  **W10 시리즈 누적 commit table:**
+  | V | SHA | Type | 내용 |
+  |---|---|---|---|
+  | V14 | `89f86f5` | lock | receive/fallback self-cast |
+  | V15 | `55bf70d` | lock | constructor self-cast |
+  | V16 | `4fdce7d` | lock | try-wrapped self-cast |
+  | V17 | `b1dd31a` | lock | modifier-scope self-cast |
+  | V18 | `8539446` | **fix** | low-level `.call{...}` struct_expression hop |
+  | V19 | `6995184` | **feat** | `HasHighLevelSelfCall` new marker |
+  | V20 | `e009dff` | lock | try × high-level cross-axis |
+  | V22 | `1668afb` | **fix** | high-level `.foo{...}` struct_expression hop |
+
+- [ ] **C7** W-C 시리즈 다음 후보:
+  - **W10 V21 (deferred)**: chained-receiver `getTarget(this).foo()` — *negative lockdown* (의도된 false negative 명시) 또는 *별도 marker* 분리 결정 필요
+  - **W10 V23+ other syntax**: library function call (`L.foo(this)` where this is passed as first arg by using-for), assembly self-call (Yul `call(gas(), address(), ...)` with self receiver), event emit ‖ 보안 의미 미미
   - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
   - **W9 V***: inheritance-aware storage slot layout
   - **W8 V***: function-typed state-var cross-contract assignment
