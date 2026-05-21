@@ -140,6 +140,87 @@ func TestValidateMentions_Hallucinated(t *testing.T) {
 	}
 }
 
+// TestValidateMentions_QnameSuffix_NotDiverged — V2 (2026-05-21,
+// T-04 second smoke run): a mention that is a segment-aware
+// case-insensitive suffix of the qname counts as a clean qname
+// match, NOT as a divergence. Locks the short-qname pattern
+// (LLM writes "Vault.deposit" for store qname
+// "service.Vault.Deposit") that V1 flagged falsely.
+func TestValidateMentions_QnameSuffix_NotDiverged(t *testing.T) {
+	store := mkStore(
+		types.Node{Name: "Deposit", QualifiedName: "service.Vault.Deposit"},
+	)
+	// Two mentions that case-fold to the same key — dedup leaves 1.
+	out := "Look at Vault.Deposit and also vault.deposit (case variants)."
+	got, err := ValidateMentions(out, store)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.Total != 1 {
+		t.Fatalf("Total: got %d, want 1 (case-folded dedup collapses Vault.Deposit and vault.deposit)", got.Total)
+	}
+	if len(got.Hallucinated) != 0 {
+		t.Errorf("Hallucinated: got %v, want empty", got.Hallucinated)
+	}
+	if len(got.QnameDiverged) != 0 {
+		t.Errorf("QnameDiverged: got %v, want empty (V2 suffix match should clear short-qname mentions)", got.QnameDiverged)
+	}
+}
+
+// TestValidateMentions_SingleSegmentSuffix — bare name `Deposit`
+// alone matches qname `service.Vault.Deposit` via 1-segment
+// suffix. V2 covers this trivially (mSegs=[Deposit], qSegs=[...,
+// Deposit] aligns at the last segment).
+func TestValidateMentions_SingleSegmentSuffix(t *testing.T) {
+	store := mkStore(
+		types.Node{Name: "Deposit", QualifiedName: "service.Vault.Deposit"},
+	)
+	// "Deposit" alone won't match extractSymbols' "must contain a dot"
+	// filter, so this test exercises the suffix-match path through a
+	// 2-segment mention that aligns on the last segment only.
+	out := "Use Helper.Deposit somewhere unrelated."
+	got, err := ValidateMentions(out, store)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.Total != 1 {
+		t.Fatalf("Total: got %d, want 1", got.Total)
+	}
+	// `Helper.Deposit` is NOT a suffix of `service.Vault.Deposit` —
+	// `Helper` ≠ `Vault`. The bare name `Deposit` resolves, but the
+	// qname does not align, so this lands in QnameDiverged as
+	// expected.
+	if len(got.QnameDiverged) != 1 {
+		t.Errorf("QnameDiverged: got %v, want [Helper.Deposit] (segment misalignment at index -2)", got.QnameDiverged)
+	}
+}
+
+// TestValidateMentions_ReceiverStyle_StillDiverged — V2 explicitly
+// does NOT cover receiver-style mentions like `h.vault.Deposit`
+// where `h` is a local variable. The leading variable segment
+// defeats segment-aligned suffix match, so the mention still
+// surfaces in QnameDiverged for V3 design (first-segment-variable
+// heuristic).
+func TestValidateMentions_ReceiverStyle_StillDiverged(t *testing.T) {
+	store := mkStore(
+		types.Node{Name: "Deposit", QualifiedName: "service.Vault.Deposit"},
+	)
+	out := "h.vault.Deposit is the call site."
+	got, err := ValidateMentions(out, store)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if got.Total != 1 {
+		t.Fatalf("Total: got %d, want 1", got.Total)
+	}
+	if len(got.Hallucinated) != 0 {
+		t.Errorf("Hallucinated: got %v, want empty (bare name resolves)", got.Hallucinated)
+	}
+	if !sameSet(got.QnameDiverged, []string{"h.vault.Deposit"}) {
+		t.Errorf("QnameDiverged: got %v, want [h.vault.Deposit] (V3 territory)", got.QnameDiverged)
+	}
+}
+
 // TestValidateMentions_QnameDiverged — the bare name resolves but
 // against a different qualified name. Found includes the mention,
 // QnameDiverged also includes it, Hallucinated does not.

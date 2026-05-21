@@ -419,12 +419,34 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   **V0 design 한계 (V2 후보):**
   - `Vault.deposit` (LLM 짧은 표기) vs `service.Vault.Deposit` (store 정식 qname) — *suffix match*가 cover 안 됨. `QnameDiverged false positive`. *수정 시 mention이 *store qname의 *case-insensitive suffix*면 *non-diverged*.
 
-- [ ] **C22** 사용자 재실행 권장: *동일 fixture 재측정으로 *bug fix effectiveness 확인*. 기대: hallucination rate *28.6% → 0%* (두 false positive 모두 제거). 실 result:
-  - rate 0% → P0 fix 성공 *증명*
-  - rate >0% → 새 finding 또는 *V0 design 한계 (suffix match 등)이 표면화*
+- [x] **C22 — Fix effectiveness 검증 + V2 suffix match** ✅
+  
+  **C21 fix 효과 *empirical proof*:**
+  | 측정값 | C21 | C22 cycle 2 | Delta |
+  |---|---|---|---|
+  | Hallucinated | 2 | 0 | -2 ✅ |
+  | Rate | 28.6% | 0.0% | **-28.6%p** ✅ |
+  | QnameDiverged | 1 | 3 | +2 (nature change: hallucinated → diverged) |
+  | Score | 0.476 | 0.500 | +0.024 |
+  
+  **V2 enhancement: anyQnameMatch에 *suffix match* 도입.** `isQnameSuffix(qname, mention)` helper — segment-aware case-insensitive suffix matching. 9 unit tests PASS (2건 신규: QnameSuffix_NotDiverged, SingleSegmentSuffix). Walker 0줄.
+  
+  **V2가 cover하는 것:**
+  - `Vault.deposit` (mention) ↔ `service.Vault.Deposit` (qname) → case-fold suffix → match
+  - `Vault.Deposit` (mention) ↔ `service.Vault.Deposit` → exact suffix → match
+  
+  **V2가 cover *못 하는 것 (V3 후보)*:**
+  - `h.vault.Deposit` — receiver-style (`h` = variable). leading variable segment defeats suffix align.
+  - `h.vault` — variable-only receiver path. *V3: first-segment-variable heuristic 필요*.
 
-- [ ] **C23** V2 enhancement 후보 (C22 결과에 따라):
-  - **suffix match** for QnameDiverged false positive
-  - **L1 token counting audit** (smoke run에서 input=5 tokens 비현실적)
-  - **β/γ/δ baseline run** — α만으로는 *raw dump 영향*과 *tool-augmented 영향* 분리 불가
+- [ ] **C23** 사용자 *3번째 재실행* 권장: 동일 fixture. *기대:*
+  - Hallucinated 0건 (유지)
+  - QnameDiverged *3 → 1* (Vault.deposit이 V2로 cover, h.vault.* 2건은 V3 territory로 남음)
+  - rate 0% (유지)
+
+- [ ] **C24** V3 receiver-style heuristic (사용자 결과 검토 후 결정):
+  - 후보 A: first-segment가 *1-2 char lowercase variable*이면 drop 후 suffix match
+  - 후보 B: 모든 *mention의 prefix들*을 *try* (`h.vault.Deposit` → `vault.Deposit` → `Deposit`)
+  - 후보 C: V3 *skip* — QnameDiverged의 *현 의미*를 *유지*하고 *별도 metric*으로 *receiver-style mentions 분류*
+  - false positive 위험 분석 필요
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션

@@ -169,6 +169,61 @@ func anyQnameMatch(nodes []types.Node, mention string) bool {
 		if strings.EqualFold(n.QualifiedName, mention) {
 			return true
 		}
+		// V2 (2026-05-21, T-04 second smoke run): a mention that is a
+		// *segment-aware suffix* of the qualified name still counts as a
+		// qname match. The motivating finding: LLM responses use
+		// short-qname forms ("Vault.deposit") for full graph qnames
+		// ("service.Vault.Deposit") because that's the call-site syntax
+		// in idiomatic Go / Sol / TS source. Without suffix awareness,
+		// every short-qname mention drops into QnameDiverged even when
+		// it is unambiguously the same symbol. With suffix awareness,
+		// the mention resolves as long as its dot-segments match the
+		// tail of the store qname case-insensitively.
+		//
+		// Receiver-style mentions like "h.vault.Deposit" (where `h` is
+		// a local variable, not a package) are *not* covered by V2 —
+		// the leading variable segment defeats segment-aligned suffix
+		// match. They still surface in QnameDiverged so the V3
+		// "first-segment is a likely variable" heuristic has a hit list
+		// to design against.
+		if isQnameSuffix(n.QualifiedName, mention) {
+			return true
+		}
 	}
 	return false
+}
+
+// isQnameSuffix reports whether `mention` is a segment-aware
+// case-insensitive suffix of `qname`. Both inputs are dot-separated;
+// the mention's segments must match the last len(mention.segments)
+// segments of qname.
+//
+// Example matches:
+//
+//	qname="service.Vault.Deposit", mention="Vault.Deposit" → true
+//	qname="service.Vault.Deposit", mention="vault.deposit" → true (case-fold)
+//	qname="service.Vault.Deposit", mention="Deposit"       → true (1-seg suffix)
+//
+// Example non-matches:
+//
+//	qname="service.Vault.Deposit", mention="h.vault.Deposit" → false
+//	  (4 segments needed in qname, only 3 present)
+//	qname="service.Vault.Deposit", mention="Vault.Withdraw" → false
+//	  (last segment differs)
+//	qname="service.Vault.Deposit", mention="service.Vault"   → false
+//	  (V2 is suffix-only; prefix match would be a separate question
+//	   about partial qualification, which is out of scope here.)
+func isQnameSuffix(qname, mention string) bool {
+	qSegs := strings.Split(qname, ".")
+	mSegs := strings.Split(mention, ".")
+	if len(mSegs) == 0 || len(mSegs) > len(qSegs) {
+		return false
+	}
+	offset := len(qSegs) - len(mSegs)
+	for i, m := range mSegs {
+		if !strings.EqualFold(qSegs[offset+i], m) {
+			return false
+		}
+	}
+	return true
 }
