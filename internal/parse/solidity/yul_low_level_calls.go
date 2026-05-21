@@ -71,6 +71,15 @@ func (v *declVisitor) runYulLowLevelCalls() {
 	// …)` self-delegate sites map to the enclosing callable so we
 	// can mark HasSelfDelegatecallDead alongside HasLowLevelCall.
 	yulSelfDelegateDead := map[string]bool{}
+	// W-C W10 V23 (2026-05-21): same symmetry for Yul `call` and
+	// `staticcall` — `call(gas(), address(), …)` / `staticcall(gas(),
+	// address(), …)` re-enter the same contract through the EVM
+	// message-call boundary, parallel to the Sol-level
+	// `payable(this).call(...)` caught by V8. Without this set the
+	// Yul self-call path silently lost HasSelfReentrantCall while
+	// the V10 path captured the delegatecall variant — a left/right
+	// asymmetry inside the same walker.
+	yulSelfReentrant := map[string]bool{}
 	for {
 		m := matches.Next()
 		if m == nil {
@@ -118,6 +127,16 @@ func (v *declVisitor) runYulLowLevelCalls() {
 			if opName == "delegatecall" && isYulSelfAddress(targetArg, v.src) {
 				yulSelfDelegateDead[fnID] = true
 			}
+			// W-C W10 V23 (2026-05-21): Yul self-call (excluding
+			// delegatecall, which has its own dead-weight marker
+			// above). `call(gas(), address(), …)` and
+			// `staticcall(gas(), address(), …)` re-enter the same
+			// contract — security tooling consumes
+			// HasSelfReentrantCall on these the same way it does on
+			// the Sol cast walker's V8 path.
+			if (opName == "call" || opName == "staticcall") && isYulSelfAddress(targetArg, v.src) {
+				yulSelfReentrant[fnID] = true
+			}
 			receiverName := extractYulReceiverName(targetArg, v.src)
 			if receiverName == "" {
 				continue
@@ -140,7 +159,7 @@ func (v *declVisitor) runYulLowLevelCalls() {
 			})
 		}
 	}
-	if len(hasLowLevel) == 0 && len(yulSelfDelegateDead) == 0 {
+	if len(hasLowLevel) == 0 && len(yulSelfDelegateDead) == 0 && len(yulSelfReentrant) == 0 {
 		return
 	}
 	for i := range v.nodes {
@@ -149,6 +168,9 @@ func (v *declVisitor) runYulLowLevelCalls() {
 		}
 		if yulSelfDelegateDead[v.nodes[i].ID] {
 			v.nodes[i].HasSelfDelegatecallDead = true
+		}
+		if yulSelfReentrant[v.nodes[i].ID] {
+			v.nodes[i].HasSelfReentrantCall = true
 		}
 	}
 }
