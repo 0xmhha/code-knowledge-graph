@@ -134,4 +134,16 @@ type Node struct {
 	// enters fallback / receive on certain edge paths) so security
 	// tooling can pick either signal.
 	HasSelfDelegatecallDead bool `json:"has_self_delegatecall_dead,omitempty"`
+	// HasHighLevelSelfCall (W-C W10 V19, 2026-05-21): true when a
+	// callable performs a *typed* self-call — `this.foo()`,
+	// `MyContract(address(this)).foo()`, or `IFoo(address(this)).bar()`
+	// (and equivalents through cast chains). Unlike
+	// HasSelfReentrantCall (which keys on low-level `.call /
+	// .delegatecall / .transfer / .send` to a self-cast receiver),
+	// this marker surfaces *high-level* dispatch self-calls: typed
+	// invocations through the EVM message-call boundary that still
+	// allow re-entrancy. The two markers are independent — a callable
+	// can have either, both, or neither — and security tooling
+	// consumes both to characterise the full re-entrancy surface.
+	HasHighLevelSelfCall bool `json:"has_high_level_self_call,omitempty"`
 }

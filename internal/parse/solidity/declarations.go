@@ -250,6 +250,14 @@ func (v *declVisitor) visit() {
 	// cast-shape low-level calls. Complements the V4 Pass-2 mark
 	// for bare-identifier address-typed receivers.
 	v.runExternalCallCastMarker()
+	// W10 V19 (2026-05-21): mark HasHighLevelSelfCall=true on callables
+	// that perform a typed self-call — `this.foo()`,
+	// `MyContract(address(this)).foo()`, `IFoo(address(this)).bar()`,
+	// or nested cast chains that bottom out at `this`. Parallel to
+	// the low-level V8/V18 surface but independent: the EVM message-
+	// call boundary still applies, so the callee can re-enter through
+	// typed dispatch just as effectively as through `.call(...)`.
+	v.runHighLevelSelfCallMarker()
 	// W10 V6 (2026-05-19): queue PendingRefs for chained-call
 	// shape (`getTarget().call(...)`). Pass 2 looks up the inner
 	// function's first return type via funcReturnTypes and marks
