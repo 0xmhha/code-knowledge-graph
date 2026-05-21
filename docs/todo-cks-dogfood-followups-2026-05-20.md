@@ -232,9 +232,18 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 - [x] **C2 — W10 V17** ✅ `b1dd31a` modifier-scope self-cast 회귀 가드.
 - [x] **C3 — W10 V18** ✅ `8539446` call-options chained syntax (`{value:..., gas:...}`) self-cast. *실제 코드 수정 + fixture + test*. tree-sitter parent chain probe로 wrapper 이름(`struct_expression`) 발견 후 walker에 hop 추가.
 
-- [ ] **C4** W-C 시리즈 다음 후보 — W10은 shape + 현대 syntax 완결. 다른 axis 후보:
-  - **W10 V19+ syntax**: interface dispatch (`IFoo(this).bar()`), contract-type cast (`MyC(this).foo()`), high-level `this.foo()` 직접 호출 (low-level 아닌 typed call도 self-reentrant 가능)
-  - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
-  - **W9 V***: inheritance-aware storage slot layout 변형
-  - **W8 V***: function-typed state-var의 cross-contract assignment
+- [x] **C4 — W10 V19** ✅ `6995184` high-level self-call marker. 새 `HasHighLevelSelfCall` field 추가 + walker `runHighLevelSelfCallMarker` + 재귀 `isSelfRef` helper. 3 shape (bare `this.foo()` / `MyC(this).foo()` / `IFoo(this).bar()`) 모두 lockdown.
+
+  **발견:** Sol grammar는 `TypeName(arg)`와 `funcName(arg)`를 같은 `call_expression`으로 parse — type cast 식별 불가. *leading identifier upper-case + single call_argument* 휴리스틱으로 false positive 제한. (대문자로 시작하는 user-defined helper에 한해 false positive 가능 — security marker는 false positive < false negative 정책.)
+
+  **W10 syntax-axis 진화 정리:**
+  - V18 (`8539446`): `.call{value:..., gas:...}` chained low-level (struct_expression hop)
+  - V19 (`6995184`): high-level typed dispatch (new marker, isSelfRef 재귀 helper)
+
+- [ ] **C5** W-C 시리즈 다음 후보 — W10 self-call shape + syntax 양 axis 모두 cover. 다른 axis:
+  - **W10 V20+**: low-level + high-level *둘 다 부착되는 hybrid* 케이스 (예: `try IFoo(this).bar() { ... }` — V16 + V19 교차) — fixture 위주 작업, 0줄 코드
+  - **W10 V21+**: chained-receiver shape (`getTarget(this).foo()` — `isSelfRef`의 call_expression 재귀가 잡지 못하는 케이스)
+  - **W7 V***: modifier composition variant
+  - **W9 V***: inheritance-aware storage slot layout
+  - **W8 V***: function-typed state-var cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
