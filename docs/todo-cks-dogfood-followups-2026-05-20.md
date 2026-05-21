@@ -258,10 +258,26 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   | V20 | `e009dff` | lock | try × high-level cross-axis |
   | V22 | `1668afb` | **fix** | high-level `.foo{...}` struct_expression hop |
 
-- [ ] **C7** W-C 시리즈 다음 후보:
-  - **W10 V21 (deferred)**: chained-receiver `getTarget(this).foo()` — *negative lockdown* (의도된 false negative 명시) 또는 *별도 marker* 분리 결정 필요
-  - **W10 V23+ other syntax**: library function call (`L.foo(this)` where this is passed as first arg by using-for), assembly self-call (Yul `call(gas(), address(), ...)` with self receiver), event emit ‖ 보안 의미 미미
+- [x] **C7 — W10 V21** ✅ `e2ff5f2` chained-receiver negative lockdown. `getTarget(this).foo()` (lower-case identifier)가 `isSelfRef` 휴리스틱으로 거부됨을 *명시 잠금* — 의도된 false negative trade.
+
+  **W10 self-call 시리즈 최종 (V14-V22):**
+  | V | SHA | Type | 내용 |
+  |---|---|---|---|
+  | V14 | `89f86f5` | lock | receive/fallback self-cast |
+  | V15 | `55bf70d` | lock | constructor self-cast |
+  | V16 | `4fdce7d` | lock | try-wrapped self-cast |
+  | V17 | `b1dd31a` | lock | modifier-scope self-cast |
+  | V18 | `8539446` | **fix** | low-level `.call{...}` struct_expression hop |
+  | V19 | `6995184` | **feat** | `HasHighLevelSelfCall` new marker |
+  | V20 | `e009dff` | lock | try × high-level cross-axis |
+  | V21 | `e2ff5f2` | **neg-lock** | chained-receiver intentional false negative |
+  | V22 | `1668afb` | **fix** | high-level `.foo{...}` struct_expression hop |
+
+  *9개 commit, shape × syntax × heuristic-edge 3-axis cover, 1 negative lock.*
+
+- [ ] **C8** W-C 시리즈 다음 axis (W10 완결):
+  - **W10 V23+ other syntax**: library function call (`L.foo(this)` with using-for `using L for IFoo`), assembly self-call (Yul `call(gas(), address(), ...)` with self receiver)
   - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
-  - **W9 V***: inheritance-aware storage slot layout
+  - **W9 V***: inheritance-aware storage slot layout (W9 V15/V16에서 cross-file 처리; library/interface slot interaction은 미커버)
   - **W8 V***: function-typed state-var cross-contract assignment
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
