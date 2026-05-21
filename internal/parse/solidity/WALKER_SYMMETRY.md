@@ -57,6 +57,20 @@ drift candidate).
 | `this.foo{value:x}()` | — | — | ✓ HasHighLevelSelfCall (V22 hop) | V22 |
 | `getTarget(this).foo()` (lower-case helper) | — | — | **✗ intentional false negative** | V21 (negative lock) |
 
+### EdgeOverrides emit — function vs modifier walker symmetry
+
+The W2 function-override walker and the W7.3 modifier-override walker
+share `funcByQName` and `resolveOverridesRef`, but emit through two
+*separate* AST-walk paths (`emitFunctionDeclWithOverride` vs
+`runModifierOverride`). Both walks branch on `len(override.explicitParents)`:
+bare `override` → `dispatchKindOverride`, explicit `override(A, B)` →
+one `dispatchKindOverrideExplicit` PendingRef per listed parent.
+
+| Override shape | Function walker | Modifier walker | Locked by |
+|---|---|---|---|
+| Bare `override` (single parent) | ✓ EdgeOverrides | ✓ EdgeOverrides | W2 / W7.3 V0 |
+| Explicit `override(A, B)` (diamond) | ✓ one EdgeOverrides per parent | ✓ one EdgeOverrides per parent | W2 / **V25** |
+
 ### Enclosing-callable shape — `nearestFunctionQnameAndStart` accepted kinds
 
 A marker that keys on the enclosing callable ID should fire regardless of
@@ -127,6 +141,7 @@ series actually surfaced, not theoretical concerns.
 | 1 | struct_expression hop | cast (V18) | high-level (V22) | Both walkers now traverse the same wrapper |
 | 2 | self-receiver detection | Yul delegatecall (V10) | Yul call / staticcall (V23) | All three opcodes share `isYulSelfAddress` |
 | 3 | callable shape coverage gap | cast (V14/V15/V17 — 4 shapes) | high-level (V19 — only function body) | V24 added the constructor / receive / modifier cross-axis fixture so all four shapes are now locked on both walker columns |
+| 4 | explicit-list override branch coverage | function (W2 — tested) | modifier (`runModifierOverride.dispatchKindOverrideExplicit` — shipped without a lockdown test) | V25 added `testdata/modifier_composition/explicit_override.sol` with a diamond `override(A, B)` parent list; the test asserts both EdgeOverrides edges and that src/dst are NodeModifier |
 
 If you fix a new drift, append a row. The catalogue itself is the lesson —
 *reading it before adding a walker is how the next drift gets prevented*.

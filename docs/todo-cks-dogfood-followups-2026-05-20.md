@@ -345,8 +345,13 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
   **WALKER_SYMMETRY.md drift catalogue 3 rows 모두 close.**
 
-- [ ] **C14** W-C 다음 후보:
-  - **W9 V19**: library type-scope (state-var 불가하지만 struct 정의 가능 — type slot 처리)
-  - **W7**: modifier composition variant (`override` + `virtual` + base call interaction)
+- [x] **C14 — W7.4 V25** ✅ explicit-list modifier override lockdown. `runModifierOverride`의 `dispatchKindOverrideExplicit` 분기가 *코드는 있는데 test 없음* (silent regression 위험). 다이아몬드 `override(A, B)` fixture + EdgeOverrides 2개 edge 검증. WALKER_SYMMETRY.md에 (1) 함수 vs modifier override emit 대칭 행, (2) drift catalogue row 4 추가. Walker 0줄 변경.
+
+  **Probe로 드러난 추가 drift (별도 작업 후보):**
+  - **modifier SubKind = ""** (function W2는 SubKind=`virtual`/`override`/`virtual_override` set, modifier는 empty) — *intentional negative lock* 또는 *walker fix* 양자택일. consumer 측 활용 시나리오 정해진 뒤 진행.
+
+- [ ] **C15** W-C 다음 후보 (V25 이후):
+  - **W9 V19**: library type-scope (state-var 불가하지만 struct 정의 가능 — type slot 처리). probe 결과 모호 — 시나리오 자체가 negative case일 가능성.
   - **W8**: function-typed state-var cross-contract param propagation
+  - **W7.5**: modifier SubKind drift (위 probe 결과 lock)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
