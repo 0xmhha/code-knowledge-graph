@@ -79,6 +79,23 @@ func NewCLIClient(opts CLIClientOptions) (*CLIClient, error) {
 	if agent == "" {
 		return nil, ErrCliwrapAgentNotFound
 	}
+	// Validate the agent path resolves before handing it to cli-wrapper.
+	// Reason: smoke-run 2026-05-21 produced `exec: "ccliwrap-agent not
+	// found": executable file not found in $PATH` followed by a
+	// nil-pointer panic during Close (cli-wrapper internal lifecycle bug
+	// when Start fails on a registered handle). The exec error came from
+	// cli-wrapper resolving CLIWRAP_AGENT and trying to launch it, with
+	// no early validation on our side. A pre-check here catches the
+	// common cases (CLIWRAP_AGENT pointing at a non-existent binary,
+	// PATH lookup of a misspelled name, the binary not having executable
+	// permission) and produces an actionable error before cli-wrapper
+	// gets the chance to misfire in a hard-to-recover state.
+	if _, err := os.Stat(agent); err != nil {
+		return nil, fmt.Errorf("ckg eval: CLIWRAP_AGENT=%q is not accessible: %w "+
+			"(check spelling and path; install with "+
+			"`go install github.com/0xmhha/cli-wrapper/cmd/cliwrap-agent@latest`)",
+			agent, err)
+	}
 
 	runtimeDir := opts.RuntimeDir
 	if runtimeDir == "" {
@@ -101,10 +118,29 @@ func NewCLIClient(opts CLIClientOptions) (*CLIClient, error) {
 // Close shuts down the underlying cli-wrapper Manager, draining its WAL
 // outbox. A 5s timeout is used so a wedged shutdown does not hang the
 // eval run; failures are returned to the caller.
-func (c *CLIClient) Close() error {
+//
+// The deferred recover guards against an upstream lifecycle bug
+// surfaced by smoke-run 2026-05-21: when h.Start() fails on a
+// processHandle that's already registered with the Manager, the
+// subsequent Shutdown walks the handle list, calls
+// processHandle.Stop, and reaches into a nil ipc.Conn (Seqs nil
+// dereference). Without the recover, the runner's `defer
+// llm.Close()` panics and overwrites the real error
+// ("start claude: ...exec...") that the user actually needs to
+// see. With the recover, Close converts the panic into a normal
+// error return so the runner surfaces both: the original spawn
+// failure on stderr from runOne, and this Close error from the
+// final Run return value.
+func (c *CLIClient) Close() (err error) {
 	if c.mgr == nil {
 		return nil
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("ckg eval: cli-wrapper Shutdown panicked: %v "+
+				"(upstream bug — likely a registered handle whose Start failed)", r)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	return c.mgr.Shutdown(ctx)

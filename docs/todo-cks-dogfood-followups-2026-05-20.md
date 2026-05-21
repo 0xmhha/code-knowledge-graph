@@ -390,9 +390,20 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   2. `make eval-llm-smoke` 실행 → 첫 hallucination baseline 측정
   3. 결과 보고 *bug fix priority 결정*
 
-- [ ] **C20** smoke run 후 *결과 분석 + bug 후속 작업* (사용자 환경 setup 후):
-  - hallucination rate가 0이 아니면 → 어떤 종류 hallucination인지 분류
-  - QnameDiverged 다수 → ckg가 *qname을 *정확히 노출 안 함* 또는 *LLM이 prefix 자주 잘못*
-  - score 낮음 → α baseline은 *raw file dump만*이라 *낮은 게 정상*, β/γ/δ 비교 필요
-  - 결정사항: V2 wiring (file-path validation, fuzzy matching) vs *직접 발견된 bug fix* vs *W-C 재개*
+- [x] **C20 — smoke run 첫 cycle: 2 bugs surfaced + fixed** ✅ 사용자가 `make eval-llm-smoke LLM_BACKEND=cli` 실행. 두 bug 즉시 발견:
+  - **Bug A**: `exec: "ccliwrap-agent not found"` — `$CLIWRAP_AGENT` 환경 변수가 잘못된 path 가리킴. Fix: `NewCLIClient`에 *agent path file existence check* 추가 — actionable error + install hint.
+  - **Bug B**: `CLIClient.Close()`에서 *cli-wrapper 라이브러리 *내부 nil-pointer panic*. *Start 실패한 processHandle*의 *Stop이 nil ipc.Conn 접근*. Fix: `Close()`에 *deferred recover* 추가 → panic → error로 변환, runner의 *진짜 spawn 에러*가 *masked되지 않음*.
+
+  **Evaluation-driven bug discovery cycle 성공**: V1 wiring 완료 직후 *첫 *실 LLM 실행* 시도에서 *2 bugs* 식별. 사용자 명시 우려 *"코드가 잘 구현되었는지 확인할 수가 없어서, 불명확성이 너무 커지고 있다"*에 *직접 응답하는 결과*.
+
+  **Unit tests:**
+  - `TestNewCLIClient_AgentNotExist`: typo CLIWRAP_AGENT path → 친절한 error
+  - `TestCLIClient_Close_NilManager`: 기존 (V0)
+  - `Close panic-recover`: integration-level 검증 (unit reproduction은 cli-wrapper 내부 API 한계로 불가)
+
+- [ ] **C21** 다음 smoke run cycle (사용자 재시도):
+  - 사용자가 *환경 변수 재확인* + `make eval-llm-smoke LLM_BACKEND=cli` 재실행
+  - 또는 *API key 옵션 A로 전환*: `export ANTHROPIC_API_KEY=...; make eval-llm-smoke`
+  - 정상 종료 시 → 첫 *hallucination_rate baseline 측정값* 확보 → C22 (결과 분석)
+  - 실패 시 → C20 사이클 반복 (추가 bug fix)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션

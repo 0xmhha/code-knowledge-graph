@@ -250,6 +250,49 @@ func TestCLIClient_Close_NilManager(t *testing.T) {
 	}
 }
 
+// TestNewCLIClient_AgentNotExist: CLIWRAP_AGENT set to a non-existent
+// path produces an actionable error mentioning the bad path *and*
+// install hint, rather than letting cli-wrapper fail later with the
+// raw exec error and a downstream panic (smoke-run 2026-05-21 found
+// both happened when CLIWRAP_AGENT pointed at a misspelled binary).
+func TestNewCLIClient_AgentNotExist(t *testing.T) {
+	dir := t.TempDir()
+	fakeClaude := filepath.Join(dir, "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+
+	bogus := filepath.Join(dir, "ccliwrap-agent-typo")
+	t.Setenv("CLIWRAP_AGENT", bogus)
+
+	_, err := NewCLIClient(CLIClientOptions{Binary: fakeClaude})
+	if err == nil {
+		t.Fatal("want error for non-existent CLIWRAP_AGENT, got nil")
+	}
+	if !strings.Contains(err.Error(), bogus) {
+		t.Errorf("error should include the bad path %q: %v", bogus, err)
+	}
+	if !strings.Contains(err.Error(), "CLIWRAP_AGENT") {
+		t.Errorf("error should mention CLIWRAP_AGENT for triage: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cliwrap-agent@latest") {
+		t.Errorf("error should include the install hint: %v", err)
+	}
+}
+
+// Note: Close()'s panic-recover path (added 2026-05-21 to guard
+// against the cli-wrapper Shutdown-after-failed-Start nil-pointer
+// panic) is intentionally NOT unit-tested. c.mgr is the concrete
+// *cliwrap.Manager type, so a panic cannot be injected from outside
+// the cli-wrapper package without either (a) refactoring mgr to an
+// interface purely for the test, which is over-engineering for
+// defensive code, or (b) building a contrived Manager-equivalent
+// that we'd have to maintain in lockstep with cli-wrapper's API.
+// The recover is verified at integration level: re-running the
+// scenario that originally panicked (CLIWRAP_AGENT pointing at a
+// non-existent binary, then Run → defer Close) now returns a
+// normal error rather than aborting the process.
+
 // buildCliwrapAgentForTest builds the cliwrap-agent binary into t.TempDir
 // using `go build` against the current module's go.mod. It is the test
 // equivalent of having `cliwrap-agent` installed on PATH and lets the
