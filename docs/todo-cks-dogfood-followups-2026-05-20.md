@@ -275,9 +275,30 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
   *9개 commit, shape × syntax × heuristic-edge 3-axis cover, 1 negative lock.*
 
-- [ ] **C8** W-C 시리즈 다음 axis (W10 완결):
-  - **W10 V23+ other syntax**: library function call (`L.foo(this)` with using-for `using L for IFoo`), assembly self-call (Yul `call(gas(), address(), ...)` with self receiver)
+- [x] **C8 — W10 V23** ✅ `f90592e` Yul self-call marker symmetry. `yul_low_level_calls.go`의 좌우 비대칭 수정 — V10이 `delegatecall(gas(), address(), …)`만 처리하고 `call`/`staticcall` 누락한 것을 mirror.
+
+  **W10 시리즈 최종 (V14-V23, 10 commits) — *진짜 완결*:**
+  | V | SHA | Type | 내용 |
+  |---|---|---|---|
+  | V14 | `89f86f5` | lock | receive/fallback self-cast (Sol) |
+  | V15 | `55bf70d` | lock | constructor self-cast (Sol) |
+  | V16 | `4fdce7d` | lock | try-wrapped self-cast (Sol) |
+  | V17 | `b1dd31a` | lock | modifier-scope self-cast (Sol) |
+  | V18 | `8539446` | **fix** | low-level `.call{...}` struct_expression hop (Sol) |
+  | V19 | `6995184` | **feat** | `HasHighLevelSelfCall` new marker (Sol) |
+  | V20 | `e009dff` | lock | try × high-level cross-axis (Sol) |
+  | V21 | `e2ff5f2` | **neg-lock** | chained-receiver intentional false negative (Sol) |
+  | V22 | `1668afb` | **fix** | high-level `.foo{...}` struct_expression hop (Sol) |
+  | V23 | `f90592e` | **fix** | Yul `call`/`staticcall` self-receiver symmetry |
+
+  **3-axis 완결 coverage:**
+  - *Shape* (callable kinds): function / constructor / fallback-receive / modifier / try-wrapped — V14-V17, V20
+  - *Syntax* (call expression variants): plain `.call(...)` / `.call{...}(...)` / `this.foo()` / `MyC(this).foo()` / `IFoo(this).foo()` / `.foo{...}()` — V8 / V18 / V19 / V22
+  - *Parser* (Sol cast walker vs Yul inline assembly): V14-V22는 Sol측, V23은 Yul측
+  - *Heuristic edge* (intentional false negative): chained-receiver — V21
+
+- [ ] **C9** W-C 시리즈 다음 axis — W10 self-call surface는 *Sol + Yul 양측 완결*. 다음 axis:
   - **W7 V***: modifier composition variant (`override` + `virtual` + base call interaction)
-  - **W9 V***: inheritance-aware storage slot layout (W9 V15/V16에서 cross-file 처리; library/interface slot interaction은 미커버)
-  - **W8 V***: function-typed state-var cross-contract assignment
+  - **W9 V***: inheritance-aware storage slot layout (W9 V15/V16에서 cross-file 처리; multi-inheritance offset, library/interface slot interaction 등 미커버)
+  - **W8 V***: function-typed state-var cross-contract assignment (callback propagation)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
