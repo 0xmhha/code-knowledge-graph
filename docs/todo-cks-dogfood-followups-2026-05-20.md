@@ -320,12 +320,20 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - V18 (`5548dd5`): diamond MRO dedup (`B, C ← A`)
   - 두 fixture가 *base own-scope semantics* + *derived absolute-after-offset*의 비대칭을 *명시*
 
-- [ ] **C11** W-C 다음 후보:
-  - **W9 V19**: library state-var slot — `library L`은 *stateless*이므로 state-var 정의 불가. 다만 `library L { struct S { ... } }` 같은 type 정의는 가능. type-scope storage 처리 검증.
-  - **W9 V20**: deeper diamond (`E is D, C; D is B, A; C is A; B is A`) — C3 알고리즘의 *triangle 이상 패턴* 검증
-  - **W7**: modifier composition variant (`override` + `virtual` + base call)
-  - **W8**: function-typed state-var cross-contract assignment (callback propagation)
-  - ~~**C12 후보**: walker symmetry matrix meta tool~~ ✅ `dc05899` `internal/parse/solidity/WALKER_SYMMETRY.md` 로 land. V18/V22 + V10/V23 drift 패턴 + 6-question checklist + drift catalogue.
+- [x] **C11 — W9 V20** ✅ `48291cb` deeper-diamond MRO offset lockdown. 5-node chain (E ← C, D ← B ← A)에서 transitive dedup 정확 + slot model 명시(*root only own-scope, 모든 derived는 inheritance-folded*).
+
+  **W9 storage layout 시리즈 누적:**
+  - V17 (`3f22bb1`): two-base linear offset
+  - V18 (`5548dd5`): 3-node diamond MRO dedup
+  - V20 (`48291cb`): 5-node deeper diamond MRO transitive dedup + slot model 명시
+
+- [x] **C12 — walker symmetry matrix** ✅ `dc05899` `internal/parse/solidity/WALKER_SYMMETRY.md`. V18/V22 + V10/V23 drift 패턴 + 6-question checklist + drift catalogue.
 
 - [x] **Meta — stale `.git/index.lock` 분석** ✅ `9a22242` `docs/stale-git-lock-analysis-2026-05-21.md`. 10+회 발생 패턴 진단, 4가지 가설(gitstatusd race 가장 유력), 6가지 해결책 옵션(B git-safe wrapper 권장, C 셸 탭 정리 free), 추적 테이블. ckg source 무영향, 사용자 환경 문제.
+
+- [ ] **C13** W-C 다음 axis — W10 self-call + W9 inheritance layout 양쪽 다 마무리. 다음 후보:
+  - **W9 V19**: library type-scope (state-var 불가하지만 struct 정의 가능 — type slot 처리)
+  - **W7**: modifier composition variant (`override` + `virtual` + base call interaction)
+  - **W8**: function-typed state-var cross-contract param propagation
+  - **High-level walker shape gap closure**: W10 V14-V17의 `?` 셀 — high-level walker가 constructor / fallback-receive / modifier scope에서도 작동 검증 (3 fixture)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
