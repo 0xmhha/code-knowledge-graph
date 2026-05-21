@@ -28,6 +28,17 @@ type Result struct {
 	NumToolCalls int
 	Stale        bool
 	RawOutput    string
+
+	// Hallucination is the per-response classification of every symbol
+	// mention the LLM emitted, looked up against the same store the
+	// runner used to answer. T-04 V1 (HANDOFF.md 2026-05-11, wired
+	// 2026-05-21). Populated by runOne after scoreTask; nil store on
+	// the runOne path is the rubric-only short-circuit and produces
+	// Total=0 / Rate=0. The detailed Found/QnameDiverged/Hallucinated
+	// lists are surfaced via the report.md path, not CSV, because
+	// the lists are variable-length and would balloon CSV column
+	// count beyond what spreadsheet readers handle cleanly.
+	Hallucination HallucinationResult
 }
 
 // Run loops tasks × baselines and writes results.csv plus report.md.
@@ -111,12 +122,24 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	}
 
 	score, calls := scoreTask(t, out.OutputText)
+	// T-04 V1: classify every symbol the LLM named against the same
+	// store the runner used. Failures here would mask hallucinations
+	// rather than report them, so a store error degrades to a
+	// best-effort empty result (Total=0) instead of failing the
+	// whole task — the eval continues, just without the hallucination
+	// signal for this row. The error is surfaced in the report only
+	// when every row in a baseline has Total=0 (see WriteReport).
+	hallu, hErr := ValidateMentions(out.OutputText, store)
+	if hErr != nil {
+		fmt.Fprintf(os.Stderr, "task %s/%s: hallucination check: %v (continuing)\n", t.ID, b, hErr)
+	}
 	return Result{
 		TaskID: t.ID, Baseline: b,
 		InputTokens: out.InputTokens, OutputTokens: out.OutputTokens,
 		CachedTokens: out.CacheReadTokens + out.CacheCreateTokens,
 		Score:        score, LatencyMS: time.Since(start).Milliseconds(),
 		NumToolCalls: calls, Stale: stale, RawOutput: out.OutputText,
+		Hallucination: hallu,
 	}, nil
 }
 
@@ -282,14 +305,27 @@ func writeCSV(path string, rows []Result) error {
 	// all-zero) was impossible without re-running the eval. Trailing
 	// column position is chosen so existing CSV readers that index by
 	// field position keep working; new readers can opt in via header.
+	// hallucination_* columns added 2026-05-21 (T-04 V1). Inserted
+	// *before* raw_output so raw_output stays last — TestWriteCSV_RawOutputColumn
+	// locks that invariant because spreadsheet readers tolerate a
+	// trailing free-text column far better than a trailing numeric
+	// one. Variable-length hallucinated-symbol *list* stays out of
+	// CSV entirely; report.md carries the literal list so a single
+	// mis-spelled symbol doesn't balloon a single CSV row to many KB.
 	_ = w.Write([]string{"task_id", "baseline", "input_tokens", "output_tokens",
-		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale", "raw_output"})
+		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale",
+		"hallucination_total", "hallucination_count", "hallucination_rate",
+		"raw_output"})
 	for _, r := range rows {
 		_ = w.Write([]string{r.TaskID, string(r.Baseline),
 			strconv.Itoa(r.InputTokens), strconv.Itoa(r.OutputTokens),
 			strconv.Itoa(r.CachedTokens), fmt.Sprintf("%.4f", r.Score),
 			strconv.FormatInt(r.LatencyMS, 10), strconv.Itoa(r.NumToolCalls),
-			strconv.FormatBool(r.Stale), r.RawOutput})
+			strconv.FormatBool(r.Stale),
+			strconv.Itoa(r.Hallucination.Total),
+			strconv.Itoa(len(r.Hallucination.Hallucinated)),
+			fmt.Sprintf("%.4f", r.Hallucination.Rate),
+			r.RawOutput})
 	}
 	return nil
 }

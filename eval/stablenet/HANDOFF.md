@@ -181,25 +181,31 @@ if strings.Contains(tok, ".") && !strings.HasPrefix(tok, ".") && !strings.HasSuf
 
 **카테고리**: 환경
 **우선**: P0 — 측정 자체가 불가능
+**상태**: **인프라 ready, smoke run 미실행 (2026-05-21, C19)**
 
-### 현 상태
-- cli backend: `cliwrap-agent` 바이너리 경로 사라짐 (지난 세션에서 panic 확인)
-- api backend: `ANTHROPIC_API_KEY` 미설정 (또는 미확인)
+### 현 상태 (2026-05-21 update)
+- `make eval-llm-smoke` target 추가 — 환경변수에 따라 자동으로 backend 선택
+  - `ANTHROPIC_API_KEY` set → api backend
+  - 없으면 cli backend (claude CLI는 PATH에 있음, **`CLIWRAP_AGENT` 미설정** → block)
+- T-04 V1 wiring 완료 — backend가 가동되면 결과 CSV/Report에 hallucination metric 자동 포함
 
-### 권장 접근
+### 사용자 작업 — 한쪽 선택:
 **옵션 A — api backend (권장)**:
-1. `ANTHROPIC_API_KEY` 환경변수 설정
-2. `ckg-e val --llm-backend=api --llm=claude-sonnet-4-6` (또는 opus)
+1. `export ANTHROPIC_API_KEY=...`
+2. `make eval-llm-smoke` → ~1-2분 후 report.md 출력
 3. 토큰 분류가 정확 (input/output/cache 분리) — H1 측정에 필수
 
 **옵션 B — cli backend 복구**:
-1. cliwrap-agent 재설치: `go install github.com/0xmhha/cli-wrapper/cmd/cliwrap-agent@latest` 또는 source build
-2. `CLIWRAP_AGENT` 환경변수 설정
-3. 토큰 측정 한계는 그대로 (L1, docs only)
+1. cliwrap-agent 설치: `go install github.com/0xmhha/cli-wrapper/cmd/cliwrap-agent@latest`
+2. `export CLIWRAP_AGENT=$(which cliwrap-agent)`
+3. `make eval-llm-smoke LLM_BACKEND=cli` → claude CLI subprocess 통해 실행
+4. 토큰 측정 한계는 그대로 (L1, docs only)
 
-### Acceptance criteria
-- `ckg-e val ... --baselines=alpha --tasks=tasks/T01-*.yaml` 1 task 1 baseline 정상 종료 → results.csv 1 행 생성
+### Acceptance criteria (V0)
+- `make eval-llm-smoke` 1회 정상 종료 → `eval/results/latest/results.csv` 1 행 생성
 - raw_output 컬럼에 LLM 응답 텍스트 채워짐
+- **hallucination_total / hallucination_count / hallucination_rate 컬럼 채워짐 (T-04 V1)**
+- `report.md`의 `## Hallucination detail (T-04)` section에 *literal symbol list* 표시
 
 ### 관련 자료
 - `internal/eval/llm_cli.go`, `internal/eval/llm.go` (api backend)

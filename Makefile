@@ -145,6 +145,63 @@ eval-baseline-update:
 	@echo "eval/baseline/ refreshed from eval/results/latest/"
 	@echo "Commit the change to lock the new baseline."
 
+# eval-llm-smoke: one-shot LLM-driven eval against the synthetic corpus
+# for the *alpha* baseline only. This is the fastest path to a real
+# correctness signal — alpha appends raw files to the prompt with no
+# tools so it exercises the LLM directly without the MCP loop. Used to
+# (1) verify the LLM backend works end-to-end, (2) trigger T-04
+# hallucination measurement on a real response, (3) eyeball the output
+# before committing to the full 4-baseline run.
+#
+# Backend selection:
+#   - With ANTHROPIC_API_KEY in env → uses Anthropic API directly
+#     (LLM_BACKEND=api LLM_MODEL=claude-sonnet-4-6 by default)
+#   - Without API key → falls back to the claude CLI binary
+#     (LLM_BACKEND=cli, needs `claude` on PATH and CLIWRAP_AGENT set
+#     to a cliwrap-agent binary path — see internal/eval/llm_cli.go
+#     for setup; CKG does not install cliwrap-agent).
+#
+# Override via:
+#   make eval-llm-smoke LLM_BACKEND=api
+#   make eval-llm-smoke TASKS_GLOB='eval/tasks/synthetic-T*.yaml'
+#
+# Output: eval/results/latest/{results.csv,report.md}. Read report.md
+# Hallucination detail (T-04) section first — that's the signal this
+# target was added to surface.
+LLM_BACKEND ?= $(if $(ANTHROPIC_API_KEY),api,cli)
+LLM_MODEL ?= claude-sonnet-4-6
+TASKS_GLOB ?= eval/tasks/synthetic-T01-find-callers.yaml
+eval-llm-smoke: build-no-viewer
+	@mkdir -p eval/results/latest
+	@echo "=== ckg eval-llm-smoke ==="
+	@echo "  backend = $(LLM_BACKEND)"
+	@echo "  tasks   = $(TASKS_GLOB)"
+	@if [ "$(LLM_BACKEND)" = "cli" ] && [ -z "$(CLIWRAP_AGENT)" ]; then \
+	    echo ""; \
+	    echo "ERROR: LLM_BACKEND=cli requires CLIWRAP_AGENT to point at the"; \
+	    echo "  cliwrap-agent binary (https://github.com/0xmhha/cli-wrapper)."; \
+	    echo "  Either:"; \
+	    echo "    1. Set ANTHROPIC_API_KEY to use the API backend instead, OR"; \
+	    echo "    2. Install cliwrap-agent and set CLIWRAP_AGENT=/path/to/agent"; \
+	    exit 1; \
+	fi
+	@if [ ! -d eval/.synthetic-data ]; then \
+	    echo "Building synthetic graph (one-time)..."; \
+	    ./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go; \
+	fi
+	./bin/ckg eval \
+	    --tasks='$(TASKS_GLOB)' \
+	    --graph=eval/.synthetic-data \
+	    --baselines=alpha \
+	    --llm-backend=$(LLM_BACKEND) \
+	    --llm=$(LLM_MODEL) \
+	    --out=eval/results/latest
+	@echo ""
+	@echo "=== Report ==="
+	@cat eval/results/latest/report.md
+	@echo ""
+	@echo "=== Done. Hallucination detail above (T-04 V1). ==="
+
 # lint-viewer: ESLint over web/viewer-next/. The primary concern is
 # react-hooks/rules-of-hooks — viewer once shipped a regression where a
 # useCallback was placed below an early return, producing React error

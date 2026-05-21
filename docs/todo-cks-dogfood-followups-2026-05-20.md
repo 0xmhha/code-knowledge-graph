@@ -383,8 +383,16 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - file 경로 토큰 검증 (현재 symbol mention만)
   - misspell 처리 (fuzzy matching)
 
-- [ ] **C19** W-C lockdown vs LLM eval *어느 방향 우선?* — 사용자 결정 사항:
-  - **(A) C18 V1 wiring**: hallucination check를 runner에 통합 → JSON 출력 → ckg eval 실 호출 + bug discovery cycle
-  - **(B) W-C 시리즈 재개**: W9 V29 walker fix, W7.5, W9 V19, WALKER_SYMMETRY refactor 등
-  - 권장: A — *사용자 명시 우려 (0% error 측정)*의 *직접적 다음 step*
+- [x] **C19 — T-04 V1 wiring** ✅ 사용자 명시 우선순위 (*"evaluation 빠르게 진행"*)에 따라 진행. `Result.Hallucination HallucinationResult` field 추가, `runOne()` 끝에서 `ValidateMentions(out.OutputText, store)` 호출, CSV/Report에 metric 통합. `make eval-llm-smoke` target 추가 — API key 있으면 api backend 자동 선택, 없으면 cli backend (CLIWRAP_AGENT 필요). Walker 0줄 변경.
+
+  **다음 step (사용자 작업 필요):**
+  1. `ANTHROPIC_API_KEY` 설정 *또는* `cliwrap-agent` 설치 후 `CLIWRAP_AGENT` 설정
+  2. `make eval-llm-smoke` 실행 → 첫 hallucination baseline 측정
+  3. 결과 보고 *bug fix priority 결정*
+
+- [ ] **C20** smoke run 후 *결과 분석 + bug 후속 작업* (사용자 환경 setup 후):
+  - hallucination rate가 0이 아니면 → 어떤 종류 hallucination인지 분류
+  - QnameDiverged 다수 → ckg가 *qname을 *정확히 노출 안 함* 또는 *LLM이 prefix 자주 잘못*
+  - score 낮음 → α baseline은 *raw file dump만*이라 *낮은 게 정상*, β/γ/δ 비교 필요
+  - 결정사항: V2 wiring (file-path validation, fuzzy matching) vs *직접 발견된 bug fix* vs *W-C 재개*
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
