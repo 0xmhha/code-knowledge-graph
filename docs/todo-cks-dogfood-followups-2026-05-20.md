@@ -365,8 +365,19 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
   **V6 코멘트가 명시한 3 shapes 모두 lock 완료.** 미래 walker fix는 *batch flip* 필요.
 
-- [ ] **C17** W-C 다음 후보 (V27 이후):
-  - **W9 V19**: library type-scope (probe 결과 모호 — negative case 가능성)
-  - **W7.5**: modifier SubKind drift (cks scenario 후 design 결정)
-  - **W8 V28**: V9 코멘트 grep 후 *추가 known limitation* 발견 시 추가 negative lock
+- [x] **C17 — W9 V28** ✅ struct-internal reference-type slot fallback *characterization lock*. systematic walker-limitation grep으로 `struct_size.go` V5 코멘트 발굴 → probe로 *V5 코멘트 의도와 walker 실제 동작 divergence* 확인 + *추가 multi-contract namespace divergence* 발견. 4 contracts × 3 fields = 12 cells 모두 *현재 fallback (head=0, inner=1, tail=2)*로 lock. WALKER_SYMMETRY drift catalogue row 6 추가. Walker 0줄 변경.
+
+  **C17의 종류 차이 (V21/V26/V27과 vs V28):**
+  - V21/V26/V27: walker 코멘트가 *limitation을 명시*, test가 *그 limitation을 정확히 lock*. 즉 *코멘트 + walker behavior aligned*.
+  - V28: walker 코멘트가 *intent를 명시*, walker behavior가 *코멘트와 다름*. test는 *behavior를 lock + divergence를 명시*. 즉 *characterization* (의도가 아니라 *실제 동작* 기록).
+
+  **추가 발견 (V28에 명시):**
+  - V5 `tryComputeStructBytes`가 bytes/string/dynamic-array에 fallthrough (0, false). Struct가 structSizes에 등록 안 됨.
+  - **PrimitiveOnly struct (V11 fixture와 동일 구조)도 *내 fixture에서 1 slot fallback*** — multi-contract namespace 또는 fixed-point ordering 이슈. V11은 single-contract라 cover. 실 codebase는 multi-contract이므로 *광범위 fallback 가능성*.
+
+- [ ] **C18** W-C 다음 후보 (V28 이후):
+  - **W9 V19**: library type-scope (probe 결과 모호)
+  - **W7.5**: modifier SubKind drift (cks scenario 후)
+  - **W9 V29 walker fix**: V28에서 드러난 *multi-contract namespace / reference-type member* 두 divergence 중 *하나* fix. 작업 범위 큰 편 (~20-50줄 walker change).
+  - **WALKER_SYMMETRY refactor**: 6 rows 누적, *카테고리별 그룹화* (cross-walker drift vs test-coverage gap vs characterization)
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
