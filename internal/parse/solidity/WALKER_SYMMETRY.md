@@ -67,16 +67,17 @@ propagates transparently.
 | Callable shape | Cast walker | High-level walker | Locked by |
 |---|---|---|---|
 | `function_definition` | ✓ | ✓ (V20 cross-axis) | V14 / V20 |
-| `constructor_definition` | ✓ | ? | V15 |
-| `fallback_receive_definition` | ✓ | ? | V14 |
-| `modifier_definition` | ✓ | ? | V17 |
+| `constructor_definition` | ✓ | ✓ (V24 cross-axis) | V15 / V24 |
+| `fallback_receive_definition` | ✓ | ✓ (V24 cross-axis) | V14 / V24 |
+| `modifier_definition` | ✓ | ✓ (V24 cross-axis) | V17 / V24 |
 | try-statement (transparent walk) | ✓ | ✓ (V20) | V16 / V20 |
 
-`?` rows: the high-level walker uses the same `nearestFunctionQnameAndStart`
-helper so the marker should propagate, but there is no explicit fixture yet.
-Adding three tests (`high_level_constructor_self_call_test.go`,
-`high_level_fallback_self_call_test.go`,
-`high_level_modifier_self_call_test.go`) would close the cells.
+All five rows are now `✓ / ✓` on both walker columns. `V24` shares a
+single fixture (`testdata/yul_receiver/sol_high_level_shape_cross.sol`)
+with one contract per remaining shape — constructor / receive / modifier —
+and a single test that asserts the high-level marker fires on all three.
+The fixture also pins HasSelfReentrantCall=false to keep the high-level
+vs low-level axis separation explicit per shape.
 
 ## Checklist when adding a new walker
 
@@ -125,6 +126,7 @@ series actually surfaced, not theoretical concerns.
 |---|---|---|---|---|
 | 1 | struct_expression hop | cast (V18) | high-level (V22) | Both walkers now traverse the same wrapper |
 | 2 | self-receiver detection | Yul delegatecall (V10) | Yul call / staticcall (V23) | All three opcodes share `isYulSelfAddress` |
+| 3 | callable shape coverage gap | cast (V14/V15/V17 — 4 shapes) | high-level (V19 — only function body) | V24 added the constructor / receive / modifier cross-axis fixture so all four shapes are now locked on both walker columns |
 
 If you fix a new drift, append a row. The catalogue itself is the lesson —
 *reading it before adding a walker is how the next drift gets prevented*.
