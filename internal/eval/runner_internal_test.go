@@ -117,6 +117,104 @@ func TestExtractSymbols_FileExtensionBlacklist(t *testing.T) {
 	}
 }
 
+// TestExtractSymbols_ParenSplit locks the T-02 P0 fix surfaced by the
+// 2026-05-21 T-04 V1 first smoke run. A real Claude response of the
+// shape "Call h.vault.Deposit(req) to wire it up" produced the token
+// `h.vault.Deposit(req` because the splitter only ran FieldsFunc on
+// whitespace + a few markdown chars; parens were in the Trim set,
+// which only strips prefix/suffix and never the open-paren *inside*
+// a token. extractSymbols then classified `h.vault.Deposit(req` as a
+// hallucinated symbol because `Deposit(req` has no chance of
+// resolving in the graph.
+//
+// Promoting `(` and `)` to FieldsFunc separators splits the call
+// site from the symbol so the dotted prefix stays intact and the
+// argument list (which fails the "must contain a dot" check)
+// drops cleanly.
+func TestExtractSymbols_ParenSplit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "open paren inside token splits cleanly",
+			in:   "Call h.vault.Deposit(req) to wire it up.",
+			want: []string{"h.vault.Deposit"},
+		},
+		{
+			name: "two adjacent calls each keep their symbol",
+			in:   "service.Vault.Deposit(req) then api.Handler.HandleDeposit(ctx)",
+			want: []string{"service.Vault.Deposit", "api.Handler.HandleDeposit"},
+		},
+		{
+			name: "nested-call shape still extracts both",
+			in:   "wrap(eth.Ethereum.New(cfg))",
+			want: []string{"eth.Ethereum.New"},
+		},
+		{
+			name: "paren-only token gets dropped (no dot)",
+			in:   "(req) is just the argument",
+			want: []string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractSymbols(tc.in)
+			sort.Strings(got)
+			sort.Strings(tc.want)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("extractSymbols(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExtractSymbols_ProseAbbreviationBlacklist locks the second
+// finding of the 2026-05-21 smoke run: `e.g` from a real LLM
+// response ("e.g., service.Vault.Deposit") was classified as a
+// hallucinated symbol because it's a dot-bearing token that survives
+// the file-extension blacklist (".g" is not a known file ext).
+// isProseAbbreviation drops the common cases by case-folded lookup.
+func TestExtractSymbols_ProseAbbreviationBlacklist(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "e.g dropped",
+			in:   "e.g., service.Vault.Deposit kicks off the flow",
+			want: []string{"service.Vault.Deposit"},
+		},
+		{
+			name: "i.e dropped",
+			in:   "i.e., the entrypoint is api.Handler.HandleDeposit",
+			want: []string{"api.Handler.HandleDeposit"},
+		},
+		{
+			name: "case-folded E.g dropped",
+			in:   "E.g. pkg.Helper.Run is invoked here",
+			want: []string{"pkg.Helper.Run"},
+		},
+		{
+			name: "et.al dropped",
+			in:   "see Smith et.al for prior work; symbol is pkg.Run",
+			want: []string{"pkg.Run"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractSymbols(tc.in)
+			sort.Strings(got)
+			sort.Strings(tc.want)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("extractSymbols(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestWriteCSV_RawOutputColumn locks L2 fix (2026-05-11 VERIFICATION_REPORT
 // §5 L2-1): the writeCSV header + each row now carries the raw LLM output
 // as the 10th column so post-hoc analysis of low scores doesn't need an

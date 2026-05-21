@@ -188,14 +188,32 @@ func scoreTask(t Task, output string) (float64, int) {
 // The blacklist is conservative — it intentionally does not strip every
 // dotted token, only those that look like file paths or stand-alone file
 // names. Genuine `pkg.Func` identifiers stay in the output.
+//
+// 2026-05-21 (T-04 V1 first smoke-run, T-02 P0): the splitter previously
+// only treated parens as a *trim* set, which Trim() only applies to
+// prefix/suffix. A real LLM response of "Call h.vault.Deposit(req)
+// directly" produced the token `h.vault.Deposit(req` — paren *inside*
+// the token never split. extractSymbols then classified it as a
+// hallucination (no node named `Deposit(req`). Promoting `(` and `)`
+// to FieldsFunc separators splits the call site from the symbol so
+// "h.vault.Deposit" stays in the output cleanly and "(req" / "req"
+// gets discarded by the "must contain a dot" filter.
+//
+// Prose-abbreviation blacklist (e.g., i.e., et.al, ...) is applied
+// next. LLMs use these in explanatory text and they all match the
+// dot-bearing shape extractSymbols looks for. isProseAbbreviation
+// drops them by case-folded lookup.
 func extractSymbols(s string) []string {
 	out := []string{}
 	for _, tok := range strings.FieldsFunc(s, func(r rune) bool {
-		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"'
+		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"' ||
+			r == '(' || r == ')'
 	}) {
 		// Normalise pointer-receiver sigils + bracket/punct wrappers before
 		// the dot-position check, so `*pkg.Func.` or `[pkg.Func]` both
-		// reduce to `pkg.Func`.
+		// reduce to `pkg.Func`. Parens stay in the Trim set as a defensive
+		// belt-and-suspenders — if a future splitter change removes paren
+		// separation, Trim still cleans simple wrappers.
 		tok = strings.Trim(tok, ".:;()[]*&")
 		if !strings.Contains(tok, ".") || strings.HasPrefix(tok, ".") || strings.HasSuffix(tok, ".") {
 			continue
@@ -207,9 +225,29 @@ func extractSymbols(s string) []string {
 		if dot := strings.LastIndex(tok, "."); dot >= 0 && isFileExtension(tok[dot:]) {
 			continue
 		}
+		// Prose abbreviation blacklist (T-04 V1 finding 2026-05-21).
+		// `e.g`, `i.e`, `et.al`, `vs.something` shapes that LLMs use in
+		// explanatory text but that have no chance of resolving in the
+		// graph. Case-folded lookup so `E.g` is filtered the same as
+		// `e.g`.
+		if isProseAbbreviation(tok) {
+			continue
+		}
 		out = append(out, tok)
 	}
 	return out
+}
+
+// isProseAbbreviation matches common explanatory-prose tokens that
+// extractSymbols' "dot-bearing identifier" filter would otherwise
+// catch. The set is intentionally small and case-folded — adding
+// rarer abbreviations is cheap. Keys are stored already case-folded.
+func isProseAbbreviation(tok string) bool {
+	switch strings.ToLower(tok) {
+	case "e.g", "i.e", "et.al", "etc.", "vs.":
+		return true
+	}
+	return false
 }
 
 // isFileExtension reports whether ext (including the leading dot) is a

@@ -401,9 +401,30 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - `TestCLIClient_Close_NilManager`: 기존 (V0)
   - `Close panic-recover`: integration-level 검증 (unit reproduction은 cli-wrapper 내부 API 한계로 불가)
 
-- [ ] **C21** 다음 smoke run cycle (사용자 재시도):
-  - 사용자가 *환경 변수 재확인* + `make eval-llm-smoke LLM_BACKEND=cli` 재실행
-  - 또는 *API key 옵션 A로 전환*: `export ANTHROPIC_API_KEY=...; make eval-llm-smoke`
-  - 정상 종료 시 → 첫 *hallucination_rate baseline 측정값* 확보 → C22 (결과 분석)
-  - 실패 시 → C20 사이클 반복 (추가 bug fix)
+- [x] **C21 — 첫 *실 measurement 확보 + 2 bugs surfaced + fixed*** ✅ 사용자가 cli backend setup 재조정 후 실행 성공:
+
+  **첫 baseline:**
+  | Metric | 값 |
+  |---|---|
+  | Hallucination rate | **28.6%** (2/7 mentions) |
+  | Score | 0.476 |
+  | Mentions | 7 |
+  | Hallucinated | `h.vault.Deposit(req`, `e.g` |
+  | QnameDiverged | `Vault.deposit` |
+
+  **2 bugs fixed:**
+  - **T-02 P0 (extractSymbols paren split)**: `h.vault.Deposit(req`가 *paren inside token*에서 *split 안 됨*. `FieldsFunc` separator에 `(`/`)` 추가. unit test 4건 PASS.
+  - **Prose abbreviation noise**: `e.g`, `i.e`, `et.al`, `etc.`, `vs.` blacklist. `isProseAbbreviation` helper 추가. unit test 4건 PASS.
+
+  **V0 design 한계 (V2 후보):**
+  - `Vault.deposit` (LLM 짧은 표기) vs `service.Vault.Deposit` (store 정식 qname) — *suffix match*가 cover 안 됨. `QnameDiverged false positive`. *수정 시 mention이 *store qname의 *case-insensitive suffix*면 *non-diverged*.
+
+- [ ] **C22** 사용자 재실행 권장: *동일 fixture 재측정으로 *bug fix effectiveness 확인*. 기대: hallucination rate *28.6% → 0%* (두 false positive 모두 제거). 실 result:
+  - rate 0% → P0 fix 성공 *증명*
+  - rate >0% → 새 finding 또는 *V0 design 한계 (suffix match 등)이 표면화*
+
+- [ ] **C23** V2 enhancement 후보 (C22 결과에 따라):
+  - **suffix match** for QnameDiverged false positive
+  - **L1 token counting audit** (smoke run에서 input=5 tokens 비현실적)
+  - **β/γ/δ baseline run** — α만으로는 *raw dump 영향*과 *tool-augmented 영향* 분리 불가
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
