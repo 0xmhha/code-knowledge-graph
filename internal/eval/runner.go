@@ -122,9 +122,26 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	// For β/γ/δ we *pre-call* the chosen tool against Store and append the
 	// JSON result to the user prompt as if the LLM had received it. This
 	// preserves the token-savings hypothesis test even without a tool loop.
+	//
+	// β fix (2026-05-22): the original SubgraphByQname("", 99) call relied
+	// on an empty qname expanding to the whole graph. It does not — the
+	// BFS-by-qname path resolves the empty string to zero root nodes and
+	// returns an empty subgraph, so β's LLM received the literal string
+	// "[]" as its context and answered something like "the get_subgraph
+	// result is empty, so I can't find any symbols." Score=0.000 on the
+	// first 4-axis smoke run was the symptom.
+	//
+	// The intent of β was "whole-graph dump in one pre-call", so we now
+	// substitute TopNodes("pagerank", 200) + AllEdges() — bounded enough
+	// to be safe on large graphs (synthetic fixtures fit comfortably
+	// under 200 nodes) and meaningful because pagerank's top slots are
+	// the hub symbols a tool-augmented LLM would have asked about first.
 	if b == BaselineBeta {
-		if sub, _, err := store.SubgraphByQname("", 99); err == nil {
-			user += "\n\n--- get_subgraph result ---\n" + jsonString(sub)
+		nodes, nErr := store.TopNodes("pagerank", 200)
+		edges, eErr := store.AllEdges()
+		if nErr == nil && eErr == nil {
+			user += "\n\n--- get_subgraph result ---\nNodes:\n" + jsonString(nodes) +
+				"\nEdges:\n" + jsonString(edges)
 		}
 	}
 	if b == BaselineDelta {

@@ -122,7 +122,7 @@ eval: build-no-viewer
 	@# changes. testdata/synthetic/ is the fixed ground truth; eval/.synthetic-data/
 	@# is the regenerable index.
 	@echo "=== ckg eval: step 5/5 — eval-retrieval (LLM-free recall/precision) ==="
-	./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go
+	./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go,ts,sol
 	./bin/ckg eval-retrieval --graph=eval/.synthetic-data --fixtures=eval/retrieval \
 	    --output=eval/results/latest/retrieval.json
 	@echo
@@ -209,10 +209,16 @@ eval-llm-smoke: build-no-viewer
 	    echo "    2. Install cliwrap-agent and set CLIWRAP_AGENT=/path/to/agent"; \
 	    exit 1; \
 	fi
-	@if [ ! -d eval/.synthetic-data ]; then \
-	    echo "Building synthetic graph (one-time)..."; \
-	    ./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go; \
-	fi
+	@# Rebuild every time. The graph is small (synthetic fixture) and
+	@# the language set / fixture content changes from time to time —
+	@# a stale eval/.synthetic-data was the smoking gun behind the
+	@# `VaultService.depositFn` hallucination chain in the first
+	@# 4-axis smoke run (the TS symbol existed in source but the
+	@# graph was Go-only). One rebuild ≈ one second; the cost is
+	@# orders of magnitude smaller than the LLM call.
+	@rm -rf eval/.synthetic-data
+	@echo "Building synthetic graph..."
+	./bin/ckg build --src=testdata/synthetic --out=eval/.synthetic-data --lang=go,ts,sol
 	./bin/ckg eval \
 	    --tasks='$(TASKS_GLOB)' \
 	    --graph=eval/.synthetic-data \

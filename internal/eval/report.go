@@ -24,7 +24,7 @@ import (
 // columns stay structurally consistent across shot counts.
 func WriteReport(path string, results []Result) error {
 	type bAgg struct {
-		scores, halluRates, tokens, halluTotals []float64
+		scores, halluRates, inputTokens, totalTokens, halluTotals []float64
 	}
 	byBaseline := map[Baseline]*bAgg{}
 	for _, r := range results {
@@ -35,25 +35,39 @@ func WriteReport(path string, results []Result) error {
 		}
 		a.scores = append(a.scores, r.Score)
 		a.halluRates = append(a.halluRates, r.Hallucination.Rate)
-		a.tokens = append(a.tokens, float64(r.InputTokens))
+		a.inputTokens = append(a.inputTokens, float64(r.InputTokens))
+		// 2026-05-22 (post-4-axis smoke run): the first cli-backend
+		// multi-shot run revealed that Claude Code's prompt cache eats
+		// almost the entire prompt — α reported input=5 / cached=53866
+		// in a typical run. Comparing baselines on input_tokens alone
+		// reads the LLM's per-call billing burden, not the prompt size
+		// the LLM actually sees. H1 cares about the latter (does δ
+		// supply less context than α?), so we now aggregate
+		// input + cached as "total tokens" and use that for the
+		// hypothesis check. input_tokens stays as a separate column
+		// so a reader can still see the uncached billing portion.
+		a.totalTokens = append(a.totalTokens, float64(r.InputTokens+r.CachedTokens))
 		a.halluTotals = append(a.halluTotals, float64(r.Hallucination.Total))
 	}
 	type row struct {
 		B                           Baseline
 		Runs                        int
-		MeanTokens, StdTokens       float64
+		MeanInput                   float64
+		MeanTotal, StdTotal         float64
 		MeanScore, StdScore         float64
 		MeanHalluRate, StdHalluRate float64
 		MeanHalluTotal              float64
 	}
 	var rows []row
 	for b, a := range byBaseline {
-		mt, st := meanStd(a.tokens)
+		mi, _ := meanStd(a.inputTokens)
+		mtot, stot := meanStd(a.totalTokens)
 		ms, ss := meanStd(a.scores)
 		mr, sr := meanStd(a.halluRates)
 		mh, _ := meanStd(a.halluTotals)
 		rows = append(rows, row{B: b, Runs: len(a.scores),
-			MeanTokens: mt, StdTokens: st,
+			MeanInput: mi,
+			MeanTotal: mtot, StdTotal: stot,
 			MeanScore: ms, StdScore: ss,
 			MeanHalluRate: mr, StdHalluRate: sr,
 			MeanHalluTotal: mh})
@@ -62,10 +76,10 @@ func WriteReport(path string, results []Result) error {
 
 	var sb strings.Builder
 	sb.WriteString("# CKG eval report\n\n")
-	sb.WriteString("| Baseline | N | Avg input tokens | Score (mean ± std) | Hallucination rate (mean ± std) | Avg mentions |\n|---|---|---|---|---|---|\n")
+	sb.WriteString("| Baseline | N | Avg input (uncached) | Avg total (input + cached) | Score (mean ± std) | Hallucination rate (mean ± std) | Avg mentions |\n|---|---|---|---|---|---|---|\n")
 	for _, r := range rows {
-		fmt.Fprintf(&sb, "| %s | %d | %.0f | %.3f ± %.3f | %.3f ± %.3f | %.1f |\n",
-			r.B, r.Runs, r.MeanTokens,
+		fmt.Fprintf(&sb, "| %s | %d | %.0f | %.0f ± %.0f | %.3f ± %.3f | %.3f ± %.3f | %.1f |\n",
+			r.B, r.Runs, r.MeanInput, r.MeanTotal, r.StdTotal,
 			r.MeanScore, r.StdScore,
 			r.MeanHalluRate, r.StdHalluRate,
 			r.MeanHalluTotal)
@@ -110,15 +124,19 @@ func WriteReport(path string, results []Result) error {
 	}
 
 	sb.WriteString("\n## Hypothesis check\n\n")
-	if a, ok := byBaseline[BaselineAlpha]; ok && len(a.tokens) > 0 {
-		if d, ok := byBaseline[BaselineDelta]; ok && len(d.tokens) > 0 {
-			meanAlphaTokens, _ := meanStd(a.tokens)
-			meanDeltaTokens, _ := meanStd(d.tokens)
+	if a, ok := byBaseline[BaselineAlpha]; ok && len(a.totalTokens) > 0 {
+		if d, ok := byBaseline[BaselineDelta]; ok && len(d.totalTokens) > 0 {
+			meanAlphaTotal, _ := meanStd(a.totalTokens)
+			meanDeltaTotal, _ := meanStd(d.totalTokens)
 			meanAlphaScore, _ := meanStd(a.scores)
 			meanDeltaScore, _ := meanStd(d.scores)
-			if meanAlphaTokens > 0 {
-				savings := 1 - meanDeltaTokens/meanAlphaTokens
-				fmt.Fprintf(&sb, "- **H1** δ vs α token savings: **%.1f%%** (target ≥ 50%%)\n", savings*100)
+			if meanAlphaTotal > 0 {
+				// H1 uses total tokens (input + cached), not just
+				// input — see the WriteReport doc above. Token
+				// "savings" is a prompt-size question, not a billing
+				// question.
+				savings := 1 - meanDeltaTotal/meanAlphaTotal
+				fmt.Fprintf(&sb, "- **H1** δ vs α total-token savings: **%.1f%%** (target ≥ 50%%)\n", savings*100)
 				scoreDelta := meanDeltaScore - meanAlphaScore
 				fmt.Fprintf(&sb, "- **H2** δ score - α score: **%+.3f** (target ≥ 0)\n", scoreDelta)
 			}

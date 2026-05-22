@@ -483,13 +483,36 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
 
   **Axis 4 detail**: `internal/eval/filter.go::FilterHallucinations(text, halluResult)` — hallucinated symbols을 `[unverified: <symbol>]`로 *word-boundary-aware replacement*. 4 unit tests PASS. report.md에 *post-filter warnings* 통합.
 
-- [ ] **C26** 사용자 *4-axis 통합 multi-shot full run* 권장:
+- [x] **C26 — 4-axis 통합 첫 measurement** ✅ 사용자 `make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3` 실행.
+
+  **첫 4-axis baseline:**
+  | Baseline | N | Tokens | Score (mean±std) | Halu rate (mean±std) |
+  |---|---|---|---|---|
+  | α | 3 | 5 | 0.396±0.119 | 0.187±0.046 |
+  | β | 3 | 6 | **0.000±0.000** 🔴 | 0.000 |
+  | γ | 3 | 193 | **0.700±0.047** | **0.444±0.113** |
+  | δ | 3 | 9 | 0.620±0.115 | 0.363±0.059 |
+
+  **5 findings**:
+  - β baseline broken (score 0) — `SubgraphByQname("", 99)`가 empty 반환
+  - H1 hypothesis FAIL (-86.7%) — token counting *misleading* (input_tokens만, cached 무시)
+  - γ paradox (score 최고 + hallu 최고)
+  - systematic LLM invention (`VaultService.depositFn` 3/3 runs) — **실제 graph에 없는 TS symbol**
+  - Korean text + line ref noise
+
+- [x] **C27 — A+B+D fix cycle** ✅ (이 commit) 권장 순서 (A → B → D) 동시 진행:
+  - **A (β broken)**: `SubgraphByQname("", 99)` → `TopNodes("pagerank", 200)` + `AllEdges()`. *β의 *whole-graph context* 의도 회복*.
+  - **B (token counting)**: H1 hypothesis가 *input_tokens만 사용*해서 *misleading*. *Claude Code prompt cache가 거의 100%*. *report에 *Total (input + cached) column 추가*, H1이 *total 기준 계산*.
+  - **D (graph rebuild + lang expansion)**: `eval-llm-smoke`가 *Go only graph*로 build. *Makefile에 *`--lang=go,ts,sol`* + *force rebuild every run*. `VaultService.depositFn`이 *진짜 TS symbol*인데 *graph에 없어서 hallucination으로 *misclassified*. *graph 갱신으로 *measurement accuracy 회복*.
+
+- [ ] **C28** 사용자 *재실행 권장* (post A+B+D):
   ```bash
   make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
   ```
-  - *4 baselines × 3 runs = 12 LLM calls* (~5-10분)
-  - *기대*: mean±std 컬럼 *non-zero*, *anti-hallucination guidance 효과 측정*, *β/γ/δ vs α 비교*, *post-filter warnings 출력*
-  - 결과로 *0% error까지의 *quantified gap* 명확화
+  - *β score 0 → 정상값* 예상
+  - *Total tokens column에 *진짜 prompt size 표시*
+  - *VaultService.depositFn 같은 *TS symbol mention*이 *hallucinated → found/diverged로 *재분류*
+  - *H1 hypothesis check meaningful number*
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.
