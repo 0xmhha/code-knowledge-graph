@@ -82,13 +82,26 @@ func WriteReport(path string, results []Result) error {
 			continue
 		}
 		any = true
-		fmt.Fprintf(&sb, "### %s / %s\n", r.TaskID, r.Baseline)
+		fmt.Fprintf(&sb, "### %s / %s (run %d)\n", r.TaskID, r.Baseline, r.RunIdx)
 		fmt.Fprintf(&sb, "- mentions=%d, rate=%.3f\n", r.Hallucination.Total, r.Hallucination.Rate)
 		if len(r.Hallucination.Hallucinated) > 0 {
 			fmt.Fprintf(&sb, "- hallucinated: `%s`\n", strings.Join(r.Hallucination.Hallucinated, "`, `"))
 		}
 		if len(r.Hallucination.QnameDiverged) > 0 {
 			fmt.Fprintf(&sb, "- qname-diverged: `%s`\n", strings.Join(r.Hallucination.QnameDiverged, "`, `"))
+		}
+		// Axis 4 (2026-05-22): show the consumer-facing filter
+		// output and any warnings for this row. The filtered text
+		// inlines `[unverified: <symbol>]` markers in place of every
+		// hallucinated symbol so a downstream consumer can choose to
+		// either show the marker, strip the marker, or refuse to
+		// surface the answer at all.
+		_, warnings := FilterHallucinations(r.RawOutput, r.Hallucination)
+		if len(warnings) > 0 {
+			sb.WriteString("- post-filter (Axis 4) warnings:\n")
+			for _, w := range warnings {
+				fmt.Fprintf(&sb, "  - %s\n", w)
+			}
 		}
 		sb.WriteString("\n")
 	}

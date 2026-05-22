@@ -472,13 +472,26 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - H1 = δ vs α token savings target ≥ 50%
   - H2 = δ - α score target ≥ 0
 
-- [ ] **C25** Evaluation system 다음 큰 step (non-determinism 대응):
-  - **multi-shot averaging**: 같은 fixture를 *N번 (e.g. 5번)* run, *mean ± std* 보고. *single-shot noise* → *stable baseline*. *runner.go 작업 ~50줄*.
-  - **β/γ/δ baseline 추가**: α만으로는 *raw dump 영향* 분리 불가. *tool-augmented (β/γ/δ)*가 *진짜 cks-like usage*.
-  - **prompt engineering**: system message에 *"only mention symbols you can verify exist"* — *real hallucination 감소 측정*. **0% error 목표의 *direct lever*.
-  - **추가 task fixtures**: T01 외에 T-02~T-30. *cover area 확장*.
+- [x] **C25 — 4-axis evaluation roadmap 완료** ✅ 사용자 권장 순서 (3→1→2→4)대로 진행. *각 axis 별도 commit*. 코드 변경 + Makefile + docs 모두 commit.
 
-- [ ] **C26** V3 receiver-style heuristic (data 더 모은 후 결정):
+  | Axis | Commit | 변경 | 목적 |
+  |---|---|---|---|
+  | 3 (β/γ/δ) | `1db6d2d` | Makefile BASELINES variable | tool-augmented 비교 |
+  | 1 (multi-shot) | `c368d9c` | Result.RunIdx + mean±std | non-determinism 측정 |
+  | 2 (prompt) | `1754b6c` | anti-hallucination guidance | 0% error direct lever |
+  | 4 (filter) | (this) | FilterHallucinations + report integration | consumer-level safety |
+
+  **Axis 4 detail**: `internal/eval/filter.go::FilterHallucinations(text, halluResult)` — hallucinated symbols을 `[unverified: <symbol>]`로 *word-boundary-aware replacement*. 4 unit tests PASS. report.md에 *post-filter warnings* 통합.
+
+- [ ] **C26** 사용자 *4-axis 통합 multi-shot full run* 권장:
+  ```bash
+  make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
+  ```
+  - *4 baselines × 3 runs = 12 LLM calls* (~5-10분)
+  - *기대*: mean±std 컬럼 *non-zero*, *anti-hallucination guidance 효과 측정*, *β/γ/δ vs α 비교*, *post-filter warnings 출력*
+  - 결과로 *0% error까지의 *quantified gap* 명확화
+
+- [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.
   - false positive 위험: `b.New`, `c.Init` 등 legit short package names
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
