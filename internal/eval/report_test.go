@@ -76,12 +76,17 @@ func TestWriteReport(t *testing.T) {
 	t.Run("alpha and delta valid H1 H2", func(t *testing.T) {
 		dir := t.TempDir()
 		path := filepath.Join(dir, "report.md")
-		// alpha: avg 1000 tokens, avg score 0.5; delta: avg 400 tokens, avg score 0.6
+		// alpha: avg 1000 user-prompt bytes, avg score 0.5;
+		// delta: avg 400 user-prompt bytes, avg score 0.6.
+		// H1 now uses UserPromptBytes (smartContext audit
+		// 2026-05-22) instead of InputTokens; the savings target
+		// stays identical because the prompt-size question is
+		// what H1 always meant to ask.
 		results := []eval.Result{
-			{TaskID: "T01", Baseline: eval.BaselineAlpha, InputTokens: 1000, Score: 0.5},
-			{TaskID: "T02", Baseline: eval.BaselineAlpha, InputTokens: 1000, Score: 0.5},
-			{TaskID: "T01", Baseline: eval.BaselineDelta, InputTokens: 400, Score: 0.6},
-			{TaskID: "T02", Baseline: eval.BaselineDelta, InputTokens: 400, Score: 0.6},
+			{TaskID: "T01", Baseline: eval.BaselineAlpha, UserPromptBytes: 1000, InputTokens: 1000, Score: 0.5},
+			{TaskID: "T02", Baseline: eval.BaselineAlpha, UserPromptBytes: 1000, InputTokens: 1000, Score: 0.5},
+			{TaskID: "T01", Baseline: eval.BaselineDelta, UserPromptBytes: 400, InputTokens: 400, Score: 0.6},
+			{TaskID: "T02", Baseline: eval.BaselineDelta, UserPromptBytes: 400, InputTokens: 400, Score: 0.6},
 		}
 		if err := eval.WriteReport(path, results); err != nil {
 			t.Fatalf("WriteReport: %v", err)

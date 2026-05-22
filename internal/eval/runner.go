@@ -27,15 +27,28 @@ type Result struct {
 	// and computes mean ± std across RunIdx, surfacing the
 	// non-determinism the third smoke run made unmistakable (3 runs
 	// of the same fixture produced 0, 0, and 4 hallucinated symbols).
-	RunIdx       int
-	InputTokens  int
-	OutputTokens int
-	CachedTokens int
-	Score        float64
-	LatencyMS    int64
-	NumToolCalls int
-	Stale        bool
-	RawOutput    string
+	RunIdx int
+	// UserPromptBytes is the application-level size of the
+	// per-invocation user prompt the runner built for this row
+	// (post-baseline-specific append: raw files for α,
+	// get_subgraph result for β, smartContext for δ). It is the
+	// only "prompt size" measurement that is independent of
+	// claude CLI's internal prompt cache state, which carries
+	// Claude Code's workspace context across invocations and
+	// inflates cached_tokens to hundreds of thousands. H1's
+	// question — "does δ supply less context than α?" — answers
+	// cleanly against this field; cached_tokens reads the
+	// CLI-side cache pattern instead and is the wrong proxy
+	// (audit 2026-05-22).
+	UserPromptBytes int
+	InputTokens     int
+	OutputTokens    int
+	CachedTokens    int
+	Score           float64
+	LatencyMS       int64
+	NumToolCalls    int
+	Stale           bool
+	RawOutput       string
 
 	// Hallucination is the per-response classification of every symbol
 	// mention the LLM emitted, looked up against the same store the
@@ -152,6 +165,7 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	// γ is intentionally NOT pre-called — emulating the multi-turn cost,
 	// we let the LLM ask in plain text. (Real tool-loop emulation arrives V1+.)
 
+	userPromptBytes := len(user)
 	out, err := llm.Complete(ctx, system, user)
 	if err != nil {
 		return Result{}, err
@@ -171,7 +185,8 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	}
 	return Result{
 		TaskID: t.ID, Baseline: b,
-		InputTokens: out.InputTokens, OutputTokens: out.OutputTokens,
+		UserPromptBytes: userPromptBytes,
+		InputTokens:     out.InputTokens, OutputTokens: out.OutputTokens,
 		CachedTokens: out.CacheReadTokens + out.CacheCreateTokens,
 		Score:        score, LatencyMS: time.Since(start).Milliseconds(),
 		NumToolCalls: calls, Stale: stale, RawOutput: out.OutputText,
@@ -491,7 +506,12 @@ func writeCSV(path string, rows []Result) error {
 	// Positioned right after baseline so (task, baseline, run_idx) is
 	// the natural group key for any external analysis. Single-shot
 	// runs leave it at 0.
+	// user_prompt_bytes added 2026-05-22 (smartContext audit). The
+	// application-level prompt size H1 actually cares about — see
+	// the Result struct doc for why cached_tokens is the wrong
+	// proxy.
 	_ = w.Write([]string{"task_id", "baseline", "run_idx",
+		"user_prompt_bytes",
 		"input_tokens", "output_tokens",
 		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale",
 		"hallucination_total", "hallucination_count", "hallucination_rate",
@@ -499,6 +519,7 @@ func writeCSV(path string, rows []Result) error {
 	for _, r := range rows {
 		_ = w.Write([]string{r.TaskID, string(r.Baseline),
 			strconv.Itoa(r.RunIdx),
+			strconv.Itoa(r.UserPromptBytes),
 			strconv.Itoa(r.InputTokens), strconv.Itoa(r.OutputTokens),
 			strconv.Itoa(r.CachedTokens), fmt.Sprintf("%.4f", r.Score),
 			strconv.FormatInt(r.LatencyMS, 10), strconv.Itoa(r.NumToolCalls),

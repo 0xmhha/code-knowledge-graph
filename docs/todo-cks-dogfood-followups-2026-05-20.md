@@ -569,10 +569,29 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - *QnameDiverged 대폭 감소* 예상 (`h.vault.Deposit`, `svc.depositFn` 등 모두 Found 분류)
   - *Hallucination rate 추가 ↓* 예상 (V3가 *false positives 마지막 cleanup*)
 
-- [ ] **C34** B — smartContext audit (V3 cycle 후):
-  - H1 hypothesis -359% root cause 조사
-  - δ가 α의 4.6x prompt size 사용 — *smartContext가 *narrowing 안 함*
-  - `pkg/smartctx` 코드 audit + 가능 시 fix
+- [x] **C34 — B smartContext audit + UserPromptBytes metric** ✅ (이 commit)
+  
+  **Audit finding**: smartContext의 *BudgetTokens=8000* (~32KB). 그러나 *cached_tokens가 170K-587K로 *swing*. *Claude Code의 *workspace cache state*가 *cached에 누적* — *CLI-side cache pattern 이지 *application prompt size 아님*.
+  
+  **Fix**: `Result.UserPromptBytes` 추가 (application-level prompt size). H1 hypothesis가 *cached/input_tokens 대신 *UserPromptBytes 기준* 계산. *CLI cache state 영향 *제거*.
+  
+  | Metric | 의미 | H1 적용 |
+  |---|---|---|
+  | input_tokens | uncached billing portion | H1 V1 (misleading) |
+  | input + cached | full Claude prompt (workspace cache 포함) | H1 V2 (CLI state 포함) |
+  | **UserPromptBytes** | runner가 추가한 application prompt | **H1 V3 (정확)** |
+  
+  CSV에 *user_prompt_bytes column 추가*. Report에 *User prompt bytes (mean ± std) column*. H1 명칭: "user-prompt-bytes savings".
+  
+  Tests updated: TestWriteCSV expectedCols + row index, TestWriteReport H1 case에 UserPromptBytes 추가.
+
+- [ ] **C35** 사용자 *최종 재실행 권장* (post-V3 + smartContext audit):
+  ```bash
+  make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
+  ```
+  - **V3 효과**: QnameDiverged 대폭 ↓ (`h.*`, `svc.*`, `this.*` 모두 Found)
+  - **H1 metric 의미화**: UserPromptBytes 기준 — *δ가 실제로 *α의 *얼마나 *덜/더 prompt 사용*하는지 *정확히 측정*
+  - 이게 *7-cycle 누적 작업의 *최종 measurement 검증*
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.

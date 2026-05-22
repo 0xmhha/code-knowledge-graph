@@ -24,7 +24,7 @@ import (
 // columns stay structurally consistent across shot counts.
 func WriteReport(path string, results []Result) error {
 	type bAgg struct {
-		scores, halluRates, inputTokens, totalTokens, halluTotals []float64
+		scores, halluRates, inputTokens, totalTokens, userBytes, halluTotals []float64
 	}
 	byBaseline := map[Baseline]*bAgg{}
 	for _, r := range results {
@@ -41,17 +41,22 @@ func WriteReport(path string, results []Result) error {
 		// almost the entire prompt — α reported input=5 / cached=53866
 		// in a typical run. Comparing baselines on input_tokens alone
 		// reads the LLM's per-call billing burden, not the prompt size
-		// the LLM actually sees. H1 cares about the latter (does δ
-		// supply less context than α?), so we now aggregate
-		// input + cached as "total tokens" and use that for the
-		// hypothesis check. input_tokens stays as a separate column
-		// so a reader can still see the uncached billing portion.
+		// the LLM actually sees. The next iteration aggregated
+		// input + cached as "total tokens" but that proxy still bleeds
+		// Claude Code's workspace-cache state into the H1 number; the
+		// smartContext audit (2026-05-22) showed total swings 170K–
+		// 587K across runs of an unchanged prompt purely because of
+		// CLI-side cache behaviour. UserPromptBytes — what the runner
+		// itself supplied — is the only metric independent of that
+		// noise.
 		a.totalTokens = append(a.totalTokens, float64(r.InputTokens+r.CachedTokens))
+		a.userBytes = append(a.userBytes, float64(r.UserPromptBytes))
 		a.halluTotals = append(a.halluTotals, float64(r.Hallucination.Total))
 	}
 	type row struct {
 		B                           Baseline
 		Runs                        int
+		MeanUserBytes, StdUserBytes float64
 		MeanInput                   float64
 		MeanTotal, StdTotal         float64
 		MeanScore, StdScore         float64
@@ -60,12 +65,14 @@ func WriteReport(path string, results []Result) error {
 	}
 	var rows []row
 	for b, a := range byBaseline {
+		mub, sub := meanStd(a.userBytes)
 		mi, _ := meanStd(a.inputTokens)
 		mtot, stot := meanStd(a.totalTokens)
 		ms, ss := meanStd(a.scores)
 		mr, sr := meanStd(a.halluRates)
 		mh, _ := meanStd(a.halluTotals)
 		rows = append(rows, row{B: b, Runs: len(a.scores),
+			MeanUserBytes: mub, StdUserBytes: sub,
 			MeanInput: mi,
 			MeanTotal: mtot, StdTotal: stot,
 			MeanScore: ms, StdScore: ss,
@@ -76,10 +83,11 @@ func WriteReport(path string, results []Result) error {
 
 	var sb strings.Builder
 	sb.WriteString("# CKG eval report\n\n")
-	sb.WriteString("| Baseline | N | Avg input (uncached) | Avg total (input + cached) | Score (mean ± std) | Hallucination rate (mean ± std) | Avg mentions |\n|---|---|---|---|---|---|---|\n")
+	sb.WriteString("| Baseline | N | User prompt bytes (mean ± std) | Avg input (uncached) | Avg total (input + cached) | Score (mean ± std) | Hallucination rate (mean ± std) | Avg mentions |\n|---|---|---|---|---|---|---|---|\n")
 	for _, r := range rows {
-		fmt.Fprintf(&sb, "| %s | %d | %.0f | %.0f ± %.0f | %.3f ± %.3f | %.3f ± %.3f | %.1f |\n",
-			r.B, r.Runs, r.MeanInput, r.MeanTotal, r.StdTotal,
+		fmt.Fprintf(&sb, "| %s | %d | %.0f ± %.0f | %.0f | %.0f ± %.0f | %.3f ± %.3f | %.3f ± %.3f | %.1f |\n",
+			r.B, r.Runs, r.MeanUserBytes, r.StdUserBytes,
+			r.MeanInput, r.MeanTotal, r.StdTotal,
 			r.MeanScore, r.StdScore,
 			r.MeanHalluRate, r.StdHalluRate,
 			r.MeanHalluTotal)
@@ -124,19 +132,23 @@ func WriteReport(path string, results []Result) error {
 	}
 
 	sb.WriteString("\n## Hypothesis check\n\n")
-	if a, ok := byBaseline[BaselineAlpha]; ok && len(a.totalTokens) > 0 {
-		if d, ok := byBaseline[BaselineDelta]; ok && len(d.totalTokens) > 0 {
-			meanAlphaTotal, _ := meanStd(a.totalTokens)
-			meanDeltaTotal, _ := meanStd(d.totalTokens)
+	if a, ok := byBaseline[BaselineAlpha]; ok && len(a.userBytes) > 0 {
+		if d, ok := byBaseline[BaselineDelta]; ok && len(d.userBytes) > 0 {
+			meanAlphaUser, _ := meanStd(a.userBytes)
+			meanDeltaUser, _ := meanStd(d.userBytes)
 			meanAlphaScore, _ := meanStd(a.scores)
 			meanDeltaScore, _ := meanStd(d.scores)
-			if meanAlphaTotal > 0 {
-				// H1 uses total tokens (input + cached), not just
-				// input — see the WriteReport doc above. Token
-				// "savings" is a prompt-size question, not a billing
-				// question.
-				savings := 1 - meanDeltaTotal/meanAlphaTotal
-				fmt.Fprintf(&sb, "- **H1** δ vs α total-token savings: **%.1f%%** (target ≥ 50%%)\n", savings*100)
+			if meanAlphaUser > 0 {
+				// H1 (2026-05-22 audit): uses UserPromptBytes — the
+				// per-invocation prompt the runner itself supplies —
+				// instead of CLI-reported tokens. Both input_tokens
+				// (uncached billing portion) and input+cached (Claude
+				// Code workspace cache) were dominated by CLI-side
+				// state unrelated to what α vs δ actually supplied.
+				// UserPromptBytes is the only proxy that asks "how
+				// much context did the runner add?"
+				savings := 1 - meanDeltaUser/meanAlphaUser
+				fmt.Fprintf(&sb, "- **H1** δ vs α user-prompt-bytes savings: **%.1f%%** (target ≥ 50%%)\n", savings*100)
 				scoreDelta := meanDeltaScore - meanAlphaScore
 				fmt.Fprintf(&sb, "- **H2** δ score - α score: **%+.3f** (target ≥ 0)\n", scoreDelta)
 			}
