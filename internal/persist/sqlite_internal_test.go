@@ -53,6 +53,53 @@ func TestRewriteFTSQuery_TrailingPunctuation(t *testing.T) {
 	}
 }
 
+// TestRewriteFTSQuery_PowerUserGateNarrowed locks the second
+// smartContext-audit fix (2026-05-22 iteration 2): a task
+// description containing natural-language quotes around an
+// example identifier (`Include names like "service.Vault.Deposit"`)
+// used to flip the power-user gate via the loose
+// `ContainsAny(q, "*\"")` check, route the whole query straight
+// to FTS5, and produce `syntax error near "."` again — defeating
+// the iteration-1 dotted-identifier fix.
+//
+// The narrowed gate now requires either an explicit `*` or a
+// query that is *entirely* phrase-quoted (`"foo bar"`); prose
+// with embedded quotes still flows through the rewriter and the
+// quote becomes a separator alongside `.`.
+func TestRewriteFTSQuery_PowerUserGateNarrowed(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "embedded quote in prose goes through rewriter",
+			in:   `find names like "Vault.deposit" or core.NewBlockChain`,
+			// `like` is 4 chars so it takes the wildcard tail;
+			// `or` is 2 chars so it drops via the stop-word filter.
+			want: "find* OR names* OR like* OR Vault* OR deposit* OR core* OR NewBlockChain*",
+		},
+		{
+			name: "wildcard still passes through",
+			in:   "Vault.deposit*",
+			want: "Vault.deposit*",
+		},
+		{
+			name: "fully phrase-quoted query still passes through",
+			in:   `"Vault.deposit phrase"`,
+			want: `"Vault.deposit phrase"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rewriteFTSQuery(tc.in)
+			if got != tc.want {
+				t.Errorf("rewriteFTSQuery(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRewriteFTSQuery_DottedIdentifierSplit locks the smartContext
 // audit fix (2026-05-22): a task description like "List functions
 // that call Vault.deposit" used to tokenise `Vault.deposit` as a

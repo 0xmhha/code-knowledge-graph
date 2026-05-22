@@ -746,7 +746,23 @@ func rewriteFTSQuery(q string) string {
 	// prose; `trimFTSToken` strips boundary `(` / `)` / `:` so the FTS5
 	// expression stays well-formed. Hand-crafted FTS5 queries that rely
 	// on grouping or column filters can still opt in by adding `*` or `"`.
-	if strings.ContainsAny(q, `*"`) {
+	// Power-user passthrough — explicit FTS5 wildcard (`*`) or a
+	// query that is *entirely* phrase-quoted ("foo bar baz") signals
+	// a hand-crafted FTS5 expression. Prose containing embedded
+	// quotes (`Like "Vault.deposit"`) does NOT qualify — those are
+	// natural-language quotes around an identifier and must still
+	// go through the rewriter. The earlier check
+	// `strings.ContainsAny(q, "*\"")` flipped on any quote
+	// anywhere in the query, which caused the post-V3+B smoke run
+	// to bypass the rewriter on a task description that quoted
+	// example qnames and to hand FTS5 the raw `Vault.deposit.`
+	// — fts5 then rejected the trailing period with the original
+	// "syntax error near '.'" surfaced as δ smartContext silent
+	// failure (2026-05-22, second iteration).
+	if strings.Contains(q, "*") {
+		return q
+	}
+	if strings.HasPrefix(q, `"`) && strings.HasSuffix(q, `"`) && len(q) >= 2 {
 		return q
 	}
 	// 2026-05-22 (smartContext audit): dotted identifiers in task
@@ -757,12 +773,13 @@ func rewriteFTSQuery(q string) string {
 	// path: smartctx.BuildContext → store.Search → SearchFTS →
 	// rewriteFTSQuery → fts5 → error. δ baseline ran with no
 	// smartContext context for the entire previous smoke run
-	// because of this. Splitting on `.` (in addition to whitespace)
-	// lines up with the FTS5 tokeniser's own behaviour — it indexes
-	// dotted identifiers as separate tokens, so the rewriter has
-	// nothing to lose by matching that semantics.
+	// because of this. Splitting on `.` (and `"`, after the gate
+	// tightening above) lines up with the FTS5 tokeniser's own
+	// behaviour — it indexes dotted identifiers as separate
+	// tokens, so the rewriter has nothing to lose by matching that
+	// semantics.
 	fields := strings.FieldsFunc(q, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '.'
+		return r == ' ' || r == '\t' || r == '\n' || r == '.' || r == '"'
 	})
 	if len(fields) == 0 {
 		return q
