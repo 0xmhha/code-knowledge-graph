@@ -311,7 +311,8 @@ func TestWriteCSV(t *testing.T) {
 			t.Errorf("want 1 row (header), got %d", len(records))
 		}
 		header := records[0]
-		expectedCols := []string{"task_id", "baseline", "input_tokens", "output_tokens",
+		expectedCols := []string{"task_id", "baseline", "run_idx",
+			"input_tokens", "output_tokens",
 			"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale",
 			"hallucination_total", "hallucination_count", "hallucination_rate",
 			"raw_output"}
@@ -355,7 +356,8 @@ func TestWriteCSV(t *testing.T) {
 		if len(records) != 3 { // header + 2 rows
 			t.Fatalf("want 3 records, got %d", len(records))
 		}
-		// Row 1 (index 1): T01
+		// Row 1 (index 1): T01. Column indexes shifted +1 by run_idx
+		// insertion at column 2 (Axis 1, 2026-05-22).
 		r1 := records[1]
 		if r1[0] != "T01" {
 			t.Errorf("row1 task_id: want T01, got %q", r1[0])
@@ -363,11 +365,11 @@ func TestWriteCSV(t *testing.T) {
 		if r1[1] != "alpha" {
 			t.Errorf("row1 baseline: want alpha, got %q", r1[1])
 		}
-		if r1[5] != "0.7500" {
-			t.Errorf("row1 score: want 0.7500, got %q", r1[5])
+		if r1[6] != "0.7500" {
+			t.Errorf("row1 score: want 0.7500, got %q", r1[6])
 		}
-		if r1[6] != "1234" {
-			t.Errorf("row1 latency_ms: want 1234, got %q", r1[6])
+		if r1[7] != "1234" {
+			t.Errorf("row1 latency_ms: want 1234, got %q", r1[7])
 		}
 		// Row 2 (index 2): T02
 		r2 := records[2]
@@ -377,14 +379,14 @@ func TestWriteCSV(t *testing.T) {
 		if r2[1] != "delta" {
 			t.Errorf("row2 baseline: want delta, got %q", r2[1])
 		}
-		if r2[5] != "0.5000" {
-			t.Errorf("row2 score: want 0.5000, got %q", r2[5])
+		if r2[6] != "0.5000" {
+			t.Errorf("row2 score: want 0.5000, got %q", r2[6])
 		}
-		if r2[7] != "3" {
-			t.Errorf("row2 num_tool_calls: want 3, got %q", r2[7])
+		if r2[8] != "3" {
+			t.Errorf("row2 num_tool_calls: want 3, got %q", r2[8])
 		}
-		if r2[8] != "true" {
-			t.Errorf("row2 stale: want true, got %q", r2[8])
+		if r2[9] != "true" {
+			t.Errorf("row2 stale: want true, got %q", r2[9])
 		}
 	})
 }

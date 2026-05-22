@@ -18,8 +18,16 @@ import (
 
 // Result is one row in the CSV.
 type Result struct {
-	TaskID       string
-	Baseline     Baseline
+	TaskID   string
+	Baseline Baseline
+	// RunIdx identifies which of the N repeats of a (task, baseline)
+	// pair this row represents (Axis 1, 2026-05-22). Single-shot eval
+	// runs leave it at 0; multi-shot runs (--n-runs > 1) fill it with
+	// 0..N-1. The report aggregator groups rows by (TaskID, Baseline)
+	// and computes mean ± std across RunIdx, surfacing the
+	// non-determinism the third smoke run made unmistakable (3 runs
+	// of the same fixture produced 0, 0, and 4 hallucinated symbols).
+	RunIdx       int
 	InputTokens  int
 	OutputTokens int
 	CachedTokens int
@@ -41,12 +49,20 @@ type Result struct {
 	Hallucination HallucinationResult
 }
 
-// Run loops tasks × baselines and writes results.csv plus report.md.
+// Run loops tasks × baselines × nRuns and writes results.csv plus
+// report.md. Each (task, baseline) pair runs nRuns times; per-run
+// rows carry RunIdx 0..nRuns-1 so the report aggregator can compute
+// mean ± std across repeats (Axis 1, 2026-05-22). nRuns ≤ 0 is
+// treated as 1 for backwards compatibility with single-shot callers.
+//
 // Run takes ownership of llm: it is Closed when Run returns, regardless
 // of error path. Callers must NOT Close llm themselves.
 func Run(ctx context.Context, tasks []Task, baselines []Baseline,
-	graphDir string, llm LLMClient, outDir string) ([]Result, error) {
+	graphDir string, llm LLMClient, outDir string, nRuns int) ([]Result, error) {
 	defer func() { _ = llm.Close() }()
+	if nRuns < 1 {
+		nRuns = 1
+	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -60,18 +76,21 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 	var results []Result
 	for _, t := range tasks {
 		for _, b := range baselines {
-			res, err := runOne(ctx, llm, store, t, b, stale)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "task %s/%s: %v\n", t.ID, b, err)
-				continue
+			for runIdx := 0; runIdx < nRuns; runIdx++ {
+				res, err := runOne(ctx, llm, store, t, b, stale)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "task %s/%s run %d: %v\n", t.ID, b, runIdx, err)
+					continue
+				}
+				res.RunIdx = runIdx
+				results = append(results, res)
 			}
-			results = append(results, res)
 		}
 	}
 
-	expected := len(tasks) * len(baselines)
+	expected := len(tasks) * len(baselines) * nRuns
 	if dropped := expected - len(results); dropped > 0 {
-		fmt.Fprintf(os.Stderr, "ckg eval: %d/%d (task,baseline) pairs failed; report H1/H2 may be biased\n", dropped, expected)
+		fmt.Fprintf(os.Stderr, "ckg eval: %d/%d (task,baseline,run) triples failed; report H1/H2 may be biased\n", dropped, expected)
 	}
 
 	if err := writeCSV(filepath.Join(outDir, "results.csv"), results); err != nil {
@@ -362,12 +381,19 @@ func writeCSV(path string, rows []Result) error {
 	// one. Variable-length hallucinated-symbol *list* stays out of
 	// CSV entirely; report.md carries the literal list so a single
 	// mis-spelled symbol doesn't balloon a single CSV row to many KB.
-	_ = w.Write([]string{"task_id", "baseline", "input_tokens", "output_tokens",
+	//
+	// run_idx column added 2026-05-22 (Axis 1, multi-shot averaging).
+	// Positioned right after baseline so (task, baseline, run_idx) is
+	// the natural group key for any external analysis. Single-shot
+	// runs leave it at 0.
+	_ = w.Write([]string{"task_id", "baseline", "run_idx",
+		"input_tokens", "output_tokens",
 		"cached_tokens", "score", "latency_ms", "num_tool_calls", "stale",
 		"hallucination_total", "hallucination_count", "hallucination_rate",
 		"raw_output"})
 	for _, r := range rows {
 		_ = w.Write([]string{r.TaskID, string(r.Baseline),
+			strconv.Itoa(r.RunIdx),
 			strconv.Itoa(r.InputTokens), strconv.Itoa(r.OutputTokens),
 			strconv.Itoa(r.CachedTokens), fmt.Sprintf("%.4f", r.Score),
 			strconv.FormatInt(r.LatencyMS, 10), strconv.Itoa(r.NumToolCalls),

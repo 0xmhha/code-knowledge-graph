@@ -165,6 +165,13 @@ eval-baseline-update:
 #   make eval-llm-smoke LLM_BACKEND=api
 #   make eval-llm-smoke TASKS_GLOB='eval/tasks/synthetic-T*.yaml'
 #   make eval-llm-smoke BASELINES=alpha,beta,gamma,delta
+#   make eval-llm-smoke N_RUNS=5
+#
+# N_RUNS controls multi-shot averaging (Axis 1, 2026-05-22). Cost
+# scales linearly: N_RUNS=5 × BASELINES=4 = 20 LLM invocations per
+# task. Use N_RUNS≥3 to get a meaningful mean±std for the
+# non-deterministic LLM response (single-shot has been observed to
+# swing from 0% to 36% hallucination rate on the same fixture).
 #
 # Output: eval/results/latest/{results.csv,report.md}. Read report.md
 # Hallucination detail (T-04) section first — that's the signal this
@@ -185,12 +192,14 @@ LLM_BACKEND ?= $(if $(ANTHROPIC_API_KEY),api,cli)
 LLM_MODEL ?= claude-sonnet-4-6
 TASKS_GLOB ?= eval/tasks/synthetic-T01-find-callers.yaml
 BASELINES ?= alpha
+N_RUNS ?= 1
 eval-llm-smoke: build-no-viewer
 	@mkdir -p eval/results/latest
 	@echo "=== ckg eval-llm-smoke ==="
 	@echo "  backend   = $(LLM_BACKEND)"
 	@echo "  tasks     = $(TASKS_GLOB)"
 	@echo "  baselines = $(BASELINES)"
+	@echo "  n_runs    = $(N_RUNS)"
 	@if [ "$(LLM_BACKEND)" = "cli" ] && [ -z "$(CLIWRAP_AGENT)" ]; then \
 	    echo ""; \
 	    echo "ERROR: LLM_BACKEND=cli requires CLIWRAP_AGENT to point at the"; \
@@ -210,6 +219,7 @@ eval-llm-smoke: build-no-viewer
 	    --baselines=$(BASELINES) \
 	    --llm-backend=$(LLM_BACKEND) \
 	    --llm=$(LLM_MODEL) \
+	    --n-runs=$(N_RUNS) \
 	    --out=eval/results/latest
 	@echo ""
 	@echo "=== Report ==="
