@@ -27,18 +27,36 @@ func AllowedTools(b Baseline) []string {
 	return nil
 }
 
+// antiHallucinationGuidance is appended to every baseline's system
+// prompt (Axis 2, 2026-05-22). It tells the model the rule that the
+// hallucination validator enforces: only mention symbols the model
+// can verify against the context it was given. The motivating
+// finding was the third smoke run, where Claude invented
+// `Token.transfer`, `main.main`, and `server.Register` — symbols
+// that look plausible for a Go codebase but have no chance of
+// resolving in the actual graph.
+//
+// The guidance is short on purpose: long preambles tend to dilute
+// the rest of the prompt and bloat input tokens for every call.
+// Anti-hallucination is the highest-leverage direction the
+// hallucination_rate metric exposes (HANDOFF.md T-04 goal: 0%
+// error). A future iteration can expand this with examples once
+// we have a multi-shot baseline measuring whether the guidance
+// itself measurably moves the rate.
+const antiHallucinationGuidance = " IMPORTANT: Only name symbols (functions, types, packages) that appear in the context you were given. Do not invent or guess plausible-sounding names. If unsure, say so explicitly rather than naming a symbol that may not exist."
+
 // SystemPrompt returns the system prompt fragment that primes the LLM about
 // what's available. α also receives raw file dumps appended to user content.
 func SystemPrompt(b Baseline) string {
 	switch b {
 	case BaselineAlpha:
-		return "You are a coding assistant. Raw source files are appended below the task description. Use them to answer."
+		return "You are a coding assistant. Raw source files are appended below the task description. Use them to answer." + antiHallucinationGuidance
 	case BaselineBeta:
-		return "You are a coding assistant. Call get_subgraph once to retrieve the entire graph, then answer."
+		return "You are a coding assistant. Call get_subgraph once to retrieve the entire graph, then answer." + antiHallucinationGuidance
 	case BaselineGamma:
-		return "You are a coding assistant. Use find_symbol/find_callers/find_callees/get_subgraph/search_text as needed to gather context, then answer."
+		return "You are a coding assistant. Use find_symbol/find_callers/find_callees/get_subgraph/search_text as needed to gather context, then answer." + antiHallucinationGuidance
 	case BaselineDelta:
-		return "You are a coding assistant. Call get_context_for_task ONCE with the user's task description, then answer."
+		return "You are a coding assistant. Call get_context_for_task ONCE with the user's task description, then answer." + antiHallucinationGuidance
 	}
 	return ""
 }
