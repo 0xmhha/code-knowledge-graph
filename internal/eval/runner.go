@@ -206,8 +206,20 @@ func scoreTask(t Task, output string) (float64, int) {
 func extractSymbols(s string) []string {
 	out := []string{}
 	for _, tok := range strings.FieldsFunc(s, func(r rune) bool {
+		// 2026-05-21 (T-04 V1 third smoke run): braces added to the
+		// separator set. A real Claude response of
+		// `Vault{...} initialises the receiver` tokenised as
+		// `Vault{...}` because braces were nowhere in the split or
+		// trim sets. extractSymbols then read it as a dot-bearing
+		// candidate (the `{...}` looked like a dotted segment to the
+		// `strings.Contains(tok, ".")` filter — `.` from the `...`
+		// placeholder), and the false positive flowed into the
+		// hallucination count. Promoting `{` and `}` to splitters
+		// splits the struct-literal placeholder from the type name,
+		// the bare `Vault` then fails the "must contain a dot" check,
+		// and the false positive is gone.
 		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"' ||
-			r == '(' || r == ')'
+			r == '(' || r == ')' || r == '{' || r == '}'
 	}) {
 		// Normalise pointer-receiver sigils + bracket/punct wrappers before
 		// the dot-position check, so `*pkg.Func.` or `[pkg.Func]` both

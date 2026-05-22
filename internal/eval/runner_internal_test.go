@@ -170,6 +170,52 @@ func TestExtractSymbols_ParenSplit(t *testing.T) {
 	}
 }
 
+// TestExtractSymbols_BraceSplit locks the brace-splitter fix
+// surfaced by the 2026-05-21 T-04 V1 third smoke run. A real Claude
+// response wrote `Vault{...}` (Go struct-literal placeholder syntax)
+// and the splitter kept the whole thing as one token. extractSymbols'
+// `strings.Contains(tok, ".")` check matched the `.` from inside
+// the `...` placeholder, so `Vault{...}` flowed through as a
+// candidate symbol. It then fell into Hallucinated because nothing
+// in the graph is named `Vault{...}`.
+//
+// Promoting `{` and `}` to FieldsFunc separators splits the
+// placeholder from the type name. `Vault` (no dot) then fails the
+// dot filter and the false positive is removed.
+func TestExtractSymbols_BraceSplit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{
+			name: "struct literal placeholder split",
+			in:   "Vault{...} initialises the receiver; method is core.Vault.Init",
+			want: []string{"core.Vault.Init"},
+		},
+		{
+			name: "composite literal split keeps dotted symbol",
+			in:   "build with &service.Vault{cfg: cfg}",
+			want: []string{"service.Vault"},
+		},
+		{
+			name: "braces around prose drop noise",
+			in:   "see {pkg.Helper} for one method, also pkg.Run",
+			want: []string{"pkg.Helper", "pkg.Run"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractSymbols(tc.in)
+			sort.Strings(got)
+			sort.Strings(tc.want)
+			if !slicesEqual(got, tc.want) {
+				t.Errorf("extractSymbols(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestExtractSymbols_ProseAbbreviationBlacklist locks the second
 // finding of the 2026-05-21 smoke run: `e.g` from a real LLM
 // response ("e.g., service.Vault.Deposit") was classified as a

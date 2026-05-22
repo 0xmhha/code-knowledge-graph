@@ -439,14 +439,38 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - `h.vault.Deposit` — receiver-style (`h` = variable). leading variable segment defeats suffix align.
   - `h.vault` — variable-only receiver path. *V3: first-segment-variable heuristic 필요*.
 
-- [ ] **C23** 사용자 *3번째 재실행* 권장: 동일 fixture. *기대:*
-  - Hallucinated 0건 (유지)
-  - QnameDiverged *3 → 1* (Vault.deposit이 V2로 cover, h.vault.* 2건은 V3 territory로 남음)
-  - rate 0% (유지)
+- [x] **C23 — *첫 real LLM hallucination 측정* + 1 measurement bug fix** ✅
+  
+  *3번째 cycle 결과* (LLM non-deterministic, 응답이 매번 다름):
+  | Metric | C22 cycle 2 | C23 cycle 3 |
+  |---|---|---|
+  | Mentions | 6 | 11 |
+  | Hallucinated | **0** | **4** (3 real + 1 false positive) |
+  | Rate | 0.0% | 36.4% |
+  | QnameDiverged | 3 | 1 |
+  | Score | 0.500 | 0.208 |
+  
+  **3 real LLM hallucinations** (consumer-end correctness issue):
+  - `Token.transfer` — graph에 없는 symbol
+  - `main.main` — Go convention pattern, graph에 없음
+  - `server.Register` — generic web pattern, graph에 없음
+  
+  **1 measurement false positive — *fixed*:**
+  - `Vault{...}` — struct literal placeholder. extractSymbols brace 처리 안 됨. **Fix: FieldsFunc에 `{`/`}` 추가**. 3 unit tests PASS.
+  
+  **첫 *consumer-perceived hallucination 측정 모드 진입*** — *measurement framework convergence 완료*. 이제부터 *real LLM noise quantitatively tracking 가능*.
 
-- [ ] **C24** V3 receiver-style heuristic (사용자 결과 검토 후 결정):
-  - 후보 A: first-segment가 *1-2 char lowercase variable*이면 drop 후 suffix match
-  - 후보 B: 모든 *mention의 prefix들*을 *try* (`h.vault.Deposit` → `vault.Deposit` → `Deposit`)
-  - 후보 C: V3 *skip* — QnameDiverged의 *현 의미*를 *유지*하고 *별도 metric*으로 *receiver-style mentions 분류*
-  - false positive 위험 분석 필요
+- [ ] **C24** 사용자 *추가 재실행 권장* (선택):
+  - *non-determinism으로 응답 매번 다름*. *single-shot은 noise*. *3 cycles 결과 (0%, 0%, 36%)가 *baseline range* 시사 (`0-40%`).
+  - *Hallucinated `Vault{...}` 사라짐 확인* + 새 cycle의 *real hallucination 추적*
+
+- [ ] **C25** Evaluation system 다음 큰 step (non-determinism 대응):
+  - **multi-shot averaging**: 같은 fixture를 *N번 (e.g. 5번)* run, *mean ± std* 보고. *single-shot noise* → *stable baseline*. *runner.go 작업 ~50줄*.
+  - **β/γ/δ baseline 추가**: α만으로는 *raw dump 영향* 분리 불가. *tool-augmented (β/γ/δ)*가 *진짜 cks-like usage*.
+  - **prompt engineering**: system message에 *"only mention symbols you can verify exist"* — *real hallucination 감소 측정*. **0% error 목표의 *direct lever*.
+  - **추가 task fixtures**: T01 외에 T-02~T-30. *cover area 확장*.
+
+- [ ] **C26** V3 receiver-style heuristic (data 더 모은 후 결정):
+  - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.
+  - false positive 위험: `b.New`, `c.Init` 등 legit short package names
 - [ ] **E2** cks 측 워크어라운드 제거 PR — cks repo 작업, 별도 세션
