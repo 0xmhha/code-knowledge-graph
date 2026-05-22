@@ -460,9 +460,17 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   
   **첫 *consumer-perceived hallucination 측정 모드 진입*** — *measurement framework convergence 완료*. 이제부터 *real LLM noise quantitatively tracking 가능*.
 
-- [ ] **C24** 사용자 *추가 재실행 권장* (선택):
-  - *non-determinism으로 응답 매번 다름*. *single-shot은 noise*. *3 cycles 결과 (0%, 0%, 36%)가 *baseline range* 시사 (`0-40%`).
-  - *Hallucinated `Vault{...}` 사라짐 확인* + 새 cycle의 *real hallucination 추적*
+- [x] **C24 — Axis 3: BASELINES variable** ✅ Makefile에 `BASELINES ?= alpha` env-overridable variable 추가. 사용자가 `BASELINES=alpha,beta,gamma,delta make eval-llm-smoke`로 *4-baseline 비교 가능*. infrastructure 활용 (existing eval/runner.go baseline 분기 + report.go H1/H2 check). 코드 0줄, Makefile만.
+
+  **Baseline semantics:**
+  - α: raw file dump (cheapest, noisiest)
+  - β: get_subgraph pre-call (graph context, no tools)
+  - γ: tool-named in prompt, NOT pre-called (multi-turn emulation — HANDOFF T-01 미해결로 *score near-zero 예상*)
+  - δ: smartContext pre-call (task-tuned context)
+  
+  **H1/H2 hypothesis check**:
+  - H1 = δ vs α token savings target ≥ 50%
+  - H2 = δ - α score target ≥ 0
 
 - [ ] **C25** Evaluation system 다음 큰 step (non-determinism 대응):
   - **multi-shot averaging**: 같은 fixture를 *N번 (e.g. 5번)* run, *mean ± std* 보고. *single-shot noise* → *stable baseline*. *runner.go 작업 ~50줄*.

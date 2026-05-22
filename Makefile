@@ -164,18 +164,33 @@ eval-baseline-update:
 # Override via:
 #   make eval-llm-smoke LLM_BACKEND=api
 #   make eval-llm-smoke TASKS_GLOB='eval/tasks/synthetic-T*.yaml'
+#   make eval-llm-smoke BASELINES=alpha,beta,gamma,delta
 #
 # Output: eval/results/latest/{results.csv,report.md}. Read report.md
 # Hallucination detail (T-04) section first — that's the signal this
 # target was added to surface.
+#
+# Baseline semantics (internal/eval/baseline.go):
+#   alpha — raw files appended to prompt, no tools (cheapest, noisiest)
+#   beta  — get_subgraph result pre-appended (graph context, no tools)
+#   gamma — tool-named in prompt but NOT pre-called (multi-turn cost
+#           emulation; HANDOFF.md T-01 P0 — currently fiction without
+#           γ tool-loop emulation, scores near-zero by design)
+#   delta — smartContext pre-appended (task-tuned context, no tools)
+#
+# H1/H2 hypothesis check in the report uses alpha vs delta token
+# savings + score delta. Adding beta and gamma to BASELINES surfaces
+# the intermediate signals but does NOT change the H1/H2 numbers.
 LLM_BACKEND ?= $(if $(ANTHROPIC_API_KEY),api,cli)
 LLM_MODEL ?= claude-sonnet-4-6
 TASKS_GLOB ?= eval/tasks/synthetic-T01-find-callers.yaml
+BASELINES ?= alpha
 eval-llm-smoke: build-no-viewer
 	@mkdir -p eval/results/latest
 	@echo "=== ckg eval-llm-smoke ==="
-	@echo "  backend = $(LLM_BACKEND)"
-	@echo "  tasks   = $(TASKS_GLOB)"
+	@echo "  backend   = $(LLM_BACKEND)"
+	@echo "  tasks     = $(TASKS_GLOB)"
+	@echo "  baselines = $(BASELINES)"
 	@if [ "$(LLM_BACKEND)" = "cli" ] && [ -z "$(CLIWRAP_AGENT)" ]; then \
 	    echo ""; \
 	    echo "ERROR: LLM_BACKEND=cli requires CLIWRAP_AGENT to point at the"; \
@@ -192,7 +207,7 @@ eval-llm-smoke: build-no-viewer
 	./bin/ckg eval \
 	    --tasks='$(TASKS_GLOB)' \
 	    --graph=eval/.synthetic-data \
-	    --baselines=alpha \
+	    --baselines=$(BASELINES) \
 	    --llm-backend=$(LLM_BACKEND) \
 	    --llm=$(LLM_MODEL) \
 	    --out=eval/results/latest
