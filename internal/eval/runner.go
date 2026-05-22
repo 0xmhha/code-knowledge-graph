@@ -269,6 +269,23 @@ func extractSymbols(s string) []string {
 		if r >= 0xAC00 && r <= 0xD7A3 {
 			return true
 		}
+		// 2026-05-22 (cycle 7): #, @, and Unicode arrows added as
+		// separators. The post-cycle-6 smoke run surfaced two new
+		// noise classes:
+		//   - VaultService.depositFn#CallSite@153 — β graph dump
+		//     leaks ckg node IDs (`<name>#<kind>@<startByte>`) into
+		//     the prompt verbatim; the LLM copies them into the
+		//     answer. Splitting on # / @ breaks the ID back into a
+		//     dotted-identifier token (`VaultService.depositFn`)
+		//     plus drop-able tail segments.
+		//   - NewHandler→service.New — Claude uses U+2192 to denote
+		//     "X is a caller of Y" in prose. Without the arrow as a
+		//     separator the whole thing reads as one token.
+		// Both fixes are pure splitter-set widening; no existing
+		// dotted-identifier pattern uses these characters.
+		if r == '#' || r == '@' || r == 0x2192 {
+			return true
+		}
 		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"' ||
 			r == '(' || r == ')' || r == '{' || r == '}'
 	}) {
@@ -322,6 +339,16 @@ func extractSymbols(s string) []string {
 		if isProseAbbreviation(tok) {
 			continue
 		}
+		// 2026-05-22 (cycle 7): all-numeric dotted tokens dropped.
+		// Claude responses leak task-description thresholds (`0.7`,
+		// `0.7`) and float literals (`1.0`) as dot-bearing tokens
+		// that survive every previous blacklist. They are never
+		// graph symbols. The test is conservative — all runes must
+		// be digits OR a single dot — so identifiers that happen to
+		// start with a digit (`v1.Func`) still survive.
+		if isAllNumeric(tok) {
+			continue
+		}
 		out = append(out, tok)
 	}
 	return out
@@ -337,6 +364,26 @@ func isProseAbbreviation(tok string) bool {
 		return true
 	}
 	return false
+}
+
+// isAllNumeric reports whether tok consists only of digits and at
+// most one dot (i.e., is a plain numeric literal like "0.7" or
+// "1.0"). Returns false for identifiers that contain digits but
+// also non-digit / non-dot runes (`v1.Func`, `T123.x`).
+func isAllNumeric(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	for _, r := range tok {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // isFileExtension reports whether ext (including the leading dot) is a

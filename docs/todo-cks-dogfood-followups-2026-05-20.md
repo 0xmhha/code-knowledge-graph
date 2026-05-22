@@ -528,14 +528,34 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - **Hangul separator**: FieldsFunc에 *U+AC00..U+D7A3* 추가. 3 unit tests PASS.
   - **`expected.symbols` 같은 YAML key는 *defer* (false positive 위험 큼).
 
-- [ ] **C30** 사용자 *다음 cycle 재실행* (post-cycle6):
-  ```bash
-  make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
-  ```
-  - *Line refs (handler.go:23 등)이 *Hallucinated에서 사라짐* 예상
-  - *Korean 조사 (Vault.deposit을 등)도 *사라짐*
-  - *진짜 LLM hallucination만 남음*
-  - *β run 0 token=0 anomaly 재현 여부 (transient vs deterministic 결정)*
+- [x] **C30 — cycle 6 효과 *검증* + 3 new noise** ✅
+  
+  | Metric | C28 | C30 |
+  |---|---|---|
+  | α halu | 0.062 | **0.042** ↓32% |
+  | β halu | 0.143 | 0.114 ↓20% |
+  | γ halu | 0.089 | **0.074** ↓17% |
+  | δ halu | 0.185 | **0.083** ↓55% |
+  
+  **Verified**:
+  - Line refs (`handler.go:23` 등) 사라짐 ✅
+  - Korean 조사 (`Vault.deposit을` 등) 사라짐 ✅
+  - β run 0 token=0 anomaly *사라짐* — **transient** 확정 (3 runs all `88434 ± 0`)
+  
+  **3 new noise findings**:
+  - `0.7`, `1.0` (γ, δ): numeric literals (task threshold leak)
+  - `VaultService.depositFn#CallSite@153` (β 2/3 runs consistent): node-ID format leak
+  - `NewHandler→service.New` (β run 2): Unicode arrow (U+2192)
+
+- [x] **C31 — cycle 7 noise fix** ✅ (이 commit)
+  - **Numeric literal blacklist**: `0.7`, `1.0` 등 *all-digit + dot* drop. 3 unit tests PASS.
+  - **#/@/→ separator**: `VaultService.depositFn#CallSite@153` 와 `NewHandler→service.New` split. 3 unit tests PASS.
+
+- [ ] **C32** 다음 cycle 후보 (사용자 결정):
+  - **(A) 재실행** — cycle 7 효과 검증
+  - **(B) smartContext audit** — H1 -359.1% root cause (δ가 α의 4.6x context)
+  - **(C) V3 receiver-style heuristic** — `h.vault.Deposit`, `svc.depositFn`, `this.vault.deposit` 같은 *consistent diverged* 7-8건
+  - **(D) β graph dump prompt 수정** — node ID format을 prompt에서 *human-readable*로 변환
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.
