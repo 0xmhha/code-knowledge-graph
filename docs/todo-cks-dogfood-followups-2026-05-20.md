@@ -505,14 +505,37 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - **B (token counting)**: H1 hypothesis가 *input_tokens만 사용*해서 *misleading*. *Claude Code prompt cache가 거의 100%*. *report에 *Total (input + cached) column 추가*, H1이 *total 기준 계산*.
   - **D (graph rebuild + lang expansion)**: `eval-llm-smoke`가 *Go only graph*로 build. *Makefile에 *`--lang=go,ts,sol`* + *force rebuild every run*. `VaultService.depositFn`이 *진짜 TS symbol*인데 *graph에 없어서 hallucination으로 *misclassified*. *graph 갱신으로 *measurement accuracy 회복*.
 
-- [ ] **C28** 사용자 *재실행 권장* (post A+B+D):
+- [x] **C28 — post A+B+D 측정 *대대적 진전*** ✅
+  
+  | Metric | Before (C26) | After A+B+D (C28) | Delta |
+  |---|---|---|---|
+  | β score | 0.000 | **0.821** ✅ | +0.821 |
+  | α halu rate | 0.187 | 0.062 | ↓3x |
+  | γ halu rate | 0.444 | 0.089 | ↓5x |
+  | δ halu rate | 0.363 | 0.185 | ↓2x |
+  | Total tokens | (input only) | α 54K, β 59K, γ 253K, δ 320K | 측정 가능 |
+  | H1 | -86.7% | -488.9% (interpretable) | δ가 α보다 *5.9x 큰 context* |
+  
+  **5 new findings (cycle 6)**:
+  - **β run 0 token=0 anomaly**: input=0, cached=0, output=0 but score=0.71 정상 — cli backend usage parsing transient bug. defer.
+  - **mux.HandleFunc** (α run 0): real LLM invention.
+  - **Line refs** (β/γ/δ): `handler.go:23`, `vault.ts:5`, `Vault.sol:3` — file extension blacklist 한계.
+  - **Korean 조사** (γ/δ): `Vault.deposit을`, `Vault.deposit은` — extractSymbols Hangul handling 부재.
+  - **`expected.symbols`** (δ run 0): YAML fixture key를 *symbol처럼 mention*.
+
+- [x] **C29 — Line ref + Korean noise fix** ✅ (이 commit)
+  - **Line ref blacklist**: `file.ext:N` 패턴 (Go/TS/Sol/etc). 5 unit tests PASS.
+  - **Hangul separator**: FieldsFunc에 *U+AC00..U+D7A3* 추가. 3 unit tests PASS.
+  - **`expected.symbols` 같은 YAML key는 *defer* (false positive 위험 큼).
+
+- [ ] **C30** 사용자 *다음 cycle 재실행* (post-cycle6):
   ```bash
   make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
   ```
-  - *β score 0 → 정상값* 예상
-  - *Total tokens column에 *진짜 prompt size 표시*
-  - *VaultService.depositFn 같은 *TS symbol mention*이 *hallucinated → found/diverged로 *재분류*
-  - *H1 hypothesis check meaningful number*
+  - *Line refs (handler.go:23 등)이 *Hallucinated에서 사라짐* 예상
+  - *Korean 조사 (Vault.deposit을 등)도 *사라짐*
+  - *진짜 LLM hallucination만 남음*
+  - *β run 0 token=0 anomaly 재현 여부 (transient vs deterministic 결정)*
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.

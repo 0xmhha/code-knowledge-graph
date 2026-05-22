@@ -254,6 +254,21 @@ func extractSymbols(s string) []string {
 		// splits the struct-literal placeholder from the type name,
 		// the bare `Vault` then fails the "must contain a dot" check,
 		// and the false positive is gone.
+		//
+		// 2026-05-22 (post-A+B+D smoke run): Hangul characters added
+		// to the separator set. Real Claude responses on Korean prose
+		// produced tokens like `Vault.deposit을` (where `을` is the
+		// Korean accusative particle attached to the symbol). The
+		// validator then classified the whole thing as hallucinated
+		// because nothing in the graph is named `Vault.deposit을`.
+		// Hangul syllable block (U+AC00..U+D7A3) covers every
+		// composed Korean syllable, so any Korean letter touching the
+		// symbol becomes a boundary. Non-syllable Hangul (jamo,
+		// compatibility forms) is rare in prose and not worth the
+		// extra rune ranges right now.
+		if r >= 0xAC00 && r <= 0xD7A3 {
+			return true
+		}
 		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"' ||
 			r == '(' || r == ')' || r == '{' || r == '}'
 	}) {
@@ -272,6 +287,32 @@ func extractSymbols(s string) []string {
 		}
 		if dot := strings.LastIndex(tok, "."); dot >= 0 && isFileExtension(tok[dot:]) {
 			continue
+		}
+		// 2026-05-22 (post-A+B+D smoke run): line-ref blacklist.
+		// Claude responses cite source locations as `file.ext:N`
+		// (`handler.go:23`, `vault.ts:5`, `simple_class.ts:7`,
+		// `Vault.sol:3`). The token contains a dot (file extension)
+		// so it survives the file-extension blacklist above — the
+		// blacklist drops `handler.go` cleanly but `handler.go:23`
+		// keeps the colon-and-line-number suffix that lifts it back
+		// into the candidate set. We split on the last `:`; if the
+		// suffix parses as an integer AND the prefix is a file path
+		// the extension blacklist would catch, drop the whole token.
+		if colon := strings.LastIndex(tok, ":"); colon > 0 && colon < len(tok)-1 {
+			suffix := tok[colon+1:]
+			isNum := true
+			for _, c := range suffix {
+				if c < '0' || c > '9' {
+					isNum = false
+					break
+				}
+			}
+			if isNum {
+				prefix := tok[:colon]
+				if dot := strings.LastIndex(prefix, "."); dot >= 0 && isFileExtension(prefix[dot:]) {
+					continue
+				}
+			}
 		}
 		// Prose abbreviation blacklist (T-04 V1 finding 2026-05-21).
 		// `e.g`, `i.e`, `et.al`, `vs.something` shapes that LLMs use in
