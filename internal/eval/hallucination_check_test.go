@@ -195,13 +195,87 @@ func TestValidateMentions_SingleSegmentSuffix(t *testing.T) {
 	}
 }
 
-// TestValidateMentions_ReceiverStyle_StillDiverged — V2 explicitly
-// does NOT cover receiver-style mentions like `h.vault.Deposit`
-// where `h` is a local variable. The leading variable segment
-// defeats segment-aligned suffix match, so the mention still
-// surfaces in QnameDiverged for V3 design (first-segment-variable
-// heuristic).
-func TestValidateMentions_ReceiverStyle_StillDiverged(t *testing.T) {
+// TestValidateMentions_V3_WellKnownReceivers — V3 strips
+// case-folded membership tokens (`this`, `self`, `svc`, `ctx`,
+// etc.) before retrying the suffix match. The smoke run that
+// motivated V3 saw all three of `this.vault.deposit` /
+// `svc.depositFn` / `h.vault.Deposit` every multi-shot cycle.
+func TestValidateMentions_V3_WellKnownReceivers(t *testing.T) {
+	store := mkStore(
+		types.Node{Name: "Deposit", QualifiedName: "service.Vault.Deposit"},
+		types.Node{Name: "depositFn", QualifiedName: "pages.VaultService.depositFn"},
+	)
+	tests := []struct {
+		name    string
+		mention string
+	}{
+		{name: "this.vault.deposit", mention: "this.vault.deposit"},
+		{name: "self.vault.deposit", mention: "self.vault.deposit"},
+		{name: "svc.depositFn", mention: "svc.depositFn"},
+		{name: "ctx.vault.deposit", mention: "ctx.vault.deposit"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := "call " + tc.mention + " here"
+			got, err := ValidateMentions(out, store)
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
+			if len(got.Hallucinated) != 0 {
+				t.Errorf("Hallucinated: got %v, want empty", got.Hallucinated)
+			}
+			if len(got.QnameDiverged) != 0 {
+				t.Errorf("QnameDiverged: got %v, want empty (V3 should strip well-known receiver)",
+					got.QnameDiverged)
+			}
+			if len(got.Found) != 1 {
+				t.Errorf("Found: got %v, want 1 entry", got.Found)
+			}
+		})
+	}
+}
+
+// TestValidateMentions_V3_NarrowOnPackages — V3 must NOT strip
+// 2+ character lowercase prefixes that could be legitimate
+// package names. `eth.NewBlockChain` against a store qname of
+// `core.NewBlockChain` must still report QnameDiverged: `eth` is
+// a wrong-but-plausible package name, exactly the case the
+// V0/V2 QnameDiverged surface exists to flag.
+func TestValidateMentions_V3_NarrowOnPackages(t *testing.T) {
+	store := mkStore(
+		types.Node{Name: "NewBlockChain", QualifiedName: "core.NewBlockChain"},
+	)
+	out := "see eth.NewBlockChain and os.Open."
+	got, err := ValidateMentions(out, store)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	// eth.NewBlockChain: V3 leaves the 3-char `eth` alone, so
+	// suffix match fails on the segment mismatch and the mention
+	// stays in QnameDiverged.
+	if !sameSet(got.QnameDiverged, []string{"eth.NewBlockChain"}) {
+		t.Errorf("QnameDiverged: got %v, want [eth.NewBlockChain]", got.QnameDiverged)
+	}
+	// os.Open also has a 2-char prefix; V3 leaves it alone. Bare
+	// name `Open` does not resolve in this store, so the mention
+	// lands in Hallucinated.
+	if !sameSet(got.Hallucinated, []string{"os.Open"}) {
+		t.Errorf("Hallucinated: got %v, want [os.Open]", got.Hallucinated)
+	}
+}
+
+// TestValidateMentions_ReceiverStyle_NotDiverged — V3 (2026-05-22,
+// cycle 7 follow-up) covers single-letter receiver prefixes:
+// `h.vault.Deposit` strips `h` and the remaining `vault.Deposit`
+// matches the qname `service.Vault.Deposit` as a case-insensitive
+// suffix. Locks the V3 contract: real receiver-style mentions
+// now land in Found, NOT in QnameDiverged.
+//
+// Bordering case: 2-char lowercase prefixes (`eth.NewBlockChain`)
+// remain in QnameDiverged because V3 deliberately leaves
+// non-single-letter unknown packages alone — covered by
+// TestValidateMentions_QnameDiverged.
+func TestValidateMentions_ReceiverStyle_NotDiverged(t *testing.T) {
 	store := mkStore(
 		types.Node{Name: "Deposit", QualifiedName: "service.Vault.Deposit"},
 	)
@@ -216,8 +290,12 @@ func TestValidateMentions_ReceiverStyle_StillDiverged(t *testing.T) {
 	if len(got.Hallucinated) != 0 {
 		t.Errorf("Hallucinated: got %v, want empty (bare name resolves)", got.Hallucinated)
 	}
-	if !sameSet(got.QnameDiverged, []string{"h.vault.Deposit"}) {
-		t.Errorf("QnameDiverged: got %v, want [h.vault.Deposit] (V3 territory)", got.QnameDiverged)
+	if len(got.QnameDiverged) != 0 {
+		t.Errorf("QnameDiverged: got %v, want empty (V3 strips `h` and the remainder matches)",
+			got.QnameDiverged)
+	}
+	if !sameSet(got.Found, []string{"h.vault.Deposit"}) {
+		t.Errorf("Found: got %v, want [h.vault.Deposit]", got.Found)
 	}
 }
 

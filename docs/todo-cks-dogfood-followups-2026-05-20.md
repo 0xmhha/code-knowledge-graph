@@ -551,11 +551,28 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   - **Numeric literal blacklist**: `0.7`, `1.0` 등 *all-digit + dot* drop. 3 unit tests PASS.
   - **#/@/→ separator**: `VaultService.depositFn#CallSite@153` 와 `NewHandler→service.New` split. 3 unit tests PASS.
 
-- [ ] **C32** 다음 cycle 후보 (사용자 결정):
-  - **(A) 재실행** — cycle 7 효과 검증
-  - **(B) smartContext audit** — H1 -359.1% root cause (δ가 α의 4.6x context)
-  - **(C) V3 receiver-style heuristic** — `h.vault.Deposit`, `svc.depositFn`, `this.vault.deposit` 같은 *consistent diverged* 7-8건
-  - **(D) β graph dump prompt 수정** — node ID format을 prompt에서 *human-readable*로 변환
+- [x] **C32 — V3 receiver-style heuristic** ✅ (이 commit)
+  - `anyQnameMatch`에 *third clause* 추가: *receiver prefix strip + retry suffix match*
+  - `isReceiverPrefix` *narrow heuristic*:
+    - Well-known list: `this`, `self`, `svc`, `ctx`, `req`, `res`, `obj`, `tmp`, `val`, `ref`
+    - Single lowercase letter (`h`, `s`, `c`, `v` 등)
+    - **NOT** 2+ char unknown lowercase (eth/os/io/sql 등 *legit packages*)
+  - V3 cover: `h.vault.Deposit`, `svc.depositFn`, `this.vault.deposit`, `self.vault.deposit`, `ctx.vault.deposit` 모두 *Found로 *재분류*
+  - V3 narrow on: `eth.NewBlockChain`, `os.Open` 등 *2-char+ unknown packages*는 *여전히 QnameDiverged*
+  - 11 unit tests PASS (2 new: V3_WellKnownReceivers, V3_NarrowOnPackages)
+  - 기존 ReceiverStyle test → V3 의도 반영 (StillDiverged → NotDiverged)
+
+- [ ] **C33** 사용자 *재실행 권장* (post-V3):
+  ```bash
+  make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
+  ```
+  - *QnameDiverged 대폭 감소* 예상 (`h.vault.Deposit`, `svc.depositFn` 등 모두 Found 분류)
+  - *Hallucination rate 추가 ↓* 예상 (V3가 *false positives 마지막 cleanup*)
+
+- [ ] **C34** B — smartContext audit (V3 cycle 후):
+  - H1 hypothesis -359% root cause 조사
+  - δ가 α의 4.6x prompt size 사용 — *smartContext가 *narrowing 안 함*
+  - `pkg/smartctx` 코드 audit + 가능 시 fix
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.

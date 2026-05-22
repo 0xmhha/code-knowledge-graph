@@ -179,16 +179,89 @@ func anyQnameMatch(nodes []types.Node, mention string) bool {
 		// it is unambiguously the same symbol. With suffix awareness,
 		// the mention resolves as long as its dot-segments match the
 		// tail of the store qname case-insensitively.
-		//
-		// Receiver-style mentions like "h.vault.Deposit" (where `h` is
-		// a local variable, not a package) are *not* covered by V2 —
-		// the leading variable segment defeats segment-aligned suffix
-		// match. They still surface in QnameDiverged so the V3
-		// "first-segment is a likely variable" heuristic has a hit list
-		// to design against.
 		if isQnameSuffix(n.QualifiedName, mention) {
 			return true
 		}
+		// V3 (2026-05-22, cycle 7 follow-up): receiver-style mentions
+		// like "h.vault.Deposit" or "this.vault.deposit" where the
+		// leading segment is a local variable, not a package. V2
+		// suffix-match fails because the variable segment defeats
+		// segment alignment. V3 strips the leading segment when it
+		// looks like a receiver variable and retries the V2 suffix
+		// match against the stripped form.
+		//
+		// 7-cycle data set showed these consistently appearing as
+		// QnameDiverged across baselines: h.vault.Deposit (every α/γ/δ
+		// run), svc.depositFn (every γ/δ run), this.vault.deposit
+		// (every γ/δ run). They all resolve to real graph symbols
+		// once the receiver prefix drops.
+		//
+		// The heuristic is conservative — see isReceiverPrefix — so
+		// legitimate short package names like `b.New` or `os.Open`
+		// don't get stripped. The exact-equal match above (Q1)
+		// already covers them when the package exists in the graph.
+		if stripped, ok := stripReceiverPrefix(mention); ok {
+			if isQnameSuffix(n.QualifiedName, stripped) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripReceiverPrefix returns the mention with its leading segment
+// removed when that segment looks like a receiver variable
+// (single-letter, short common var name like `svc`/`ctx`/`this`,
+// or any short all-lowercase identifier with no underscore). The
+// boolean reports whether stripping happened — call sites use it
+// to skip the retry path on package-prefix mentions.
+//
+// Conservative cases: a segment qualifies only when len ≤ 4 AND
+// (case-folded set membership OR all-lowercase no-digit no-
+// underscore). That covers the variable names that showed up in
+// the smoke-run data and leaves common short package names alone
+// (e.g. `os`, `io`, `sql` are short but the exact-equal match
+// covers them when they're in the graph).
+func stripReceiverPrefix(mention string) (string, bool) {
+	i := strings.Index(mention, ".")
+	if i <= 0 || i+1 >= len(mention) {
+		return "", false
+	}
+	first := mention[:i]
+	if !isReceiverPrefix(first) {
+		return "", false
+	}
+	return mention[i+1:], true
+}
+
+// isReceiverPrefix decides whether a leading dotted segment looks
+// like a receiver variable rather than a package. Two clauses,
+// intentionally narrow to avoid stripping legitimate short package
+// names like `eth`, `os`, `io`, `sql`:
+//
+//  1. Case-folded membership in a small set of well-known receiver
+//     pronouns / common variable names (`this`, `self`, `svc`,
+//     `ctx`, etc.). These appear in idiomatic Go/TS code and in
+//     prose more or less universally.
+//  2. Single lowercase letter (`h`, `s`, `c`, `v`). Real packages
+//     are virtually always ≥2 runes, so a one-letter dotted
+//     prefix is the call-site receiver pattern by overwhelming
+//     prior. 2-4 char lowercase identifiers (`eth`, `os`, `io`)
+//     are intentionally NOT stripped — too many of them are
+//     legitimate Go/TS package names.
+//
+// The smoke-run data set that motivated V3 (h.vault.Deposit,
+// svc.depositFn, this.vault.deposit) is fully covered by these
+// two clauses; broadening further is queued behind real
+// false-positive evidence.
+func isReceiverPrefix(seg string) bool {
+	switch strings.ToLower(seg) {
+	case "this", "self", "svc", "ctx", "req", "res", "obj", "tmp", "val", "ref":
+		return true
+	}
+	if len(seg) == 1 {
+		r := rune(seg[0])
+		return r >= 'a' && r <= 'z'
 	}
 	return false
 }
