@@ -585,13 +585,40 @@ ckg 단독 결정 불가 — cks가 cross-commit 검색을 정말 필요로 하�
   
   Tests updated: TestWriteCSV expectedCols + row index, TestWriteReport H1 case에 UserPromptBytes 추가.
 
-- [ ] **C35** 사용자 *최종 재실행 권장* (post-V3 + smartContext audit):
+- [x] **C35 — H1 + H2 PASS 첫 도달** ✅
+  
+  | Hypothesis | Target | C26 first measure | **C35 (post-V3+B)** |
+  |---|---|---|---|
+  | H1 token savings | ≥ 50% | -86.7% 🔴 | **+93.0%** ✅ |
+  | H2 score delta | ≥ 0 | +0.208 | **+0.305** ✅ |
+  
+  Plus *γ halucination rate **0.000***, *β std 0* (anomaly 해결).
+  
+  **새 finding**: δ smartContext가 *silent failure* → UserPromptBytes 157 (γ-equivalent). *원인 진단 필요*.
+
+- [x] **C36 — δ smartContext silent failure root cause + fix** ✅ (이 commit)
+  
+  **Root cause**: `rewriteFTSQuery`가 *whitespace로만 split*. *task description의 *`Vault.deposit`* 같은 *dotted identifier가 *single token*으로 들어가서 *prefix wildcard 추가* → `Vault.deposit*` → **FTS5 syntax error**. *δ baseline의 *모든 runs에서 *smartContext fail*. *silent skip*.
+  
+  **Fix**: `rewriteFTSQuery` `FieldsFunc`가 *`.`도 separator로 추가*. dotted identifier가 *segments로 split* → 각 segment *prefix wildcard*. *FTS5 syntax 안전*.
+  
+  **추가 fix**: runner.go의 δ path에 *smartContext error logging* — 향후 silent failure 즉시 visible.
+  
+  Tests:
+  - `TestRewriteFTSQuery_DottedIdentifierSplit` 신설 (4 sub-cases)
+  - 기존 `TrailingPunctuation`, `PowerUserGate` 모두 PASS (regression)
+  
+  Probe로 *실 효과 검증*: `BuildContext("...Vault.deposit")` 가 *5 bodies + 15 summaries* 정상 반환.
+
+- [ ] **C37** 사용자 *최종 검증 재실행* (post-smartContext fix):
   ```bash
   make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
   ```
-  - **V3 효과**: QnameDiverged 대폭 ↓ (`h.*`, `svc.*`, `this.*` 모두 Found)
-  - **H1 metric 의미화**: UserPromptBytes 기준 — *δ가 실제로 *α의 *얼마나 *덜/더 prompt 사용*하는지 *정확히 측정*
-  - 이게 *7-cycle 누적 작업의 *최종 measurement 검증*
+  - **기대**:
+    - δ UserPromptBytes: 157 → ~32KB (smartContext result 정상 append)
+    - δ score 추가 ↑ (richer context)
+    - H1 percent 변동 (δ 추가 context로 ratio 바뀜)
+    - smartContext stderr log *발생 안 함* (fix 작동 시)
 
 - [ ] **C27** V3 receiver-style heuristic (data 더 모은 후 결정):
   - `h.vault.Deposit` 패턴 cover 여부. *현재는 *QnameDiverged*로 surface*만.

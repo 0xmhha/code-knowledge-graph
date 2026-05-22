@@ -749,7 +749,21 @@ func rewriteFTSQuery(q string) string {
 	if strings.ContainsAny(q, `*"`) {
 		return q
 	}
-	fields := strings.Fields(q)
+	// 2026-05-22 (smartContext audit): dotted identifiers in task
+	// descriptions ("List functions that call Vault.deposit") used
+	// to tokenise as a single field `Vault.deposit`. With length ≥4
+	// the rewriter then appended `*` → `Vault.deposit*`, which
+	// FTS5 rejects with `syntax error near "."`. The full call
+	// path: smartctx.BuildContext → store.Search → SearchFTS →
+	// rewriteFTSQuery → fts5 → error. δ baseline ran with no
+	// smartContext context for the entire previous smoke run
+	// because of this. Splitting on `.` (in addition to whitespace)
+	// lines up with the FTS5 tokeniser's own behaviour — it indexes
+	// dotted identifiers as separate tokens, so the rewriter has
+	// nothing to lose by matching that semantics.
+	fields := strings.FieldsFunc(q, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '.'
+	})
 	if len(fields) == 0 {
 		return q
 	}

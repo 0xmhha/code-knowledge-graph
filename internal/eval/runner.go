@@ -158,7 +158,16 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 		}
 	}
 	if b == BaselineDelta {
-		if ctxJSON, err := smartContext(store, t.Description); err == nil {
+		// 2026-05-22 (post-V3 smoke run): smartContext was failing
+		// silently and δ ran with only the task description as
+		// context — UserPromptBytes was 157 (γ-equivalent) instead
+		// of the expected ~32KB. The early `if err == nil` masked the
+		// real failure; we now log the error so the next smoke run
+		// surfaces what's breaking.
+		ctxJSON, err := smartContext(store, t.Description)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task %s/delta: smartContext failed: %v (continuing with bare task description)\n", t.ID, err)
+		} else {
 			user += "\n\n--- get_context_for_task result ---\n" + ctxJSON
 		}
 	}

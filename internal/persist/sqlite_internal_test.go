@@ -53,6 +53,57 @@ func TestRewriteFTSQuery_TrailingPunctuation(t *testing.T) {
 	}
 }
 
+// TestRewriteFTSQuery_DottedIdentifierSplit locks the smartContext
+// audit fix (2026-05-22): a task description like "List functions
+// that call Vault.deposit" used to tokenise `Vault.deposit` as a
+// single ≥4-char field, append `*`, and produce `Vault.deposit*`
+// which FTS5 rejects with "syntax error near \".\"". The rewriter
+// now splits on `.` in addition to whitespace, so each segment
+// becomes its own prefix-matched token.
+//
+// Symptom that motivated this: δ baseline ran with no smartContext
+// context for a full smoke run because store.Search bubbled the
+// FTS error up to BuildContext, which the runner silently swallowed.
+func TestRewriteFTSQuery_DottedIdentifierSplit(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "single dotted identifier splits",
+			in:   "Vault.deposit",
+			want: "Vault* OR deposit*",
+		},
+		{
+			name: "task description with dotted identifier",
+			in:   "find callers of Vault.deposit in the synthetic corpus",
+			// `the` survives as a 3-char token under the existing
+			// drop<3 stop-word heuristic and stays bare (4+ rule
+			// for the prefix-wildcard tail).
+			want: "find* OR callers* OR Vault* OR deposit* OR the OR synthetic* OR corpus*",
+		},
+		{
+			name: "trailing period still trims (regression check)",
+			in:   "consensus.",
+			want: "consensus*",
+		},
+		{
+			name: "multi-segment qname splits to all segments",
+			in:   "service.Vault.Deposit",
+			want: "service* OR Vault* OR Deposit*",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := rewriteFTSQuery(tc.in)
+			if got != tc.want {
+				t.Errorf("rewriteFTSQuery(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRewriteFTSQuery_PowerUserGate locks B3 fix (2026-05-11
 // VERIFICATION_REPORT §7.3): the earlier power-user passthrough triggered
 // on any of `*"():` chars, which mis-classified natural-language
