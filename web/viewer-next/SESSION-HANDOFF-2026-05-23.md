@@ -34,6 +34,59 @@
 - Playwright MCP + dev server + 백엔드 + 사용자 브라우저 동시 띄우면 리소스 압박 발생. 검증은 **사용자 브라우저로만** 진행 권장.
 - 응답 언어: 한글 (사용자 선호). Commit 메시지: English, no co-author, no dev-stage jargon.
 
+### 1.4 검증된 도구 버전 (이번 세션 작업 시점 기준)
+| 도구 | 버전 | 비고 |
+|---|---|---|
+| Node.js | v24.4.0 | Next.js 15 호환 — v20+ 권장 |
+| Go | 1.25.9 darwin/arm64 | `go.mod`은 1.25.5 minimum |
+| sqlite3 (CLI) | 3.43.2 | DB inspect용. backend는 modernc.org/sqlite (CGO 없음) 사용 |
+| npm | (Node v24 동봉) | `package-lock.json` 존재 → `npm ci` 권장 |
+
+OS는 macOS (darwin/arm64)에서 검증. Linux x86_64에서도 동작 예상이나 미검증.
+
+### 1.5 다른 머신 setup 절차 (clean clone부터)
+```bash
+# 1. clone + branch
+git clone https://github.com/0xmhha/code-knowledge-graph.git
+cd code-knowledge-graph
+git checkout main
+
+# 2. Go deps + backend 빌드
+go mod download
+go build -o bin/ckg ./cmd/ckg/
+
+# 3. Viewer deps install (반드시 web/viewer-next/ 안에서)
+cd web/viewer-next
+npm ci
+cd ../..
+
+# 4. (필요 시) 대상 source repo 준비 — 예: go-stablenet
+#    이번 세션은 사용자가 미리 받아둔 로컬 경로를 사용했음:
+#    /Users/wm-it-22-00661/Work/github/stable-net/go-stablenet-latest
+#    다른 머신이라면 본인 환경에 맞게 clone 후 절대경로를 기록해 둘 것.
+#    git clone <stable-net repo URL> /path/to/stable-net
+
+# 5. graph.db 생성 (10~20분 소요 — 1259 Go 파일 + Solidity + TS 파싱 + PageRank/Leiden)
+./bin/ckg build --src /path/to/stable-net --out /tmp/ckg-stablenet
+#    --src: 분석 대상 source root (디렉토리)
+#    --out: graph.db가 저장될 디렉토리 (sqlite + manifest.json)
+#    완료 후 `/tmp/ckg-stablenet/graph.db` + `manifest.json` 생성됨
+
+# 6. 백엔드 기동 (별도 터미널)
+./bin/ckg serve --graph /tmp/ckg-stablenet --port 8080
+#    healthcheck: curl http://localhost:8080/api/manifest | head
+
+# 7. Viewer dev server (별도 터미널)
+cd web/viewer-next && npm run dev
+#    Next.js dev, port 3001. Fast Refresh 사용. 출력에서 "Ready in <ms>" 확인.
+
+# 8. 브라우저 직접 접속
+open "http://localhost:3001/?fresh=$(date +%s)"
+#    ?fresh 쿼리는 dev mode의 308 redirect 캐시 회피
+```
+
+**다른 source repo로도 가능**: `/tmp/ckg-stablenet` 경로는 단순 약속이라 `ckg build --out <어디든>` 후 `ckg serve --graph <같은 경로>`로 맞추기만 하면 됨. node/edge 통계는 source repo 크기에 비례하므로 nodeLimit default 5K가 작은 repo엔 과할 수 있음 (그땐 500 등으로 dial down).
+
 ---
 
 ## 2. 이번 세션의 큰 변경 (4 라운드)
@@ -158,18 +211,31 @@ $ git status -s
 ## 5. 남은 작업
 
 ### 5.1 브라우저 검증 (필수) — Task #16 + #18 마무리
-다음 세션에서 dev server + 백엔드 재기동 후 **반드시 사용자 브라우저로 직접** 확인:
+다음 세션에서 dev server + 백엔드 재기동 후 **반드시 사용자 브라우저로 직접** 확인.
 
-- [ ] **Test 토글 OFF → ON**: test 노드 추가 로드, 화면 갱신 (bottombar의 node count 증가)
-- [ ] **Test 토글 ON → OFF**: production-only로 복귀, 화면 갱신 (이전 라운드 핵심 버그였음)
-- [ ] **nodeLimit select**: 500 / 1K / 2K / 5K / 10K 각각 선택 시 expected count 로드 (사용자가 5K가 무겁다 했으니 1K/2K도 확인)
-- [ ] **nodeLimit 변경 시 자동 refetch**: select 변경 → cooldown 후 새 layout
-- [ ] **노드 클릭 시 visibleIds 유지**: 클릭 전후 bottombar의 node count 동일하고 focus halo만 변함
-- [ ] **anchor 활성 시 dagMode**: caller가 왼쪽 / anchor 중앙 / callee가 오른쪽으로 정렬
-- [ ] **anchor 해제 시 force layout**: anchor null 되면 자유 force 모드로 복귀
-- [ ] **Back 버튼**: 이전 anchor/focus 복원
-- [ ] **패널 close/reopen**: canvas-host width 자동 조정, force-graph가 새 width 반영
-- [ ] **viewport resize**: 1400×900 / 1024×768 / 800×600 각각에서 grid 정상
+**Expected values는 stable-net DB (210K 노드) 기준**. 다른 source repo면 절대값은 다르나 상대 동작은 동일해야 함.
+
+| # | 항목 | 기대 결과 | 확인 방법 |
+|---|---|---|---|
+| 1 | 초기 boot 노드 수 (default 5K, Test OFF) | bottombar `~3,000–5,000 nodes` (top-N pagerank · 매크로 only · test 제외). stable-net은 약 4.8K 예상 | `.bottombar`의 "N nodes / M edges" 표시 |
+| 2 | Test 토글 OFF → ON | 노드 수 증가 (~+1K). bottombar 카운트 갱신 + force layout cooldown 재시작 | bottombar count 변화 |
+| 3 | **Test 토글 ON → OFF** ★ | 노드 수 원래대로 감소. 이게 이전 핵심 버그 | bottombar count 감소 확인 |
+| 4 | nodeLimit 500 | bottombar `≤500 nodes`. cooldown 매우 빠름 (~1s) | select + bottombar |
+| 5 | nodeLimit 1K | bottombar `~1000 nodes` | 동상 |
+| 6 | nodeLimit 10K | bottombar `~10,000 nodes`. cooldown 길어짐 (~6s, isLargeGraph 분기) | 동상 |
+| 7 | nodeLimit 변경 시 자동 refetch | select onChange → 즉시 새 boot fetch (별도 버튼 클릭 불필요) | DevTools Network 탭에서 `/api/nodes/top` 호출 확인 |
+| 8 | **노드 클릭 시 visibleIds 유지** ★ | 클릭 전후 bottombar count **불변**. focus halo만 anchor 주변에 적용 | bottombar count 비교 |
+| 9 | anchor 활성 시 dagMode='lr' | caller가 anchor의 왼쪽 / callee가 오른쪽으로 자동 재배치 | 시각 확인 |
+| 10 | anchor 해제 (Home 또는 다른 노드 클릭) 시 layout | dagMode 해제 → 자유 force 모드로 복귀 | 시각 확인 |
+| 11 | Back 버튼 | 이전 anchor + focusDistance 복원 (visibleIds는 변하지 않으므로 매끄러움) | TopBar `← Back` 클릭 후 anchor 표시 확인 |
+| 12 | 패널 close/reopen | TopBar `📋 Detail ▸/◂` 토글 시 canvas-host width 즉시 조정, force-graph 캔버스가 새 width로 resize | viewport 우측 영역 시각 확인 |
+| 13 | viewport resize | 브라우저 창 크기 변경 시 grid가 따라 변함. 1400×900 / 1024×768 / 800×600 모두 정상 | 창 리사이즈 |
+| 14 | Hydration error 없음 | DevTools Console에 "hydrated but some attributes ... didn't match" **없음** | DevTools Console |
+| 15 | OrbitControls 에러 없음 | 노드 클릭 시 `OrbitControls.onPointerUp` TypeError **없음** (이전 라운드 패치 검증) | DevTools Console |
+
+★ 표시는 이전 세션에서 발견된 핵심 버그 — 반드시 통과해야 함.
+
+**stale-net 외 다른 source repo**라면 노드 수 절대값은 달라지나 상대 동작 (#2/#3/#7/#8/#9/#10/#11/#12) 은 동일해야 함.
 
 ### 5.2 commit 분할 (필수)
 검증 통과 시 user의 commit 스타일 (English, no co-author)로 분할 commit 권장:
@@ -279,7 +345,75 @@ lsof -ti :3001 :8080 2>/dev/null | xargs kill
 
 ---
 
-**Last updated**: 2026-05-23
+---
+
+## 10. 이번 세션의 사용자 의사결정 history
+
+다음 세션 Claude가 "왜 이렇게 결정됐는지" 추론해야 할 때를 위한 의도 보존.
+
+| # | 사용자 발화 (원문 발췌) | Claude의 응답 (요약) | 결과 |
+|---|---|---|---|
+| 1 | "왼쪽과 오른쪽 패널이 canvas에 오버레이로 동작함으로써, canvas의 중앙지점이 ... 중앙이 아니게되는 문제" | grid layout 복귀 제안 | Round 1 |
+| 2 | "테스트 코드의 표현은 default 로 off 하고 ... 테스트 코드를 제외한 실제 동작 코드 관련한 그래프는 처음에 모두 로드해서 보여주는 방식이 한눈에 ... 복잡하게 얽혀있고 사용되고 있는 중요한 프로젝트인지 이해하기 쉬울것" | "처음에 모두 로드"의 범위 묻기 | "Field/Variable/Constant까지 포함 32K" 선택 |
+| 3 | 옵션 4지선다 답변 | Spacing: A+B 둘 다 / Flow: dagMode + arrow / Test: TopBar + default 제외 / Scope: 한 번에 | Round 3 base |
+| 4 | "지금 정도의 수치는 현재 노트북에서는 렌더링을 감당하지 못하네" | 32K → 5K로 다운, 더 보수적인 BOOT_EXCLUDED_TYPES (+ Field/Variable/Constant) | Round 3 끝 |
+| 5 | "TopBar의 Test OFF 버튼에서 ON으로 변경하면 그래프가 다시 그려지는데, 다시 OFF 할때는 아무 변화가 없어. 코드를 검토하고 버그를 수정해야해" | ref-equality pattern bug 진단, zustand subscribe로 refactor | Round 4 (앞부분) |
+| 6 | "버튼으로, 몇개의 노드를 보여줄지 선택할수 있게 해줄수 있어?? pc 의 사양마다 표현할수 있는것이 다르기때문에" | TopBar select dropdown + store nodeLimit | Round 4 (뒷부분) |
+| 7 | "다른 머신, 다른 세션에서 작업을 진행하려고 하면, 완벽하게 이어서 진행할수 있도록 문서가 정리되었어??" | doc에 환경 setup + 사용자 의사결정 history + Claude 지침 보강 | 이 commit |
+
+**다음 세션이 새 결정을 내려야 할 때 참고할 패턴**:
+- "복잡한 그래프" 인상이 중요하다고 사용자가 강조 (#2) → 무조건 작은 N으로 가지 말 것
+- 노트북 사양 제약 명확 (#4) → 무거운 default 피할 것
+- 버그 발견 시 빠른 진단 + 근본 원인 fix 선호 (#5)
+- "버튼으로" 같은 UI 패러다임 선호도 직접 표현 (#6)
+
+---
+
+## 11. 다음 세션 Claude를 위한 작업 지침
+
+다른 머신의 Claude에는 이 사용자의 글로벌 룰 (`~/.claude/CLAUDE.md`)이 없을 가능성이 큼. 이 doc에 핵심을 박아둠.
+
+### 11.1 응답 / 협업 스타일
+- **응답 언어**: 사용자가 한국어로 메시지하면 한국어로 응답. 코드 식별자·경로·commit 메시지는 영어 원어.
+- **Fact 분리**: 추측과 사실을 분리. 확신 라벨 (High / Mid / Low / None) 사용 권장.
+- **간결성**: 헤더·표로 정리. 한국어/영어 혼용 자연스럽게.
+
+### 11.2 코드 변경 원칙
+- **Read before Edit**: 절대 경로로 Read → Edit. 추측 금지.
+- **검증 분리 step**: 변경 직후 `npm run typecheck` + `npm run lint`로 검증. UI 변경이면 브라우저로 확인. 통과 못 하면 사용자에게 보고.
+- **실패 상한**: 동일 오류 3회 / 수정 시도 2회 실패 / 가설이 3개 이상으로 분기 → 사용자에게 보고 후 지시 대기.
+- **에러 silent swallow 금지**: `catch {}` 절대 금지. 단, 라이브러리 버그를 instance-level patch로 막는 경우 (예: 이번 세션 OrbitControls)는 의도 주석 필수.
+- **불변성**: 가변 상태 변경 대신 새 객체 반환.
+- **파일/함수 크기 권장**: 파일 200~400 줄 (상한 800), 함수 < 50 줄, 중첩 ≤ 3.
+
+### 11.3 Git / Commit / Push 규칙
+- **Commit 메시지**: English summary. `Co-Authored-By` 또는 "Generated with [Claude Code]" 류 attribution **포함 금지**.
+- **분할 commit**: 논리적 단위로 묶되 너무 잘게 쪼개지 말 것 (이번 세션은 4 라운드를 한 commit으로 묶었음 — 향후엔 라운드별 분할도 가능).
+- **HEREDOC으로 메시지 전달**: 줄바꿈 보존 위해 `git commit -m "$(cat <<'EOF' ... EOF)"`.
+- **Destructive git 명령 금지**: `push --force`, `reset --hard`, `branch -D` 등은 사용자가 명시적으로 요청한 경우에만.
+- **uncommitted 변경 처리**: 작업 종료 시 uncommitted가 있으면 사용자에게 commit 여부 먼저 확인. 자율 commit/폐기 금지.
+- **lockfile 잔여물**: `.git/index.lock` 발견 시 active git 프로세스 확인 (`ps`) 후 안전히 제거.
+
+### 11.4 작업 흐름 권장
+- 큰 변경 전: TaskCreate로 작업 추적. in_progress → completed 정직히 갱신.
+- 검증 안 끝났는데 commit 진행하지 말 것. 사용자 명시 요청 시는 OK (이번 세션처럼 doc + commit + push로 다른 세션에 넘기는 경우).
+- 새 결정이 필요할 때 (옵션 여러 개) AskUserQuestion 활용. 단 4개 이하.
+- 사용자가 결정한 사항은 추측으로 뒤집지 말 것. 단, 정보가 새로 들어와 분명히 잘못된 게 드러나면 사용자에게 보고 후 결정.
+
+### 11.5 도구 사용 시 리소스 절제
+- **Playwright MCP + dev server + backend 동시 띄우기 자제**. 노트북 부담 큼. 검증은 사용자 브라우저로 직접.
+- Background process는 작업 끝나면 명시적으로 종료 (`lsof -ti :3001 :8080 | xargs kill`).
+- 무한 sleep / 폴링 금지. `Monitor` 또는 `run_in_background` 활용.
+
+### 11.6 이 프로젝트만의 특수 사항
+- viewer는 dev mode (port 3001)와 embedded mode (port 8080) 두 경로로 동작. dev는 next.js이고 embedded는 Go binary가 `internal/server/web_assets/`의 static export를 serve. 둘이 desync될 수 있음.
+- `/tmp/ckg-stablenet`는 단순 경로 약속. 사용자가 다른 source repo로 시험하려면 `--src/--out`만 바꾸면 됨.
+- `react-force-graph`는 props (특히 `width`/`height`)를 mount 시점에만 잡으니 변경 추적 반드시 필요.
+- `subscribeWithSelector` middleware가 store에 이미 적용되어 있음. 새 설정 추가 시 같은 패턴으로 (`state + setter with localStorage + App.tsx subscribe effect with requestId`).
+
+---
+
+**Last updated**: 2026-05-23 (revision 2 — environment/setup/handoff guide added per user request)
 **Session model**: Claude Opus 4.7 (1M context)
-**Files modified this session**: 10 (M) + 2 (NEW viewer) + 1 (NEW handoff doc) = 13
-**Total diff**: +1222 / -165
+**Initial commit**: `efe9db7 feat(viewer): grid layout + boot-once data model + Test/Node controls`
+**This revision commit**: (will appear after next commit)
