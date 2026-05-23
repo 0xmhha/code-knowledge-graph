@@ -40,6 +40,22 @@ function hexAtBrightness(hex: number, b: number): string {
 
 interface Props {
   onNodeClick: (id: NodeId) => void;
+  // width/height are REQUIRED for responsive sizing. The vanilla
+  // `force-graph` Kapsule defaults width/height to
+  // `window.innerWidth`/`window.innerHeight` at construction time
+  // (force-graph.mjs ~line 1020) and writes those values directly to
+  // canvas.style.width/height, overriding any parent CSS sizing. There
+  // is no internal ResizeObserver — the only way to keep the canvas in
+  // sync with its grid cell is to feed dimensions in as props and
+  // update them via App-side ResizeObserver. Omitting them produced a
+  // canvas frozen at full-viewport size that ignored browser resize
+  // and overflowed the `canvas-host` column.
+  width: number;
+  height: number;
+  // H: onEngineStop fires when the d3 force simulation settles. App.tsx
+  // uses that signal to flip viewerReady → true and fade the canvas in;
+  // the user never sees the camera mid-zoom.
+  onEngineStop?: () => void;
 }
 
 export interface GraphCanvasHandle {
@@ -60,7 +76,7 @@ const ZOOM_FACTOR_OUT = 1 / 1.4;
 const ZOOM_DURATION_MS = 200;
 
 const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
-  { onNodeClick },
+  { onNodeClick, onEngineStop, width, height },
   ref,
 ) {
   const fgRef = useRef<unknown>(null);
@@ -97,16 +113,35 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // declare the surface we actually call. Cast the imperative ref once
     // per method instead of re-asserting at every call site.
     type Vec3 = { x: number; y: number; z: number };
+    interface OrbitControlsShim {
+      // OrbitControls.target is a Three.Vector3 we mutate to lock the
+      // orbit pivot onto the focused node (H1 — D1 decision). update()
+      // re-syncs the camera after we move target so the next user drag
+      // orbits around the node, not the world origin.
+      target: { set: (x: number, y: number, z: number) => void };
+      update: () => void;
+    }
     interface FGShim {
       zoom?: (factor: number, duration?: number) => void;
       zoomToFit?: (duration?: number) => void;
       cameraPosition?: (pos?: Vec3, lookAt?: Vec3, duration?: number) => Vec3 | void;
       centerAt?: (x?: number, y?: number, durationMs?: number) => void;
+      // controls() exists only on ForceGraph3D; absent on 2D. Defensive
+      // optional + runtime check so the same shim is safe in both modes.
+      controls?: () => OrbitControlsShim | undefined;
     }
     const fg = (): FGShim | null => (fgRef.current as FGShim | null) ?? null;
     const RESET_3D: Vec3 = { x: 0, y: 0, z: 600 };
     const ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
-    const CENTER_DURATION_MS = 600;
+    // CENTER_DURATION_MS: 600ms felt sluggish in the mintscan A/B —
+    // mintscan's camera settles in roughly half a tick. Drop to 400ms
+    // so a click → focus transition feels reactive without being jarring.
+    const CENTER_DURATION_MS = 400;
+    // DOLLY_FACTOR: shrink current camera distance to 60% on focus so
+    // the selected node fills more frame area (M1 — D5 decision). 1.0
+    // would be the original "keep distance" behaviour; 0.4 was tested
+    // visually but lost too much surrounding context.
+    const DOLLY_FACTOR = 0.6;
 
     const zoom3D = (factor: number) => {
       const f = fg();
@@ -139,13 +174,17 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         else zoom3D(ZOOM_FACTOR_OUT);
       },
       zoomReset() {
-        if (viewModeRef.current === '2d') {
-          fg()?.zoomToFit?.(ZOOM_DURATION_MS);
-        } else {
-          // Pass an explicit lookAt so the camera both translates AND aims
-          // at the origin — passing undefined would preserve the prior
-          // look-at and produce a tilted "reset".
-          fg()?.cameraPosition?.(RESET_3D, ORIGIN, ZOOM_DURATION_MS);
+        // F: both modes prefer zoomToFit — frames the actual node
+        // distribution rather than a hard-coded camera distance. The
+        // 3D branch used to teleport to (0,0,600) which was right for
+        // some graphs and very wrong for others; zoomToFit asks the
+        // library to compute the framing from the live bounding box.
+        fg()?.zoomToFit?.(ZOOM_DURATION_MS);
+        if (viewModeRef.current === '3d') {
+          // Release the focus-lock so subsequent user drags orbit
+          // around the world origin again (H1 D1).
+          const ctrls = fg()?.controls?.();
+          if (ctrls) { ctrls.target.set(0, 0, 0); ctrls.update(); }
         }
       },
       centerOnNode(id: NodeId) {
@@ -164,21 +203,29 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
             f.centerAt?.(n.x, n.y, CENTER_DURATION_MS);
           }
         } else {
-          // 3D: keep the camera's current distance, just move it so it
-          // looks at the node. Easiest robust trick: place the camera
-          // along the +z axis offset from the node by the current
-          // viewing distance.
+          // 3D: dolly-in on the node — shrink the viewing distance to
+          // DOLLY_FACTOR of current so the selected node grows in frame
+          // (mintscan-style cinematic focus). Easiest robust trick: place
+          // the camera along the +z axis offset from the node by the new
+          // (shorter) viewing distance.
           const nz = (n as GraphNode & { z?: number }).z ?? 0;
           if (typeof n.x !== 'number' || typeof n.y !== 'number') return;
           const cur = f.cameraPosition?.() as Vec3 | undefined;
           const dist = cur
             ? Math.sqrt(cur.x ** 2 + cur.y ** 2 + cur.z ** 2) || RESET_3D.z
             : RESET_3D.z;
+          const newDist = dist * DOLLY_FACTOR;
           f.cameraPosition?.(
-            { x: n.x, y: n.y, z: nz + dist },
+            { x: n.x, y: n.y, z: nz + newDist },
             { x: n.x, y: n.y, z: nz },
             CENTER_DURATION_MS,
           );
+          // Focus-locked orbit (H1): point OrbitControls.target at the
+          // node so the user's subsequent drag orbits around the node
+          // rather than the world origin. Persists until next
+          // centerOnNode (new target) or zoomReset (back to origin).
+          const ctrls = f.controls?.();
+          if (ctrls) { ctrls.target.set(n.x, n.y, nz); ctrls.update(); }
         }
       },
     };
@@ -221,6 +268,292 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // the previous mode would point at a disposed object).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- viewMode is the reset trigger, not a read dependency
   const meshIndex = useMemo(() => new Map<NodeId, import('three').Mesh>(), [viewMode]);
+
+  // R1.5-a fix + B2 + A fix: OrbitControls.target init + per-frame
+  // follow of the selected node + bootstrap saveState so the 'change'
+  // event listeners (registered by react-force-graph-3d) don't read .x
+  // on uninitialised target0/position0/zoom0 vectors.
+  //
+  // - Init: controlType="orbit" instantiates OrbitControls but the
+  //   library's dynamic boot doesn't always init controls.target before
+  //   the first update(); Three's update() then reads .x on undefined
+  //   and throws. We additionally call cameraPosition(...) explicitly
+  //   to seed both the camera and OrbitControls.target with a known
+  //   Vector3 (lookAt sync), then saveState() to clone target/position/
+  //   zoom into target0/position0/zoom0 — which is what the dispatch
+  //   listeners crash on when uninitialised.
+  // - Follow (B2): force simulation moves the selected node every tick.
+  //   If controls.target stays at the position we set at click time, the
+  //   visible node drifts away from the orbit pivot — and user drag then
+  //   rotates around a stale point that looks like "wherever the mouse
+  //   first clicked" rather than the selected node.
+  //
+  // We solve both with a single rAF loop: read the selected node's live
+  // position from graphDataRef and copy it into controls.target each
+  // frame (epsilon-gated so we don't churn when nothing moved). No
+  // manual update() call — react-force-graph-3d's own render loop
+  // already calls controls.update() every frame and picks up the new
+  // target on the next pass.
+  useEffect(() => {
+    if (viewMode !== '3d') return;
+    type Vec3Like = {
+      set: (x: number, y: number, z: number) => void;
+      x?: number; y?: number; z?: number;
+    };
+    type ControlsLike = {
+      target?: Vec3Like;
+      update?: () => void;
+      saveState?: () => void;
+      // The _onPointerUp slot is internal Three.js OrbitControls API —
+      // typed loosely because we monkey-patch it once below to swallow
+      // a known library bug. disconnect/connect re-register listeners
+      // against the (now wrapped) reference. Three r182+ made `connect`
+      // require an explicit element argument; without it the base
+      // Controls class just warns and returns, leaving listeners
+      // detached — so we must read `domElement` from the instance
+      // BEFORE disconnect and pass it back on connect.
+      _onPointerUp?: (e: PointerEvent) => void;
+      _onPointerUpPatched?: boolean;
+      domElement?: HTMLElement | null;
+      disconnect?: () => void;
+      connect?: (element?: HTMLElement) => void;
+    };
+    type Vec3 = { x: number; y: number; z: number };
+    type FGShim = {
+      controls?: () => ControlsLike | undefined;
+      cameraPosition?: (pos?: Vec3, lookAt?: Vec3, duration?: number) => Vec3 | void;
+    };
+    // A-fix bootstrap: poll until controls() is ready (dynamic import +
+    // canvas mount can take a few frames), then seed cameraPosition with
+    // an explicit lookAt = origin so OrbitControls.target gets a valid
+    // Vector3. Follow with saveState() to clone {target,position,zoom}
+    // into their *0 backups — the dispatch listeners read those, and
+    // crash when they were created as `new Vector3()` but the source
+    // target was undefined at init time.
+    // bootstrap removed (2026-05-21): every attempt to seed
+    // controls.target on mount — even just target.set+update — caused
+    // ForceGraph-3D's own camera placement to silently fail to render
+    // the graph (canvas stayed blank while data committed correctly).
+    // The TypeError noise from uninitialised target0/position0 vectors
+    // is then a known harmless side effect — they fire from the
+    // library's dispatch listeners but do not interrupt rendering or
+    // user interaction. Re-introducing init is fine only if we also
+    // delay it until ForceGraph's own first frame is past (e.g. via
+    // an onEngineStop callback), which is a separate piece of work.
+    let rafId = 0;
+    let dragging = false;
+    const onDown = () => { dragging = true; };
+    const onUp = () => { dragging = false; };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    const tick = () => {
+      rafId = requestAnimationFrame(tick);
+      // Drag-in-progress: leave controls.target alone. Mutating target
+      // every frame while OrbitControls is computing a delta from the
+      // mouse stream cancels out the rotation (camera and target both
+      // chase the same vector) — drag visibly does nothing. Snap the
+      // target back to the selected node BEFORE mousedown via the
+      // pre-drag pass below, then keep our hands off until mouseup.
+      if (dragging) return;
+      const fg = fgRef.current as FGShim | null;
+      const ctrls = fg?.controls?.();
+      // One-shot defensive patch: 3d-force-graph's dragend handler
+      // dispatches a synthetic `new PointerEvent('pointerup')` on the
+      // document to release OrbitControls' drag state (see
+      // 3d-force-graph.mjs ~line 471). The event has the default
+      // pointerId=0, and if OrbitControls still has a OTHER pointerId
+      // in `_pointers` when this fires, its `case 1:` branch reads
+      // `_pointerPositions[pointerId]` which can be undefined and
+      // crashes on `position.x`. The throw surfaces in the console on
+      // every node click. We can't fix the library; we wrap the
+      // handler so the throw is silently swallowed without altering
+      // any successful-path behaviour.
+      //
+      // Runs BEFORE the `if (!t) return` bail below so the patch can
+      // land even when ctrls.target is still uninitialised (which the
+      // library does on first construction). Idempotent via the
+      // _patched flag so the rAF loop only does this once per controls
+      // instance.
+      if (ctrls && !ctrls._onPointerUpPatched && ctrls._onPointerUp && ctrls.disconnect && ctrls.connect && ctrls.domElement) {
+        const original = ctrls._onPointerUp;
+        const el = ctrls.domElement;
+        ctrls.disconnect();
+        ctrls._onPointerUp = (e: PointerEvent) => {
+          try { original.call(ctrls, e); } catch { /* OrbitControls _pointerPositions race */ }
+        };
+        ctrls.connect(el);
+        ctrls._onPointerUpPatched = true;
+      }
+      const t = ctrls?.target;
+      if (!t) return;
+      const sel = useStore.getState().selectedId;
+      // No selection yet (boot, post-Home, post-clear): leave the
+      // controls.target alone. ForceGraph-3D sets its own initial
+      // camera and target based on the graph extents, and our 0.5-eps
+      // chase to origin was forcing the camera to look at (0,0,0)
+      // even when the nodes had settled elsewhere — boot screen
+      // looked blank as a result. Once the user selects a node we
+      // resume follow logic below.
+      if (!sel) return;
+      const data = graphDataRef.current;
+      const n = data?.nodes.find(x => x.id === sel) as
+        (GraphNode & { z?: number }) | undefined;
+      if (!n || typeof n.x !== 'number' || typeof n.y !== 'number') return;
+      const tx = n.x, ty = n.y, tz = n.z ?? 0;
+      const ctx = t.x ?? 0, cty = t.y ?? 0, ctz = t.z ?? 0;
+      // 0.5 unit epsilon: simulation jitter at rest is well below this,
+      // active migration is well above. Avoids per-frame mutation when
+      // nothing meaningfully changed.
+      if (Math.abs(ctx - tx) > 0.5
+       || Math.abs(cty - ty) > 0.5
+       || Math.abs(ctz - tz) > 0.5) {
+        t.set(tx, ty, tz);
+        // Call update() so the camera recomputes its position around
+        // the new target. Without this, the library's internal render
+        // loop may not pick the change up until the next user input,
+        // leaving the orbit pivot visibly stale.
+        ctrls.update?.();
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [viewMode]);
+
+  // Force tuning — runs ONCE per mount as soon as fg.d3Force is callable.
+  // The defaults (chargeStrength -30, linkDistance ~30) collapse big
+  // graphs into a tight ball; user feedback was "노드들이 너무 뭉쳐있어
+  // 보기 어렵다". We strengthen repulsion and stretch link distance so
+  // hub neighbourhoods unfold legibly, then bump cooldownTicks so the
+  // simulation has time to settle the 30K-node graph the new boot seed
+  // produces. forceCollide would be ideal but requires a direct
+  // dependency on d3-force-3d; deferred until we measure whether the
+  // tuning alone fixes the legibility issue.
+  const forceTunedRef = useRef(false);
+  useEffect(() => {
+    forceTunedRef.current = false;  // re-tune on viewMode/colorMode remount
+  }, [viewMode, colorMode]);
+  useEffect(() => {
+    if (forceTunedRef.current) return;
+    if (graphData.nodes.length === 0) return;
+    type D3Force = { strength?: (n: number) => D3Force; distance?: (n: number) => D3Force };
+    type FGForce = { d3Force?: (name: string, fn?: unknown) => D3Force | undefined };
+    let attempts = 0;
+    const tick = setInterval(() => {
+      attempts++;
+      const fg = fgRef.current as FGForce | null;
+      if (!fg?.d3Force) {
+        if (attempts > 40) clearInterval(tick);  // ~2s give up
+        return;
+      }
+      try {
+        fg.d3Force('charge')?.strength?.(-120);
+        fg.d3Force('link')?.distance?.(80);
+        forceTunedRef.current = true;
+      } catch { /* fall through, library version mismatch */ }
+      clearInterval(tick);
+    }, 50);
+    return () => clearInterval(tick);
+  }, [graphData.nodes.length, viewMode]);
+
+  // B-fix (post-bootstrap): once on first non-empty graphData, schedule
+  // a zoomToFit so the camera frames the actual node distribution. This
+  // doesn't race ForceGraph-3D's initial camera placement (we wait until
+  // graphData is in the canvas) and runs exactly once per mount.
+  //
+  // Why 2.5s: the d3 force simulation runs for cooldownTicks×~16ms ≈
+  // 1280ms and ForceGraph re-centres the camera during that window;
+  // fitting earlier puts the camera around an unsettled centroid.
+  // fitDoneRef makes this idempotent so panel toggles / data refreshes
+  // don't re-fit and yank the user's view.
+  const fitDoneRef = useRef(false);
+  useEffect(() => {
+    if (viewMode !== '3d') return;
+    if (fitDoneRef.current) return;
+    if (graphData.nodes.length === 0) return;
+    fitDoneRef.current = true;
+    const id = setTimeout(() => {
+      type FGFit = { zoomToFit?: (ms?: number, padding?: number) => void };
+      const f = fgRef.current as FGFit | null;
+      f?.zoomToFit?.(400, 60);
+    }, 2500);
+    return () => clearTimeout(id);
+  }, [graphData.nodes.length, viewMode]);
+
+  // M2: BFS-ripple — when a fresh focusDistance lands (after a node
+  // selection / trace) pulse the focused subgraph outward from dist=0,
+  // staggered so dist=1 follows dist=0 by 50ms, dist=2 by 100ms, etc.
+  // Pulse shape: scale 1 → 1.25 → 1 over 350ms via a half-sine. The
+  // whole ripple completes inside ~700ms (safety cap), then every mesh
+  // returns to scale 1. 3D-only this round: ForceGraph-2D's cooldown
+  // loop stops drawing after ~2.5s of idle, so a pulse there needs a
+  // separate refresh strategy (deferred).
+  //
+  // focusDistanceRef avoids restarting the rAF loop on every store
+  // commit — we read the live value from the ref inside the tick.
+  const rippleStartRef = useRef<number | null>(null);
+  const focusDistanceRef = useRef(focusDistance);
+  focusDistanceRef.current = focusDistance;
+  useEffect(() => {
+    if (focusDistance.size > 0) {
+      // Kick off a fresh ripple. Existing ripple in flight gets
+      // truncated and replaced — clicking a new node should always
+      // re-pulse, not queue.
+      rippleStartRef.current = performance.now();
+    }
+  }, [focusDistance]);
+  useEffect(() => {
+    const PULSE_DUR = 350;
+    const STAGGER = 50;
+    const TOTAL = 700;
+    const AMP = 0.25;
+    let rafId = 0;
+    const tick = () => {
+      rafId = requestAnimationFrame(tick);
+      const start = rippleStartRef.current;
+      if (start == null) return;
+      const elapsed = performance.now() - start;
+      const fd = focusDistanceRef.current;
+      if (fd.size === 0 || elapsed > TOTAL) {
+        if (viewMode === '3d') {
+          for (const [, mesh] of meshIndex) mesh.scale.setScalar(1);
+        } else {
+          // 2D: one last refresh so drawNode2D paints at unit scale.
+          const f = fgRef.current as { refresh?: () => void } | null;
+          f?.refresh?.();
+        }
+        rippleStartRef.current = null;
+        return;
+      }
+      if (viewMode === '3d') {
+        for (const [id, mesh] of meshIndex) {
+          const d = fd.get(id);
+          if (d == null) { mesh.scale.setScalar(1); continue; }
+          const e2 = elapsed - d * STAGGER;
+          if (e2 < 0 || e2 > PULSE_DUR) { mesh.scale.setScalar(1); continue; }
+          const t = e2 / PULSE_DUR;
+          // Half-sine: 0 at t=0, 1 at t=0.5, 0 at t=1. Times AMP gives
+          // an additive bump on top of unit scale.
+          mesh.scale.setScalar(1 + AMP * Math.sin(t * Math.PI));
+        }
+      } else {
+        // 2D: ripple scale is computed inside drawNode2D (it reads
+        // rippleStartRef + focusDistance per-node). All we need to
+        // do here is force a redraw every frame — ForceGraph-2D stops
+        // its render loop after cooldown, so without refresh() the
+        // mid-ripple frames never get re-drawn and the pulse is
+        // invisible. The refresh is cheap (just a draw, no force
+        // simulation tick).
+        const f = fgRef.current as { refresh?: () => void } | null;
+        f?.refresh?.();
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [viewMode, meshIndex]);
 
   // Reapply focus halo to existing meshes whenever focusDistance OR
   // dimmedNodes changes. Without dimmedNodes in the deps array the 3D
@@ -317,8 +650,73 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
   };
 
+  // H3 (D3 decision): src→dst alpha gradient overlay. Drawn ON TOP of the
+  // default link line (linkCanvasObjectMode='after'), so the dst end shows
+  // the default colour underneath and the src end gets a brighter cap
+  // that reads as "this is where the call comes from". The overlay line
+  // is widened (×1.6) so the src cap is visibly thicker than the dst
+  // trail — direction without needing to find the arrowhead.
+  //
+  // Trade-off: 'after' mode preserves react-force-graph's dash + arrow
+  // draws for free. The dst-end fade is therefore subtle (the default
+  // line is still there underneath). Switch to 'replace' if a stronger
+  // fade is needed, but then we have to re-implement dash + arrow draws.
+  const linkCanvasObjectMode = (() => 'after') as never;
+  const linkCanvasObject = ((
+    link: GraphEdge & { source?: GraphNode; target?: GraphNode },
+    ctx: CanvasRenderingContext2D,
+  ) => {
+    const a = link.source, b = link.target;
+    if (!a || !b || a.x == null || b.x == null || a.y == null || b.y == null) return;
+    // dimmedNodes / focusDistance match the same brightness model used
+    // by linkColor — so the gradient overlay fades in concert with the
+    // existing focus-halo behaviour instead of fighting it.
+    const dimmed = dimmedNodes.size > 0 &&
+      (dimmedNodes.has(link.src) || dimmedNodes.has(link.dst));
+    const brightness = dimmed ? 0.2 : edgeFocusBrightness(link, focusDistance);
+    if (brightness < 0.3) return; // too faded to bother painting the overlay
+    const baseHex = EDGE_STYLE[link.type]?.color ?? 0x999999;
+    const r = (baseHex >> 16) & 0xff;
+    const g = (baseHex >> 8) & 0xff;
+    const bl = baseHex & 0xff;
+    const srcAlpha = 0.85 * brightness;
+    const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+    grad.addColorStop(0, `rgba(${r},${g},${bl},${srcAlpha})`);
+    grad.addColorStop(1, `rgba(${r},${g},${bl},0)`);
+    ctx.save();
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = linkWidth(link) * 1.6;
+    ctx.setLineDash([]); // overlay is always solid; the dash pattern lives in the underlying default line
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  }) as never;
+
   const drawNode2D = (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-    const r = 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5;
+    let r = 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5;
+    // C: 2D ripple — apply the same dist-staggered half-sine pulse used
+    // by 3D mesh.scale to the radius the 2D rasteriser uses below. The
+    // ripple effect's rAF drives forceGraph.refresh() every frame
+    // during the active window, so each drawNode2D call sees the
+    // current `elapsed` and adjusts r accordingly. Outside the window
+    // (rippleStartRef === null) the multiplier is unity and the cost
+    // is two map lookups + one branch.
+    const start = rippleStartRef.current;
+    if (start != null) {
+      const elapsed = performance.now() - start;
+      if (elapsed <= 700) {
+        const d = focusDistance.get(node.id);
+        if (d != null) {
+          const e2 = elapsed - d * 50;
+          if (e2 >= 0 && e2 <= 350) {
+            const t = e2 / 350;
+            r *= 1 + 0.25 * Math.sin(t * Math.PI);
+          }
+        }
+      }
+    }
     const dimmedByCommunity = node.community_id != null && dimmedCommunities.has(node.community_id);
     // dimmedByImpact: Impact-item click pushed this node into the dim
     // set so the rest of the visible graph stays visible but recedes
@@ -402,28 +800,59 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // Layout key forces a hard remount when viewMode flips so meshes don't leak.
   const key = `fg-${viewMode}-${colorMode}`;
 
+  // anchorId drives dagMode — when set, the layout flips to hierarchical
+  // 'lr' (left-to-right) so caller→anchor→callee lays out left-to-right
+  // and the user can read flow direction by eye. Without an anchor we
+  // stay in pure force mode so the boot view shows the natural
+  // architectural cluster shape. onDagError='remove' tells force-graph
+  // to skip cycle-forming edges in the level assignment (call graphs
+  // routinely have mutual recursion); the edges themselves still render,
+  // just without participating in the level computation.
+  const anchorIdForDag = useStore(s => s.anchorId);
+  const dagMode = anchorIdForDag ? 'lr' : undefined;
+  // Scale cooldown with node count: 80 ticks suffices for the 400-node
+  // boot seed, but the new 30K-node production-only boot needs more
+  // time to settle. cooldownTime caps the wall-clock budget so users
+  // never wait more than ~6s, even on a 60K-node payload.
+  const isLargeGraph = graphData.nodes.length > 8000;
+  const cooldownTicks = isLargeGraph ? 250 : 80;
+  const cooldownTime = isLargeGraph ? 6000 : 2500;
+  // Arrow length pumped 3 → 6, slightly nudged toward dst (0.95 → 0.92)
+  // so the arrowhead reads at the typical zoom level even with the
+  // dst-end gradient overlay (linkCanvasObject) drawn on top.
+  const arrowLength = 6;
+  const arrowRelPos = 0.92;
+
   if (viewMode === '2d') {
     return (
       <ForceGraph2D
         key={key}
         ref={fgRef as never}
+        width={width}
+        height={height}
         graphData={graphData}
         linkSource="src"
         linkTarget="dst"
+        dagMode={dagMode as never}
+        dagLevelDistance={120}
+        onDagError={(() => 'remove') as never}
         nodeLabel={tooltip as never}
         nodeVisibility={nodeVisibility as never}
         linkVisibility={linkVisibility as never}
         linkColor={linkColor as never}
         linkWidth={linkWidth as never}
         linkLineDash={linkLineDash as never}
-        linkDirectionalArrowLength={3}
-        linkDirectionalArrowRelPos={0.95}
+        linkDirectionalArrowLength={arrowLength}
+        linkDirectionalArrowRelPos={arrowRelPos}
+        linkCanvasObject={linkCanvasObject}
+        linkCanvasObjectMode={linkCanvasObjectMode}
         nodeCanvasObject={drawNode2D as never}
         nodePointerAreaPaint={pointerArea2D as never}
-        backgroundColor="#0d0e10"
-        cooldownTicks={80}
-        cooldownTime={2500}
+        backgroundColor="rgba(0,0,0,0)"
+        cooldownTicks={cooldownTicks}
+        cooldownTime={cooldownTime}
         onNodeClick={onClick as never}
+        onEngineStop={onEngineStop as never}
       />
     );
   }
@@ -432,18 +861,35 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     <ForceGraph3D
       key={key}
       ref={fgRef as never}
+      width={width}
+      height={height}
       graphData={graphData}
       linkSource="src"
       linkTarget="dst"
+      // controlType="orbit" so the camera orbits around a fixed target
+      // (which we lock to the selected node in centerOnNode). The library
+      // default is "trackball" — there's no target concept and a user
+      // drag freely rotates the camera, which makes outer nodes drift
+      // out of the frustum (R1.5-a).
+      controlType="orbit"
+      dagMode={dagMode as never}
+      dagLevelDistance={120}
+      onDagError={(() => 'remove') as never}
       nodeLabel={tooltip as never}
       nodeVisibility={nodeVisibility as never}
       linkVisibility={linkVisibility as never}
       linkColor={linkColor as never}
       linkWidth={linkWidth as never}
-      linkDirectionalArrowLength={3}
-      linkDirectionalArrowRelPos={0.95}
-      cooldownTicks={80}
-      cooldownTime={2500}
+      linkDirectionalArrowLength={arrowLength}
+      linkDirectionalArrowRelPos={arrowRelPos}
+      // Transparent clear color so the .canvas-host purple/navy
+      // radial-gradient (globals.css) bleeds through. Without this,
+      // react-force-graph-3d defaults to #000 and the gradient is
+      // hidden behind the WebGL canvas.
+      backgroundColor="rgba(0,0,0,0)"
+      onEngineStop={onEngineStop as never}
+      cooldownTicks={cooldownTicks}
+      cooldownTime={cooldownTime}
       onNodeClick={onClick as never}
       nodeThreeObject={((node: GraphNode) => {
         const m = nodeMesh(node, colorMode);

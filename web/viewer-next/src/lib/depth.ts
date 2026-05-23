@@ -1,17 +1,34 @@
 import type { CommitGraph, NodeId } from '@/types';
 import type { IAPI } from '@/lib/api';
 import { useStore, computeFocusDistance } from '@/store/store';
+import { isTestPath } from '@/lib/testFilter';
 
 const MAX_VISIBLE = 800;
 
-// BOOT_VISIBLE caps the initial seed at 400 nodes — below MAX_VISIBLE so
-// after the user navigates (anchor-driven BFS) more nodes can join the
-// visible set. 400 (raised from 200 in 2026-05-09 after the
-// graphify-comparison audit) is the empirical sweet spot on go-stablenet-
-// scale graphs (~220K nodes / 1.9M edges): enough hub symbols surface that
-// the boot view doesn't read as "data is missing", while force-graph-2d's
-// layout step still settles in <500ms on commodity hardware.
-const BOOT_VISIBLE = 400;
+// Node limit is now driven by store.nodeLimit (user-controllable via
+// the TopBar select). The store enforces a clamp of [100, 100000];
+// recomputeVisible reads the live value at fetch time so a toggle
+// applies on the very next refetch without prop-drilling.
+//
+// Earlier iteration (2026-05-22 morning) loaded 32K production nodes
+// to honour the "load everything once" intent. Real-world test on the
+// user's notebook (2026-05-22 afternoon) showed that scale exceeded
+// available GPU/CPU — every interaction stalled. The default is 5K
+// (notebook-friendly) but the user can dial up or down freely.
+
+// Statement-level + identifier-level node types pulled out of the boot
+// seed. Statements (CallSite/IfStmt/...) are noisy micro-shapes that
+// dominate count without adding architectural insight; Field/Variable/
+// Constant balloon the node count by ~18K on the target repo (mostly
+// implementation detail). Hunk/Commit/Import are infrastructural
+// G6 Temporal nodes the boot view doesn't need either. Users opt
+// any of these in through the NodeTypeFilters panel once they want
+// finer detail — the data stays cached client-side after first fetch.
+const BOOT_EXCLUDED_TYPES: ReadonlyArray<string> = [
+  'CallSite', 'IfStmt', 'ReturnStmt', 'LoopStmt', 'SwitchStmt',
+  'Hunk', 'Commit', 'Import',
+  'Field', 'Variable', 'Constant',
+];
 
 // recomputeVisible builds the next CommitGraph and returns it. It does NOT
 // commit — callers run store.commit() so the renderer sees one push.
@@ -24,30 +41,37 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
   const { anchorId, depth } = s;
 
   if (!anchorId) {
-    // Prefer top-by-pagerank: hub functions/methods/types surface naturally
-    // and 1-hop neighbours show real call/import structure. Fall back to
-    // nodes('') when the new endpoint is missing (older backends, or when
-    // the static export has no pagerank/usage_score values populated).
-    // excludeTypes=['Commit', 'Hunk']: git meta nodes (Commit, Hunk —
-    // schema 1.4/1.8 G6 Temporal) are excluded from PageRank participation
-    // in score.Compute (§11.7 decision), so they land at zero rank and
-    // trail real symbols. The SQL-layer filter still applies defensively
-    // so a future PageRank-rule change can't surprise the boot seed —
-    // and so older graph.dbs (where Commits did outrank symbols, e.g.
-    // 104/200 were Commits in the self-graph) keep the corrected boot
-    // behaviour. Hunk's only inbound edge is `has_hunk` (off in
-    // DEFAULT_EDGE_TYPES) — without exclusion it would produce the same
-    // "node visible but no edges" symptom that drove the original Commit
-    // exclusion in pre-1.8.
-    let top = await api.topNodes('pagerank', BOOT_VISIBLE, ['Commit', 'Hunk']);
-    if (top.length === 0) top = await api.nodes('', BOOT_VISIBLE);
+    // Boot seed = ALL production non-statement nodes (filtered by
+    // excludeTests). topNodes('pagerank', big-limit, BOOT_EXCLUDED_TYPES)
+    // returns every node of the kept types ranked by PageRank — when the
+    // limit exceeds the row count, we get the whole population.
+    //
+    // Fallback to api.nodes('') is preserved for older backends that
+    // don't expose /api/nodes/top, but with a much smaller default since
+    // those backends don't support the excludeTypes filter and the
+    // payload would otherwise include 100K+ statement nodes.
+    let top = await api.topNodes('pagerank', s.nodeLimit, [...BOOT_EXCLUDED_TYPES]);
+    if (top.length === 0) top = await api.nodes('', 5000);
+
+    // Apply test-code filter client-side. Keeping the filter on the
+    // client means the toggle in TopBar reapplies without re-fetching;
+    // the trade-off is wire-time bandwidth, accepted because the
+    // payload still stays well under 32 MB on the target repo.
+    if (s.excludeTests) {
+      top = top.filter(n => !isTestPath(n.file_path));
+    }
+
     s.loadNodes(top);
 
-    // Fetch edges for the seed in one batch — without this the canvas
-    // shows the seed nodes but zero edges between them (V1-1 bug).
+    // Fetch edges for the boot set. With 30K+ nodes we batch the IDs
+    // to keep the POST body under a sane size — Go backend handles
+    // ~5K IDs per request comfortably. Each batch resolves to its
+    // owning edges; we let addEdges dedupe across batches.
     const ids = top.map(n => n.id);
-    if (ids.length) {
-      const fresh = await api.edges(ids);
+    const BATCH = 5000;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const slice = ids.slice(i, i + BATCH);
+      const fresh = await api.edges(slice);
       if (fresh.length) s.addEdges(fresh);
     }
 

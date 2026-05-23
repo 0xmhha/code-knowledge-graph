@@ -39,6 +39,15 @@ const EDGE_STYLES: ReadonlyArray<EdgeStyleEntry> = [
   { groupId: 'G6', label: 'Temporal',    dash: null,            width: 0.6 },
 ];
 
+// fmt2: bound floating-point precision so SVG `points`/`x1`/etc. attributes
+// serialize identically on Node SSR and the browser. Math.cos/sin can return
+// last-bit-different doubles on the two platforms (different libm builds),
+// producing strings like "10.897114317029974" vs "10.897114317029976" — same
+// number, different React hydration attribute, triggering hydration mismatch
+// warnings on every reload. parseFloat strips trailing zeros (so "5.000" →
+// "5") which keeps the served HTML compact.
+const fmt2 = (n: number): number => parseFloat(n.toFixed(2));
+
 function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
   const cx = 9, cy = 7;
   switch (shape) {
@@ -48,7 +57,7 @@ function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
       const pts: string[] = [];
       for (let i = 0; i < 6; i++) {
         const ang = (Math.PI / 3) * i;
-        pts.push(`${cx + 4.5 * Math.cos(ang)},${cy + 4.5 * Math.sin(ang)}`);
+        pts.push(`${fmt2(cx + 4.5 * Math.cos(ang))},${fmt2(cy + 4.5 * Math.sin(ang))}`);
       }
       return <svg width={18} height={14}><polygon points={pts.join(' ')} fill="#9aa" /></svg>;
     }
@@ -67,7 +76,7 @@ function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
       for (let i = 0; i < 10; i++) {
         const r = i % 2 === 0 ? 5 : 2;
         const ang = (Math.PI / 5) * i - Math.PI / 2;
-        pts.push(`${cx + r * Math.cos(ang)},${cy + r * Math.sin(ang)}`);
+        pts.push(`${fmt2(cx + r * Math.cos(ang))},${fmt2(cy + r * Math.sin(ang))}`);
       }
       return <svg width={18} height={14}><polygon points={pts.join(' ')} fill="#ffd700" /></svg>;
     }
@@ -99,10 +108,10 @@ function ShapeIcon({ shape }: { shape: ShapeEntry['shape'] }) {
           {[0, 60, 120].map(deg => (
             <line
               key={deg}
-              x1={cx - 4 * Math.cos((deg * Math.PI) / 180)}
-              y1={cy - 4 * Math.sin((deg * Math.PI) / 180)}
-              x2={cx + 4 * Math.cos((deg * Math.PI) / 180)}
-              y2={cy + 4 * Math.sin((deg * Math.PI) / 180)}
+              x1={fmt2(cx - 4 * Math.cos((deg * Math.PI) / 180))}
+              y1={fmt2(cy - 4 * Math.sin((deg * Math.PI) / 180))}
+              x2={fmt2(cx + 4 * Math.cos((deg * Math.PI) / 180))}
+              y2={fmt2(cy + 4 * Math.sin((deg * Math.PI) / 180))}
               stroke="#44aaff" strokeWidth={1.4} strokeLinecap="round"
             />
           ))}

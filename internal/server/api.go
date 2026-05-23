@@ -84,15 +84,19 @@ func (s *Server) handleNodes(w http.ResponseWriter, r *http.Request) {
 // shows hub functions/types rather than disconnected Package nodes.
 //
 // metric defaults to "pagerank" when missing — the viewer's primary boot
-// metric. limit is bounded to 1000 to keep the JSON response size sane;
-// the viewer caps its initial visible set at 200 anyway.
+// metric. limit is bounded to 100000 (raised from 1000 in 2026-05-22) so
+// the viewer can pre-load its entire production node set in a single
+// request and avoid the "every selection re-fetches" UX. JSON payload
+// size stays manageable at the ceiling — ~40MB worst case for an all-
+// types pull on a 100K-node repo, scales linearly down for the typical
+// excludeTypes-filtered boot.
 func (s *Server) handleTopNodes(w http.ResponseWriter, r *http.Request) {
 	metric := r.URL.Query().Get("metric")
 	if metric == "" {
 		metric = "pagerank"
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 1000 {
+	if limit <= 0 || limit > 100000 {
 		limit = 200
 	}
 	// excludeTypes is a comma-separated list ("Commit,Hunk"). Empty entries

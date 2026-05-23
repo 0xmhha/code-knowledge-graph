@@ -3,9 +3,16 @@ html, body {
   padding: 0;
   height: 100%;
   width: 100%;
-  overflow: hidden;
+  /* overflow: auto (was hidden): when the user's actual viewport is
+     smaller than what the 4-column grid can compress to, we want the
+     browser to show scrollbars rather than silently clip the right
+     edge / bottom bar off-screen. The grid still tries to fit by
+     clamping panel width down to its 240px floor and letting the 1fr
+     canvas shrink — body scroll only kicks in when even that minimum
+     exceeds the viewport. */
+  overflow: auto;
   font-family: -apple-system, system-ui, sans-serif;
-  background: #0d0e10;
+  background: #15171c;
   color: #e6e7e9;
 }
 
@@ -14,7 +21,27 @@ html, body {
   /* Row 1 (auto) is reserved for the optional stale-banner. When the banner
      is absent the row collapses to 0px (no children). Without this row the
      banner shoves TopBar into the 1fr canvas row, breaking the layout. */
-  grid-template-rows: auto 32px 1fr 28px;
+  /* minmax(0, 1fr) is critical: the default `1fr` resolves to
+     `minmax(auto, 1fr)`, where the auto floor takes the implicit
+     min-content of whatever lives in the row. On a 13" viewport the
+     canvas-host content (force-graph wrapper + canvas + CanvasLegend)
+     comes in around 600px of min-content, which pushes the 1fr row
+     past viewport height and shoves the bottombar (row 4) off-screen.
+     Floor at 0 so the row shrinks to fit; the canvas-host then needs
+     its own overflow rule below to clip its larger child. */
+  grid-template-rows: auto 32px minmax(0, 1fr) 28px;
+  height: 100%;
+  width: 100%;
+  /* min-width: the smallest the 4-column grid can compress to —
+     nav(52 collapsed) + callflow(0 hidden) + canvas(0 via minmax) +
+     panel(240 floor) = 292. Force at least that so the grid never
+     compresses below a usable layout; below this width, body's
+     overflow:auto kicks in and the browser scrolls horizontally.
+     min-height likewise covers the row-3 minmax(0,1fr) flooring at 0
+     — without a vertical floor a really short viewport hides the
+     canvas + panel altogether. */
+  min-width: 292px;
+  min-height: 400px;
   /* Three-column layout (#4 Call Flow):
        col 1: optional CallFlow side panel (260–320px). Hidden when no
               anchor is set; the column collapses to 0px so the canvas
@@ -35,22 +62,36 @@ html, body {
      usable share, never below 240px (legibility floor for NodeList +
      EdgeFilters labels). At 720px viewport: panel ≈ 240px, canvas ≈
      480px — both visible. */
-  grid-template-columns: 0px minmax(0, 1fr) clamp(240px, 32vw, 360px);
-  height: 100vh;
-  width: 100vw;
+  /* 4-column layout — each side surface takes a real grid column so the
+     canvas-host cell shrinks to the unoccluded middle band. The canvas's
+     own geometric centre then naturally lines up with the visible centre,
+     so force-graph's centering forces and zoomToFit framing don't bias
+     into the area the user can't see.
+       col 1: SideNav (52px, always present)
+       col 2: CallFlow (clamp 220–300, or 0 when no anchor)
+       col 3: canvas-host (minmax(0, 1fr) — see note below)
+       col 4: detail Panel (panelWidth via inline style, or 0 when hidden)
+
+     CSS holds the SSR-safe default (all side columns 0 except SideNav).
+     App.tsx mounts and applies the live inline grid-template-columns from
+     state — `mounted` gate keeps SSR HTML and first client render
+     identical (React #418 safe).
+
+     minmax(0, 1fr) for the canvas column (not bare `1fr`) is necessary
+     because `1fr` resolves to `minmax(auto, 1fr)`, whose auto floor
+     follows min-content of children. The canvas's intrinsic min-content
+     on narrow viewports otherwise pushes the column past viewport width,
+     body overflow:auto kicks in, a horizontal scrollbar steals 15px from
+     #app, and the panel column flickers as it loses width. Floor at 0
+     so the canvas-host shrinks to whatever the grid hands it. */
+  grid-template-columns: 52px 0 minmax(0, 1fr) 0;
+  position: relative;
   /* No grid-template-columns transition. Animating a layout property
      while the canvas re-runs its force simulation produced a visible
      panel flash on selection changes — the panel briefly slid as the
      column width interpolated and the canvas resized mid-animation.
      Snap-toggle is jarring once but never flashes. */
 }
-/* When CallFlow is active (anchor set), the left column expands to a
-   readable width. The viewer adds .has-callflow alongside any panel-state
-   class (.no-panel / default) so the rules compose. */
-#app.has-callflow { grid-template-columns: clamp(260px, 22vw, 320px) minmax(0, 1fr) clamp(240px, 32vw, 360px); }
-#app.no-panel { grid-template-columns: 0px minmax(0, 1fr) 0px; }
-#app.no-panel.has-callflow { grid-template-columns: clamp(260px, 22vw, 320px) minmax(0, 1fr) 0px; }
-#app.no-panel .panel { display: none; }
 
 /* Detail toggle — the prominent button users actually find. The plain
    ⇆ glyph used to live with the rest of the topbar buttons, easily
@@ -69,9 +110,64 @@ html, body {
 .topbar-detail-toggle.is-open { border-color: #44aaff; color: #7ab8ff; }
 .topbar-detail-toggle:hover { background: #2a2c30; }
 
+/* Test ON/OFF toggle — surfaced in TopBar so users can include/exclude
+   test code from the view without opening the filter panel. Default is
+   OFF (production-only). When ON, the button picks up a warning-amber
+   accent because including tests roughly doubles the node count
+   (84K test nodes on the go-stablenet target) and force layout slows. */
+.topbar-test-toggle {
+  background: #232529;
+  color: #cfd0d3;
+  border: 1px solid #3a3c40;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  min-height: 24px;
+  font-family: ui-monospace, monospace;
+}
+.topbar-test-toggle.is-on { border-color: #ff9800; color: #ffcc66; }
+.topbar-test-toggle:hover { background: #2a2c30; }
+.topbar-test-toggle.is-on:hover { background: #3a2a00; }
+
+/* Node-limit selector — small inline select that lets users choose
+   how many nodes the boot seed loads. The wrapping <label> keeps the
+   icon and the native <select> aligned and clickable as one unit. */
+.topbar-node-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #232529;
+  color: #cfd0d3;
+  border: 1px solid #3a3c40;
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  min-height: 24px;
+  cursor: pointer;
+}
+.topbar-node-limit:hover { background: #2a2c30; }
+.topbar-node-limit select {
+  background: transparent;
+  color: inherit;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+}
+/* Re-style the dropdown options in a dark colour (native popup is
+   styled per-OS but most modern browsers honour the option element's
+   bg/colour for the dropdown). */
+.topbar-node-limit select option { background: #232529; color: #cfd0d3; }
+
 .topbar {
-  grid-column: 1 / span 3;
+  grid-column: 1 / -1;
   grid-row: 2;
+  position: relative;
+  z-index: 20;
   padding: 4px 8px;
   background: #1a1c1f;
   display: flex;
@@ -147,14 +243,41 @@ html, body {
    them in adjacent columns. z-index:0 keeps it below the explicit
    z-index:1 on .panel below. */
 .canvas-host {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 3;
   position: relative;
   min-width: 0;
+  min-height: 0;
+  /* ForceGraph's canvas can briefly be larger than this column (e.g.
+     between the prop-update and the simulation re-layout, or when the
+     library's default 800×600 falls back into play). Clip overflow so
+     a too-large canvas can't push the grid sideways or overflow into
+     the panel/bottombar. */
+  overflow: hidden;
   isolation: isolate;
   z-index: 0;
+  /* Purple/navy radial gradient base. ForceGraph's own canvas paints
+     transparent on top via backgroundColor="rgba(0,0,0,0)", so this
+     bleeds through and gives the otherwise-flat dark canvas a sense
+     of depth — D2 decision (2026-05-21). The ellipse is offset
+     slightly up-left of centre so the focused subgraph (typically
+     near the centre after centerOnNode) sits in the brightest band
+     without the gradient masking node hue. */
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 45% 38%,
+      rgba(80, 70, 140, 0.32) 0%,
+      rgba(40, 50, 90, 0.18) 45%,
+      rgba(20, 22, 30, 0) 80%
+    ),
+    #15171c;
 }
 .canvas-host > div { width: 100%; height: 100%; min-width: 0; }
+/* H: hidden until ForceGraph's first onEngineStop fires; .viewer-ready
+   gets added by App.tsx and triggers a 250ms opacity ramp so the
+   initial zoom-to-fit and any settling motion happen off-screen. */
+.canvas-host { opacity: 0; transition: opacity 250ms ease-out; }
+.canvas-host.viewer-ready { opacity: 1; }
 
 /* Panel — deliberately stronger visual treatment because the canvas
    (#0d0e10) and the previous panel bg (#1a1c1f) sat ~6% lightness
@@ -190,10 +313,15 @@ html, body {
 }
 
 .panel {
-  grid-column: 3;
+  /* Panel takes col 4 of #app's grid. Width is controlled by the
+     parent's grid-template-columns (set inline from App.tsx state).
+     When the user closes the panel, App.tsx renders #app with a 0px
+     col 4 — the panel element stays mounted (so React state on its
+     children survives the toggle) but visually collapses. */
+  grid-column: 4;
   grid-row: 3;
   position: relative;
-  z-index: 1;
+  z-index: 15;
   background: #1f2329;
   border-left: 2px solid #44aaff;
   box-shadow: -8px 0 16px rgba(0, 0, 0, 0.4) inset;
@@ -201,10 +329,49 @@ html, body {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  /* R1.5-b + J: always show a scrollbar (overflow-y: scroll, not auto)
+     so the affordance is permanent regardless of content height —
+     users were missing the auto-hiding bar and reading "no scroll" as
+     "panel cut off". scrollbar-width: thin is the Firefox-side
+     equivalent of the ::-webkit-scrollbar rules below. */
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #44aaff #1a1c1f;
 }
+/* F (visible scroll): users were missing the panel's overflow because
+   the default WebKit scrollbar (3-5px, dark grey on dark background)
+   blended into the panel. Widen and tint the thumb so "there is more
+   below" reads as an affordance, not a quirk. */
+/* -webkit-appearance: none is the critical bit on macOS: without it
+   Safari/Chrome use the native auto-hiding overlay scrollbar (visible
+   only while scrolling) regardless of how we style ::-webkit-scrollbar.
+   Setting appearance: none switches the browser to the classic
+   permanently-visible scrollbar slot, which our styles then customise. */
+.panel::-webkit-scrollbar {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+}
+.panel::-webkit-scrollbar-track { background: #1a1c1f; }
+.panel::-webkit-scrollbar-thumb {
+  background: #44aaff;
+  border-radius: 6px;
+  border: 2px solid #1f2329;
+  min-height: 40px;
+}
+.panel::-webkit-scrollbar-thumb:hover { background: #7ab8ff; }
 
 .node-list {
-  flex: 1 1 35%;
+  /* M: vh-relative cap so the eight panel children sum to ≤ panel column
+     height regardless of viewport. Targets: list 18vh + detail 20vh +
+     legend 10vh + trace 6vh + node-types 10vh + edge-filters 12vh +
+     tickets 8vh + recovery 8vh = 92vh, leaving room for the column's
+     32px topbar / 28px bottombar offset. Each child gets its own
+     overflow-y so its own content scrolls inside instead of pushing
+     siblings out of the viewport. */
+  flex: 0 0 auto;
+  max-height: 18vh;
   overflow-y: auto;
   border-bottom: 1px solid #2a2c30;
   padding: 4px;
@@ -250,7 +417,8 @@ html, body {
 }
 
 .node-detail {
-  flex: 1 1 35%;
+  flex: 0 0 auto;
+  max-height: 20vh;
   overflow-y: auto;
   padding: 8px 10px;
   font-size: 12px;
@@ -411,7 +579,8 @@ html, body {
 }
 
 .legend {
-  flex: 1 1 30%;
+  flex: 0 0 auto;
+  max-height: 10vh;
   overflow-y: auto;
   border-top: 1px solid #2a2c30;
   padding: 6px 8px;
@@ -448,6 +617,9 @@ html, body {
   padding: 6px 8px;
   border-top: 1px solid #2a2c30;
   font-size: 11px;
+  max-height: 12vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 .edge-filters h4 { font-size: 11px; margin: 0 0 4px 0; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; }
 
@@ -596,6 +768,9 @@ html, body {
   padding: 6px 8px;
   border-top: 1px solid #2a2c30;
   font-size: 11px;
+  max-height: 10vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 .node-type-filters h4 {
   font-size: 11px;
@@ -771,6 +946,9 @@ html, body {
   flex-wrap: wrap;
   gap: 6px;
   align-items: center;
+  max-height: 8vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 .trace-controls h4 {
   font-size: 11px;
@@ -813,8 +991,10 @@ html, body {
 .trace-controls button.active { background: #2a3140; border-color: #7ab8ff; }
 
 .bottombar {
-  grid-column: 1 / span 3;
+  grid-column: 1 / -1;
   grid-row: 4;
+  position: relative;
+  z-index: 20;
   background: #1a1c1f;
   padding: 3px 8px;
   font-size: 11px;
@@ -830,7 +1010,7 @@ html, body {
    bottombar in the 1fr canvas slot. Hence the explicit grid-row on
    .topbar/.canvas-host/.panel/.bottombar above. */
 .stale-banner {
-  grid-column: 1 / span 3;
+  grid-column: 1 / -1;
   grid-row: 1;
   background: #5a4a00;
   color: #fff;
@@ -1142,10 +1322,14 @@ html, body {
    collapses col 1 to 0px in that case — the explicit display:none is
    defensive in case the column gets a non-zero default). */
 .call-flow {
-  grid-column: 1;
+  /* CallFlow takes col 2 of #app's grid. Visibility is driven by the
+     parent's grid-template-columns — col 2 width is 0 when there's
+     no anchor, and clamp(220px, 22vw, 300px) when an anchor is set.
+     Border-right gives the cyan accent next to the canvas. */
+  grid-column: 2;
   grid-row: 3;
   position: relative;
-  z-index: 1;
+  z-index: 14;
   background: #1f2329;
   border-right: 2px solid #44aaff;
   box-shadow: 8px 0 16px rgba(0, 0, 0, 0.4) inset;
@@ -1236,6 +1420,9 @@ html, body {
   background: rgba(120, 60, 40, 0.08);
   border-radius: 6px;
   font-size: 11px;
+  max-height: 8vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 .recovery-header {
   width: 100%;
@@ -1363,6 +1550,9 @@ html, body {
   background: rgba(60, 90, 140, 0.08);
   border-radius: 6px;
   font-size: 11px;
+  max-height: 8vh;
+  overflow-y: auto;
+  flex: 0 0 auto;
 }
 .ticket-header {
   width: 100%;
@@ -1560,3 +1750,97 @@ html, body {
 .diff-del { color: #ff8787; }
 .diff-hunk-header { color: #74c0fc; }
 .diff-context { color: #ccc; }
+
+/* ── SideNav (R2) ─────────────────────────────────────────────────────
+   Leftmost column hosting placeholder navigation items. Icon-only,
+   fixed 52px width — the expand mode was removed because the sidebar
+   is reserved real estate for future navigation, not a primary
+   surface. Item labels surface as a floating tooltip on hover. */
+.side-nav {
+  /* SideNav takes col 1 of #app's grid (fixed 52px). Width comes from
+     #app's grid-template-columns; the element itself stretches to fill
+     its track via the default `align-self: stretch`. */
+  grid-column: 1;
+  grid-row: 3;
+  position: relative;
+  z-index: 16;
+  background: #16181c;
+  border-right: 1px solid #2a2c30;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  /* overflow: visible so the hover tooltip can float past the right
+     edge of the column. .side-nav-items also stays overflow:visible
+     for the same reason; if ITEMS grows past the column height the
+     individual tooltips would need to switch to position:fixed. */
+  overflow: visible;
+}
+
+.side-nav-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  /* overflow-y: visible so the tooltip on the rightmost item can
+     escape the list bounds. If ITEMS grows past the column height
+     later, switch to auto and pair with `overflow-x: visible` (which
+     CSS doesn't let you mix per-axis without a transform/clip hack;
+     simplest is to wrap each tooltip in a position:fixed element at
+     that point). */
+  overflow: visible;
+  min-height: 0;
+}
+.side-nav-item {
+  position: relative;
+}
+.side-nav-btn {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: #cfd0d3;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1.2;
+}
+.side-nav-btn:hover { background: #232529; color: #7ab8ff; }
+.side-nav-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.side-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  width: 24px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+/* Tooltip — sibling of the button so absolute positioning anchors on
+   .side-nav-item and the tooltip can float past .side-nav's overflow
+   clip via position: fixed-like behaviour through z-index isolation
+   above. Default invisible; opacity transitions on item hover so the
+   tooltip fades in without layout shift. */
+.side-nav-tooltip {
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 6px;
+  background: #1f2329;
+  color: #e6e7e9;
+  border: 1px solid #44aaff;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 100ms ease;
+  z-index: 50;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.side-nav-item:hover .side-nav-tooltip { opacity: 1; }
+

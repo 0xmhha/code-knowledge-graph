@@ -26,6 +26,10 @@ export default function TopBar({
   const colorMode = useStore(s => s.colorMode);
   const setViewMode = useStore(s => s.setViewMode);
   const setColorMode = useStore(s => s.setColorMode);
+  const excludeTests = useStore(s => s.excludeTests);
+  const setExcludeTests = useStore(s => s.setExcludeTests);
+  const nodeLimit = useStore(s => s.nodeLimit);
+  const setNodeLimit = useStore(s => s.setNodeLimit);
 
   return (
     <div className="topbar">
@@ -80,6 +84,35 @@ export default function TopBar({
       >
         {colorMode === 'lang' ? 'LANG' : 'COMMUNITY'}
       </button>
+      <button
+        type="button"
+        className={`topbar-test-toggle${excludeTests ? '' : ' is-on'}`}
+        title={excludeTests
+          ? 'Test code is hidden. Click to load + show test files (_test.go / .test.ts / .spec.ts / tests/).'
+          : 'Test code is shown. Click to hide and re-load production-only.'}
+        onClick={() => setExcludeTests(!excludeTests)}
+      >
+        🧪 Test {excludeTests ? 'OFF' : 'ON'}
+      </button>
+      {/* Node-limit selector — lets users dial the boot seed up or
+          down based on their hardware. Lower = faster cooldown +
+          smoother interaction; higher = more architecture visible at
+          once. Changing the value triggers a refetch via the same
+          subscribe handler that watches excludeTests. */}
+      <label className="topbar-node-limit" title="Max nodes to load (top by PageRank). Lower for weaker machines.">
+        <span aria-hidden="true">📊</span>
+        <select
+          value={nodeLimit}
+          onChange={(e) => setNodeLimit(parseInt(e.target.value, 10))}
+          aria-label="Node count limit"
+        >
+          <option value={500}>500</option>
+          <option value={1000}>1K</option>
+          <option value={2000}>2K</option>
+          <option value={5000}>5K</option>
+          <option value={10000}>10K</option>
+        </select>
+      </label>
       <button
         type="button"
         className={`topbar-detail-toggle${panelOpen ? ' is-open' : ''}`}

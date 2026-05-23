@@ -25,8 +25,12 @@ const DEFAULT_NODE_TYPES_ON: ReadonlyArray<string> = [
   // Symbols: top-level declarations
   'Function', 'Method', 'Type', 'Struct', 'Interface', 'TypeAlias',
   'Class', 'Enum', 'Contract',
-  // Members: per-symbol storage and fields
-  'Field', 'Variable', 'Constant',
+  // Members: Field/Variable/Constant intentionally excluded from the
+  // default whitelist. They balloon node count ~18K on the target
+  // repo without contributing to the architectural picture the boot
+  // view tries to convey. Users opt them in via NodeTypeFilters;
+  // backend boot seed (BOOT_EXCLUDED_TYPES in lib/depth.ts) keeps
+  // them out of the initial fetch too so opt-in needs a re-load.
   // Containers: scopes and route entrypoints
   'Package', 'File', 'Endpoint', 'MessageType',
   // Concurrency primitives (Go) / VCS meta nodes
@@ -129,6 +133,26 @@ interface State {
   traceDirection: TraceDirection;
   traceDepth: number;
 
+  // excludeTests: when true (default), test-code nodes (file_path
+  // matches isTestPath) are filtered out of the boot seed and any
+  // visibility recomputation. TopBar exposes a toggle button so users
+  // can flip it without re-opening the filter panel. Persisted via
+  // localStorage ('ckg.excludeTests') so a user who turned tests ON
+  // doesn't have to do it every session.
+  //
+  // Lives in store (not in App.tsx state) because both the data layer
+  // (lib/depth.recomputeVisible reads it during boot) and the UI layer
+  // (TopBar button reflects + writes it) need to stay in lockstep
+  // without prop-drilling.
+  excludeTests: boolean;
+
+  // nodeLimit: maximum nodes the boot seed requests from the backend
+  // (top-N by PageRank). Lower values run smoothly on constrained
+  // hardware (laptops, low-power machines); higher values surface more
+  // of the architecture at the cost of force-simulation cooldown time.
+  // Range UI-bounded to [500, 10000]. Persisted via localStorage.
+  nodeLimit: number;
+
   // Perf meter.
   lastRenderMs: number;
 
@@ -187,6 +211,8 @@ interface State {
   popHistory: () => HistorySnapshot | null;
   setTraceDirection: (d: TraceDirection) => void;
   setTraceDepth: (n: number) => void;
+  setExcludeTests: (v: boolean) => void;
+  setNodeLimit: (n: number) => void;
   setLastRenderMs: (n: number) => void;
   setSelectedIssueID: (id: string | null) => void;
   // hydrateFromStorage applies persisted preferences (graphModeIsolation,
@@ -284,6 +310,16 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   historyStack: [],
   traceDirection: 'both',
   traceDepth: 2,
+  // excludeTests default TRUE matches user intent ("test 코드를 제외하고
+  // 보여지는 기능이 필요해"). Hydrated from localStorage post-mount via
+  // hydrateFromStorage; SSR snapshot uses the default to keep React #418
+  // safe.
+  excludeTests: true,
+  // nodeLimit default 5000 — notebook-friendly. Hydrated from
+  // localStorage post-mount. The UI restricts user-selectable values
+  // to {500, 1000, 2000, 5000, 10000}; the store accepts any positive
+  // integer for forward compatibility (e.g. a future "custom" input).
+  nodeLimit: 5000,
   lastRenderMs: 0,
   edgeCountsByType: {},
   selectedIssueID: null,
@@ -430,6 +466,25 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   },
   setTraceDirection: (d) => set({ traceDirection: d }),
   setTraceDepth: (n) => set({ traceDepth: n }),
+  setExcludeTests: (v) => {
+    set({ excludeTests: v });
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('ckg.excludeTests', v ? '1' : '0'); }
+      catch { /* ignore */ }
+    }
+  },
+  setNodeLimit: (n) => {
+    // Clamp to a safe range so a stale localStorage value (or a future
+    // UI bug) can't ask the backend for a million nodes. Lower bound
+    // 100 keeps the graph non-trivial; upper bound 100000 matches the
+    // backend's /api/nodes/top hard cap.
+    const clamped = Math.max(100, Math.min(100000, Math.floor(n)));
+    set({ nodeLimit: clamped });
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.setItem('ckg.nodeLimit', String(clamped)); }
+      catch { /* ignore */ }
+    }
+  },
   setLastRenderMs: (n) => set({ lastRenderMs: n }),
   setSelectedIssueID: (id) => set({ selectedIssueID: id }),
   hydrateFromStorage: () => {
@@ -446,6 +501,24 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
     }
     const wl = readNodeTypeWhitelist();
     if (wl !== null) patch.nodeTypeWhitelist = wl;
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('ckg.excludeTests');
+        // Only flip when explicitly stored. Missing key → keep default
+        // (true) so first-time users get the test-free view.
+        if (raw === '0') patch.excludeTests = false;
+        else if (raw === '1') patch.excludeTests = true;
+      } catch { /* ignore */ }
+      try {
+        const raw = localStorage.getItem('ckg.nodeLimit');
+        if (raw) {
+          const n = parseInt(raw, 10);
+          if (Number.isFinite(n) && n > 0) {
+            patch.nodeLimit = Math.max(100, Math.min(100000, n));
+          }
+        }
+      } catch { /* ignore */ }
+    }
     set(patch);
   },
 })));
