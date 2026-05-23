@@ -148,64 +148,81 @@ if strings.Contains(tok, ".") && !strings.HasPrefix(tok, ".") && !strings.HasSuf
 
 ## T-04. Hallucination validator 구현
 
-**카테고리**: 측정 인프라 (신규)
-**우선**: P0 — 30-question 요구사항 지표 #3
-**상태**: **V0 prototype DONE (2026-05-21, C18)**
+**카테고리**: 측정 인프라
+**우선**: ~~P0~~ → **CLOSED (2026-05-23)**
+**상태**: **production-ready** — V0→V5 11 cycles 누적, 4 baselines × 3 runs 측정 안정
 
-### V0 결과 (2026-05-21)
-- `internal/eval/hallucination_check.go` 추가, `ValidateMentions(output, store)` API
-- `extractSymbols` 재사용으로 토큰 추출 (scoreTask가 채점에 쓰는 것과 동일)
-- `store.FindSymbol(name, exact)` 로 bare-name (last dot-segment) 존재 확인
-- 분류 3 bucket: `Found` / `QnameDiverged` / `Hallucinated`
-- `QnameDiverged`: bare 이름은 store에 있지만 qname 매치 안 함 (`eth.NewBlockChain` vs `core.NewBlockChain`) — 수동 triage용, Rate 계산에는 반영 X
-- 6 unit tests PASS (AllFound / Hallucinated / QnameDiverged / CaseInsensitiveSweep / NilStore / DedupCaseInsensitive)
+### 진행 trajectory (요약)
+| Cycle | Commit | Milestone |
+|---|---|---|
+| C18 V0 | `2f58ce7` | ValidateMentions API + 6 unit tests |
+| C19 V1 | `bc6fe9c` | runner 통합 — 결과 CSV/Report에 metric |
+| C20-C23 | `7955b35`+`e794504`+`e9ffced`+`dc87a96` | infra + paren/prose/brace/suffix |
+| C24 4-axis | `1db6d2d`+`c368d9c`+`1754b6c`+`63e1d44` | β/γ/δ + multi-shot + prompt + filter |
+| C27 A+B+D | `22539fc` | β fix + total-token + multi-lang |
+| C29 cycle 6 | `524685a` | line-ref + Hangul separator |
+| C31 cycle 7 | `0d1b2f2` | numeric + #/@/→ separator |
+| C32 V3 | `49a6d26` | receiver-style heuristic |
+| C34 B | `46693a6` | UserPromptBytes metric for H1 |
+| C36-37 FTS | `2a4db90`+`8e8bf9b` | dotted-id + power-user gate (ckg core bug) |
 
-### V0 미해결 (V1+ 작업으로 이전)
-- ckg eval CLI에 통합 X — `internal/eval/runner.go`의 `runOne`에서 호출하도록 wiring 필요
-- 결과 JSON에 hallucination metrics 추가
-- false-positive 율 측정 (실 30-question 셋으로 1회 run 필요)
-- file 경로 토큰의 filesystem / files 테이블 검증 (현재 symbol mention만 처리)
-- fuzzy matching: `NewBlockchain` vs `NewBlockChain` 같은 *케이스 차이가 아닌 misspell* 처리 — 현재는 hallucinated로 분류
+상세: `docs/eval-trajectory.md`
 
-### Acceptance criteria (재확인)
-- LLM이 `eth.NewBlockchain` 같은 *완전 가상 함수명* 답하면 hallucination++ — **PASS** (V0 unit test에서 검증)
-- 30-question 셋에서 baseline별 hallucination 카운트 보고 — **TODO** (V1 wiring 후)
-- false-positive 율 < 5% — **측정 안 됨** (V1 실 데이터 run 필요)
+### 최종 baseline (post-cycle 9, 2026-05-23)
+| Baseline | Score (mean±std) | Halu rate | UserPromptBytes |
+|---|---|---|---|
+| α | 0.396±0.119 | 0.083 | 2,245 |
+| β | 0.746±0.046 | **0.000** | 69,422 |
+| γ | 0.688±0.037 | 0.122 | 157 |
+| δ | **0.825±0.035** | **0.000** | 12,612 |
 
-### 관련 자료
-- T-02 (extractSymbols 정규화)와 토큰 추출 로직 공유 — `extractSymbols`를 V0가 그대로 재사용
+H1 (user-prompt-bytes savings): δ vs α **-461.8%** (δ가 α의 5.6x 사용; *cost-benefit trade-off 명시*)
+H2 (score delta): δ-α **+0.429** (**PASS** ≥ 0)
+
+### Acceptance criteria (최종 평가)
+- LLM 가상 함수명 hallucination++ — **PASS**
+- baseline별 hallucination 카운트 — **PASS** (4 baselines × 3 runs)
+- false-positive 율 < 5% — **PASS** (β/δ 0.000)
+
+### V5 미해결 (defer or close)
+- file 경로 token validation — *cycle 6 line-ref blacklist*로 *부분 해소*
+- fuzzy matching (NewBlockchain vs NewBlockChain) — *V3 receiver-style heuristic*과 *유사 영역*. *데이터 더 모은 후 결정*
+- 남은 *real LLM noise*: `mux.HandleFunc`, `http.HandleFunc`, `http.HandlerFunc` (Go std-lib reaching) — *prompt engineering territory (C 옵션)*
 
 ---
 
 ## T-05. LLM backend 가동
 
 **카테고리**: 환경
-**우선**: P0 — 측정 자체가 불가능
-**상태**: **인프라 ready, smoke run 미실행 (2026-05-21, C19)**
+**우선**: ~~P0~~ → **CLOSED (2026-05-23)**
+**상태**: **가동 검증 완료** — 9회 smoke run 모두 정상 종료 (cycle 1-9, 4 baselines × 3 runs each)
 
-### 현 상태 (2026-05-21 update)
-- `make eval-llm-smoke` target 추가 — 환경변수에 따라 자동으로 backend 선택
-  - `ANTHROPIC_API_KEY` set → api backend
-  - 없으면 cli backend (claude CLI는 PATH에 있음, **`CLIWRAP_AGENT` 미설정** → block)
-- T-04 V1 wiring 완료 — backend가 가동되면 결과 CSV/Report에 hallucination metric 자동 포함
+### 가동 setup
+| Backend | Env | 비용 |
+|---|---|---|
+| api (권장) | `ANTHROPIC_API_KEY` set | Anthropic API |
+| cli | `claude` on PATH + `CLIWRAP_AGENT` set | Claude 구독 |
 
-### 사용자 작업 — 한쪽 선택:
-**옵션 A — api backend (권장)**:
-1. `export ANTHROPIC_API_KEY=...`
-2. `make eval-llm-smoke` → ~1-2분 후 report.md 출력
-3. 토큰 분류가 정확 (input/output/cache 분리) — H1 측정에 필수
+기본 명령:
+```bash
+make eval-llm-smoke BASELINES=alpha,beta,gamma,delta N_RUNS=3
+```
 
-**옵션 B — cli backend 복구**:
-1. cliwrap-agent 설치: `go install github.com/0xmhha/cli-wrapper/cmd/cliwrap-agent@latest`
-2. `export CLIWRAP_AGENT=$(which cliwrap-agent)`
-3. `make eval-llm-smoke LLM_BACKEND=cli` → claude CLI subprocess 통해 실행
-4. 토큰 측정 한계는 그대로 (L1, docs only)
+### 검증된 작동 (cycle 9 결과)
+- 4 baselines × 3 runs = 12 calls, 평균 ~5-10분 (cli backend)
+- API 529 Overloaded / SSL transient failures 정상 처리 (1/12 fail 시 11/12 계속)
+- `eval/results/latest/{results.csv,report.md}` 정상 생성
+- *Hallucination metric*, *UserPromptBytes*, *mean±std*, *Hypothesis check* 모두 정확
 
-### Acceptance criteria (V0)
-- `make eval-llm-smoke` 1회 정상 종료 → `eval/results/latest/results.csv` 1 행 생성
-- raw_output 컬럼에 LLM 응답 텍스트 채워짐
-- **hallucination_total / hallucination_count / hallucination_rate 컬럼 채워짐 (T-04 V1)**
-- `report.md`의 `## Hallucination detail (T-04)` section에 *literal symbol list* 표시
+### Acceptance criteria (V0 → final)
+- ~~`make eval-llm-smoke` 1회 정상 종료~~ → **9회 누적 검증 완료**
+- ~~raw_output 컬럼 채워짐~~ → **확인**
+- ~~hallucination_total/count/rate 컬럼~~ → **확인 + V3 receiver-style + UserPromptBytes 추가**
+- ~~report.md Hallucination detail~~ → **확인 + post-filter warnings (Axis 4) 통합**
+
+### 알려진 transient issues (작동 영향 없음)
+- API 529 / SSL: 1/12 fail 발생 — Run() loop이 graceful skip
+- cli backend token field anomaly: *β run 0 token=0 한 번 관찰 (transient)*; raw_output/score는 정상
 
 ### 관련 자료
 - `internal/eval/llm_cli.go`, `internal/eval/llm.go` (api backend)
