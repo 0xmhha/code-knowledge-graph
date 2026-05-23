@@ -95,7 +95,24 @@ Direct quote of the surprising finding:
 This was the explicit reason to write the docs you're reading now: the
 finding lived only in the conversation context until this commit.
 
-## 7. Conventions in this repo
+## 7. Pending handoff — other-session uncommitted changes
+
+As of 2026-05-23 commit `98260a8`, two files in the working tree are
+modified/untracked but belong to a different working session
+(viewer / web/viewer-next). They are left for the *viewer session*
+owner to commit so attribution stays with the original author.
+
+| File | State | Owner |
+|---|---|---|
+| `internal/server/web_assets/index.html` | modified (−20/+8) | viewer session |
+| `web/viewer-next/README.md` | untracked (6.9 KB, created 2026-05-21) | viewer session (likely missed by commit `c7de329`) |
+
+This session (eval/cks/T-04 series) deliberately did NOT stage or
+modify either file. If you are the viewer-session owner picking up
+the work, both changes appear to be ready-to-commit handoff items
+— review and commit under your authorship.
+
+## 8. Conventions in this repo
 
 - Commit messages reference cycle IDs (C18-C37) for the eval series and
   W-C V## for the parse-sol lockdown series. Both numbering systems are
