@@ -5,16 +5,16 @@
 // framing) and surface the graph layer's contribution to MCP tool
 // latency separately from the stdio transport's.
 //
-// The §11.3 retrieval boundary is preserved: every tool is wired
-// against newLLMSafeStoreReader(store), exactly the way Run does it.
-// AMBIGUOUS Hunk/Commit nodes never reach the bench callers.
+// The §11.3 retrieval boundary is preserved: mcphandlers.RegisterAll
+// wraps the store before threading. AMBIGUOUS Hunk/Commit nodes never
+// reach the bench callers.
 package mcp
 
 import (
 	server "github.com/mark3labs/mcp-go/server"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
-	"github.com/0xmhha/code-knowledge-graph/pkg/evidence"
+	"github.com/0xmhha/code-knowledge-graph/pkg/mcphandlers"
 )
 
 // BenchToolNames is the canonical ordering of the eight tools, used
@@ -38,17 +38,7 @@ var BenchToolNames = []string{
 // long-running benches).
 func NewBenchHandlers(store persist.StoreReader) (*server.MCPServer, map[string]server.ToolHandlerFunc) {
 	s := server.NewMCPServer("ckg-bench", "0.0.0")
-	safe := newLLMSafeStoreReader(store)
-	cache := evidence.NewCache()
-	registerFindSymbol(s, safe)
-	registerFindCallers(s, safe)
-	registerFindCallees(s, safe)
-	registerGetSubgraph(s, safe)
-	registerSearchText(s, safe)
-	registerGetContextForTask(s, safe)
-	registerImpactOfChange(s, safe)
-	registerEvidenceForIntent(s, safe, cache)
-
+	mcphandlers.RegisterAll(s, store)
 	handlers := make(map[string]server.ToolHandlerFunc, len(BenchToolNames))
 	for _, name := range BenchToolNames {
 		t := s.GetTool(name)

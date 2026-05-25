@@ -73,7 +73,7 @@ lands.
 | ID | Action | Estimate | Trigger |
 |---|---|---|---|
 | **T-14 (parallel surface)** | ✅ Done. `pkg/mcphandlers/` created with the 8 Register*, `RegisterAll`, and `NewLLMSafeReader`. internal/mcp kept intact as the production path; cks can now `import .../pkg/mcphandlers` without internal/ access. Smoke tests cover the cks-side wiring pattern. | — | — |
-| **T-14b (cleanup)** | Migrate internal/mcp into shims over pkg/mcphandlers (or delete + move test files). Single source of truth; clears the short-lived code duplication. Optional — landing this is a maintenance-only refactor with no behavioural change | 1-2 h | T-14 committed, any time after |
+| **T-14b (cleanup)** | ✅ Done. Deleted the 5 duplicate handler files from internal/mcp (tools/get_context/impact/evidence/h3_filter); moved the 9 handler-related test files into pkg/mcphandlers/ via `git mv`. internal/mcp now carries only `server.go::Run` (delegates to mcphandlers.RegisterAll), `bench.go::NewBenchHandlers`, and the e2e + Run smoke tests. | — | — |
 | **ckg-NEW-2/3/4** | PR breadcrumb (`pkg/types.Node.RecentPRs` + temporal slice + `pkg/store.Reader.GetNodePRs`) — new feature, not a code move. Bundle with ckg-NEW-9 in one public-surface PR per CKS-INTEGRATION §5 | 4-6 h | T-14 landed |
 | **ckg-NEW-9** | `pkg/bm25` external-import stability — `pkg/bm25/example_external_test.go` + SemVer doc in `pkg/bm25/doc.go` | 1 h | bundle with ckg-NEW-2/3/4 |
 | **search_text precision tightening** | statement-node whitelist filter OR CamelCase tokeniser — current fixtures lock the *with-statement-leak* behaviour; the future PR intentionally fails R05/R06/R07/R10 and re-narrows expecteds | 2-4 h | independent of Stream C |

@@ -1,4 +1,4 @@
-package mcp
+package mcphandlers
 
 import (
 	"testing"
@@ -19,7 +19,7 @@ import (
 func TestRegisterFindSymbol(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerFindSymbol(s, store)
+	RegisterFindSymbol(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["find_symbol"]; !ok {
 		t.Error("find_symbol not registered")
@@ -29,7 +29,7 @@ func TestRegisterFindSymbol(t *testing.T) {
 func TestRegisterFindCallers(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerFindCallers(s, store)
+	RegisterFindCallers(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["find_callers"]; !ok {
 		t.Error("find_callers not registered")
@@ -39,7 +39,7 @@ func TestRegisterFindCallers(t *testing.T) {
 func TestRegisterFindCallees(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerFindCallees(s, store)
+	RegisterFindCallees(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["find_callees"]; !ok {
 		t.Error("find_callees not registered")
@@ -49,7 +49,7 @@ func TestRegisterFindCallees(t *testing.T) {
 func TestRegisterGetSubgraph(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerGetSubgraph(s, store)
+	RegisterGetSubgraph(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["get_subgraph"]; !ok {
 		t.Error("get_subgraph not registered")
@@ -59,7 +59,7 @@ func TestRegisterGetSubgraph(t *testing.T) {
 func TestRegisterSearchText(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerSearchText(s, store)
+	RegisterSearchText(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["search_text"]; !ok {
 		t.Error("search_text not registered")
@@ -69,7 +69,7 @@ func TestRegisterSearchText(t *testing.T) {
 func TestRegisterGetContextForTask(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerGetContextForTask(s, store)
+	RegisterGetContextForTask(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["get_context_for_task"]; !ok {
 		t.Error("get_context_for_task not registered")

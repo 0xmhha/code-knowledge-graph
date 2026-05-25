@@ -1,4 +1,4 @@
-package mcp
+package mcphandlers
 
 import (
 	"path/filepath"
@@ -16,7 +16,7 @@ import (
 func TestBuildContextNotFound(t *testing.T) {
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{
-		SrcRoot:    "../parse/golang/testdata/resolve",
+		SrcRoot:    "../../internal/parse/golang/testdata/resolve",
 		OutDir:     out,
 		Languages:  []string{"auto"},
 		CKGVersion: "test",

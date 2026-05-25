@@ -1,4 +1,4 @@
-package mcp
+package mcphandlers
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 // scan of Run()) for end-to-end registration coverage.
 func TestRegisterEvidenceForIntent_ToolListed(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
-	registerEvidenceForIntent(s, &emptyStore{}, evidence.NewCache())
+	RegisterEvidenceForIntent(s, &emptyStore{}, evidence.NewCache())
 	tools := s.ListTools()
 	if _, ok := tools["evidence_for_intent"]; !ok {
 		t.Error("evidence_for_intent not registered")
@@ -44,7 +44,7 @@ func TestRegisterEvidenceForIntent_ModeArgPropagated(t *testing.T) {
 		blobs: map[string][]byte{"h1": gz("panel mounts")},
 	}
 	s := server.NewMCPServer("test", "0")
-	registerEvidenceForIntent(s, store, evidence.NewCache())
+	RegisterEvidenceForIntent(s, store, evidence.NewCache())
 	tool := s.GetTool("evidence_for_intent")
 	if tool == nil || tool.Handler == nil {
 		t.Fatal("evidence_for_intent not registered or has no handler")

@@ -1,4 +1,4 @@
-package mcp
+package mcphandlers
 
 import (
 	"database/sql"
@@ -89,7 +89,7 @@ func TestLLMSafeStoreReader_FilterAt_AllMethods(t *testing.T) {
 			{Src: "fn", Dst: "h_ext", Type: types.EdgeHasHunk},
 		},
 	}
-	safe := newLLMSafeStoreReader(fake)
+	safe := NewLLMSafeReader(fake)
 
 	// FindSymbol — exercise the filtered read path.
 	out, err := safe.FindSymbol("", true, persist.FindSymbolOptions{})
@@ -160,7 +160,7 @@ func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
 			{Src: "fn", Dst: "c_amb", Type: types.EdgeChangedIn},
 		},
 	}
-	safe := newLLMSafeStoreReader(fake)
+	safe := NewLLMSafeReader(fake)
 
 	// table-driven: every wrapper method that returns []types.Node must
 	// drop the AMBIGUOUS Hunk + Commit while keeping the EXTRACTED

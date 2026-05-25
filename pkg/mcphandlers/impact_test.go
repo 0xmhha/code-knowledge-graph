@@ -1,4 +1,4 @@
-package mcp
+package mcphandlers
 
 import (
 	"context"
@@ -20,7 +20,7 @@ func newConcurrencyStore(t *testing.T) persist.Store {
 	t.Helper()
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{
-		SrcRoot:    "../parse/golang/testdata/concurrency",
+		SrcRoot:    "../../internal/parse/golang/testdata/concurrency",
 		OutDir:     out,
 		Languages:  []string{"auto"},
 		CKGVersion: "test",
@@ -41,7 +41,7 @@ func newConcurrencyStore(t *testing.T) persist.Store {
 func invokeImpactTool(t *testing.T, store persist.StoreReader, args map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	s := server.NewMCPServer("test", "0")
-	registerImpactOfChange(s, store)
+	RegisterImpactOfChange(s, store)
 	tool := s.GetTool("impact_of_change")
 	if tool == nil || tool.Handler == nil {
 		t.Fatal("impact_of_change not registered or has no handler")
@@ -63,7 +63,7 @@ func newImplementsStore(t *testing.T) persist.Store {
 	t.Helper()
 	out := t.TempDir()
 	if _, err := buildpipe.Run(buildpipe.Options{
-		SrcRoot:    "../parse/golang/testdata/implements",
+		SrcRoot:    "../../internal/parse/golang/testdata/implements",
 		OutDir:     out,
 		Languages:  []string{"auto"},
 		CKGVersion: "test",
@@ -84,7 +84,7 @@ func newImplementsStore(t *testing.T) persist.Store {
 func TestRegisterImpactOfChange(t *testing.T) {
 	s := server.NewMCPServer("test", "0")
 	store := newFixtureStore(t)
-	registerImpactOfChange(s, store)
+	RegisterImpactOfChange(s, store)
 	tools := s.ListTools()
 	if _, ok := tools["impact_of_change"]; !ok {
 		t.Error("impact_of_change not registered")

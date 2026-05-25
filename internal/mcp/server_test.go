@@ -29,24 +29,18 @@ func TestMCPServerConstructs(t *testing.T) {
 	_ = mcppkg.Run // referenced for compilation; full registration smoke in T29
 }
 
-// TestRunRegistersAllEightTools is a static-ish guard: it grep-scans
-// the package source for the canonical register* call sites inside
-// Run(). If a future contributor adds a new register-style helper but
-// forgets to wire it into Run() — or removes one of the existing eight
-// — the test surfaces it before review. Pairs with
-// TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta to enforce
-// the §11.3 boundary across the full surface: every tool registered
-// here goes through the wrapper, and every wrapper method drops
-// AMBIGUOUS Hunk/Commit.
+// TestRunWiresMCPHandlersRegisterAll is a static guard against
+// regressing the post-T-14b architecture: Run() must hand off to
+// pkg/mcphandlers.RegisterAll, which is the single source of truth
+// for the eight-tool wiring and the §11.3 H3 safety wrapper. The
+// per-tool registration coverage lives in
+// pkg/mcphandlers/example_test.go::TestRegisterAll_LocksEightTools;
+// that test confirms each tool name shows up after RegisterAll, so
+// this file only has to lock the call-out from Run().
 //
-// We read server.go from the source tree (the test runs from the
-// package directory) rather than reflecting on the running binary,
-// because mcp-go doesn't expose a "list registered handlers" API.
-func TestRunRegistersAllEightTools(t *testing.T) {
-	// cwd for `go test ./internal/mcp/...` is the package directory,
-	// so server.go is in the same folder. Falling back to the bare
-	// filename keeps the test working under `go test -run` from a
-	// different cwd, too.
+// Read server.go from the package directory; fall back to the bare
+// filename for `go test -run` invoked from a different cwd.
+func TestRunWiresMCPHandlersRegisterAll(t *testing.T) {
 	bs, err := os.ReadFile("server.go")
 	if err != nil {
 		bs, err = os.ReadFile(filepath.Join("..", "mcp", "server.go"))
@@ -55,19 +49,7 @@ func TestRunRegistersAllEightTools(t *testing.T) {
 		}
 	}
 	src := string(bs)
-	want := []string{
-		"registerFindSymbol(s, safe)",
-		"registerFindCallers(s, safe)",
-		"registerFindCallees(s, safe)",
-		"registerGetSubgraph(s, safe)",
-		"registerSearchText(s, safe)",
-		"registerGetContextForTask(s, safe)",
-		"registerImpactOfChange(s, safe)",
-		"registerEvidenceForIntent(s, safe,",
-	}
-	for _, line := range want {
-		if !strings.Contains(src, line) {
-			t.Errorf("server.go is missing %q — Run() must wire every tool through the safe wrapper", line)
-		}
+	if !strings.Contains(src, "mcphandlers.RegisterAll(s, store)") {
+		t.Error("server.go must call mcphandlers.RegisterAll(s, store) — Run() is the production stdio entry point and the single hand-off to the public tool surface")
 	}
 }
