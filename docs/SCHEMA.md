@@ -35,9 +35,15 @@ AwaitPoint`
 
 LoopStmt uses `sub_kind ∈ {for, while, range, for_in, for_of}`.
 
-`Mutex` is **slot-reserved** for B1 (Wave 5): the enum entry exists so
-downstream caches/validators bake in the schema bump, but the parser
-does not emit Mutex nodes yet. See `spec-ckg-v0.2.md` § 2.
+`Mutex` is the B1 Stage 1 concurrency-analysis node, emitted by the Go
+parser (`internal/parse/golang/concurrency.go`) for `sync.Mutex` /
+`sync.RWMutex` declarations (struct fields, package-level vars,
+function-body locals, embedded mutexes). `sub_kind ∈ {mutex, rwmutex}`.
+`qualified_name` is `pkg.Type.field#mutex` for struct fields (the
+`#mutex` suffix disambiguates from the same-position Field node) or
+`pkg.func.localVar` for locals. Confidence is `EXTRACTED` with
+typesInfo, `INFERRED` in AST-only mode. See `spec-ckg-v0.2.md` § 2 and
+`internal/parse/golang/concurrency_test.go`.
 
 `Endpoint` (E3): an HTTP/RPC route entry point. `qualified_name`
 encodes the protocol prefix (e.g. `http:/users`, `rpc:Foo.Bar`); `name`
@@ -110,9 +116,21 @@ http_calls,
 grpc_listens_on, grpc_calls,
 awaits, overrides`
 
-`acquires_lock`, `releases_lock`, `accessed_under_lock` are **slot-reserved**
-for B1 (Wave 5) — same status as `NodeMutex` above. The viewer registers
-styling for them but they are off by default (like other concurrency edges).
+`acquires_lock` / `releases_lock` (B1 Stage 1): `Function`/`Method` →
+`Mutex` for `mu.Lock()` / `mu.Unlock()` / `mu.RLock()` / `mu.RUnlock()`
+calls. Receiver resolution uses `types.Info.ObjectOf` to confirm the
+receiver's declaration object is the Mutex node — this defeats the
+false-positive case where an unrelated type defines its own `Lock()`
+method (`spec-ckg-v0.2.md` § 2 R2.1). Read/write distinction lives on
+the destination Mutex's `sub_kind`, not the edge type.
+
+`accessed_under_lock` (B1 Stage 1): `Field` → `Mutex` for struct-field
+identifiers accessed inside a Lock/Unlock pair in the same function
+body (`internal/parse/golang/concurrency_underlock.go`). The (field,
+mutex) pair is the edge key — repeated accesses inside the same
+critical section collapse to one edge so multi-mutation methods don't
+inflate the edge count. The viewer registers styling for all three
+edges; they're off by default like other concurrency edges.
 
 `listens_on` (E3): handler function/method → `Endpoint` it serves
 (net/http registration patterns). `handles_message` (E3): handler

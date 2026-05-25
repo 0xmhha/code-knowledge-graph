@@ -1,20 +1,25 @@
 # Continuity — cross-session / cross-machine entry point
 
-> 2026-05-23. *Single entry point* for a new session or new machine picking
+> 2026-05-26. *Single entry point* for a new session or new machine picking
 > up the ckg dogfood / eval / cks-integration work. Everything below is
 > deliberately short — every section links to the authoritative source.
 
 ## 1. Snapshot (where the project is)
 
 - **Branch**: `main`
-- **Local commits ahead of origin**: 0 (all pushed)
-- **Latest commits** (top 5):
-  - `563dc63` docs(eval/stablenet): cks integration cross-machine handoff (other session)
-  - `efe9db7` feat(viewer): grid layout + boot-once data model (other session)
-  - `8e8bf9b` fix(persist): narrow FTS power-user gate (ckg core bug, this session)
-  - `2a4db90` fix(persist+eval): FTS5 dotted-identifier (ckg core bug, this session)
-  - `46693a6` feat(eval): UserPromptBytes metric for H1
-- **Eval framework**: production-ready, T-04/T-05 closed
+- **Local commits ahead of origin**: 0 pushed; **uncommitted Lane X work in tree** (see §9 for the file list and recommended commit split)
+- **Latest pushed commits** (top 5):
+  - `d4aed40` docs(viewer): README — make build + ckg serve as the prod path
+  - `ac01132` docs(handoff): note viewer-session uncommitted files in CONTINUITY §7
+  - `98260a8` docs(handoff): cross-session continuity (CONTINUITY + eval-trajectory + HANDOFF close)
+  - `c7de329` docs(viewer): handoff doc — environment setup + Claude collab rules
+  - `563dc63` docs(eval/stablenet): cks integration cross-machine handoff
+- **Lane X (2026-05-25 → 26)**: complete, in-tree only, awaiting commit
+  - search_text + pkg/store now expose AND/OR mode (`SearchFTSOptions.Mode`, `Reader.SearchWithOpts`)
+  - retrieval gold-set: 5 → **12 fixtures**, aggregate **R=1.00 P=1.00 F1=1.00**
+  - B1 Stage 1 concurrency emit (Mutex / acquires_lock / releases_lock / accessed_under_lock) was already live in `internal/parse/golang/concurrency*.go` — docs drift fixed, R11/R12 fixtures lock against future regression
+  - User north-star ("6-axis graph DB + keyword query at 100%") first lock achieved
+- **Eval framework (LLM-driven)**: production-ready, T-04/T-05 closed
 - **Last smoke run**: 2026-05-22 (cycle 9), 12/12 LLM calls, all four baselines clean
 
 ## 2. Where to read next
@@ -61,13 +66,24 @@ Expected outcome (cycle 9 baseline): α score ~0.4, β ~0.75, γ ~0.69, δ ~0.83
 
 ## 5. Next-action priority queue
 
+Post-Lane X (2026-05-26): the capability-first lane closed the user-articulated
+first-step goal. The queue below is what to do *after* the Lane X commit
+lands.
+
 | ID | Action | Estimate | Trigger |
 |---|---|---|---|
-| **B-2** | cks `go.mod` ckg version bump | 5 min | after user pushes ckg commits (already done — `origin/main` synced) |
-| **C** | Prompt engineering V2 — reduce `http.HandleFunc`/`mux.HandleFunc` LLM noise | 1 h | none |
-| **D** | smartContext budget audit — H1 cost-benefit curve | 1 h | none |
-| **E** | Task fixture expansion (T02-T30) — coverage breadth | 1-2 h | none |
-| **Defer** | CKG-3, EV1 Phase 3, W-C series resume, HANDOFF T-12/T-13 | — | per CKS-INTEGRATION recommendation |
+| **Lane-X commit** | Stage + commit the in-tree Lane X changes (3 logical groups — see §9) | 10 min | user authorises commit |
+| **T-14** | `pkg/mcphandlers/` public surface — load-bearing cks S1 unblock | 2-3 h | Lane X committed |
+| **ckg-NEW-2/3/4** | PR breadcrumb (`pkg/types.Node.RecentPRs` + temporal slice) | 4-6 h | bundle with T-14 in one public-surface PR (CKS-INTEGRATION §5 rationale) |
+| **ckg-NEW-9** | `pkg/bm25` external-import stability test | 1 h | same PR as T-14 |
+| **search_text precision tightening** | statement-node whitelist filter OR CamelCase tokeniser — current fixtures lock the *with-statement-leak* behaviour; the future PR intentionally fails these fixtures and re-narrows expecteds | 2-4 h | independent of Stream C |
+| **ckg-NEW-5/8** | 12 ckv-fixture mirror task YAMLs + Stage B harness over the synthetic→stable-net corpus | 3-4 h | T-14 done (cks side can consume) |
+| **Defer** | CKG-3 (Option C dir-routing), EV1 Phase 3 CI (user-manual snippet ready), W-A/W-B/W-C resume, HANDOFF T-12/T-13 (now fixture-covered by R11/R12 + the Stream B design slots) | — | per CKS-INTEGRATION §3.4 / §8 |
+
+The Stream A follow-ups (C prompt-V2 / D smartContext audit / E LLM-task
+expansion) are still valid but downgraded to *post Stream C* — the Stream
+C work measures over the same fixture set and decides whether Stream A
+improvements move the needle.
 
 Cross-project items (separate sessions):
 - cks-side methodology transfer (this series → cks's own evaluation)
@@ -111,6 +127,70 @@ This session (eval/cks/T-04 series) deliberately did NOT stage or
 modify either file. If you are the viewer-session owner picking up
 the work, both changes appear to be ready-to-commit handoff items
 — review and commit under your authorship.
+
+## 9. Lane X uncommitted file list + recommended commit split
+
+The 2026-05-25 → 26 Lane X work touches 27 files in three logical groups.
+The split below pairs *behaviour change* with *its own tests* and isolates
+the *data-only* and *docs-only* moves so each commit has a single review
+concern.
+
+### Commit A — capability: search_text AND/OR mode + SearchWithOpts surface
+
+```
+internal/persist/search_hit.go         (SearchFTSOptions.Mode field)
+internal/persist/sqlite.go             (SearchFTS mode branch + helpers + SearchWithOpts)
+internal/persist/postgres_store.go     (PG parity)
+internal/persist/store_interface.go    (SearchWithOpts interface method)
+internal/persist/search_mode_test.go   (NEW: 5 integration tests)
+internal/persist/postgres_exporter_test.go  (mockStoreReader.SearchWithOpts)
+internal/mcp/h3_filter.go              (llmSafeStoreReader.SearchWithOpts forwarder)
+internal/mcp/h3_filter_test.go         (fakeStore.SearchWithOpts + leak-guard table row)
+internal/mcp/tools.go                  (registerSearchText mode/language args)
+internal/eval/hallucination_check_test.go  (fakeStore.SearchWithOpts)
+internal/eval/retrieval/runner.go      (runSearchText mode/language args)
+```
+
+Subject suggestion:
+`feat(search): AND/OR mode in search_text + pkg/store.SearchWithOpts`
+
+### Commit B — measurement: fixture corpus + B1 synthetic + baseline
+
+```
+eval/retrieval/R01-find-callers-vault-deposit.yaml  (M: + service.SafeVault.SafeDeposit)
+eval/retrieval/R03-find-callers-service-new.yaml    (M: + service.NewSafeVault, P=1.0)
+eval/retrieval/R04-find-symbol-vault.yaml           (M: + TS Vault + SafeVault.vault)
+eval/retrieval/R05-search-text-deposit.yaml         (M: AND mode disposition)
+eval/retrieval/R06-...yaml                          (NEW: OR multi-keyword Go)
+eval/retrieval/R07-...yaml                          (NEW: 3-token AND)
+eval/retrieval/R08-...yaml                          (NEW: TS language filter)
+eval/retrieval/R09-...yaml                          (NEW: Sol language filter)
+eval/retrieval/R10-...yaml                          (NEW: single-keyword strict Go)
+eval/retrieval/R11-find-symbol-mutex.yaml           (NEW: B1 Mutex node lock)
+eval/retrieval/R12-find-callees-safedeposit.yaml    (NEW: B1 lock-protected delegation lock)
+eval/baseline/retrieval.json                        (M: 5 → 12 fixtures, R=1.00 P=1.00 F1=1.00)
+testdata/synthetic/go-backend/service/concurrent.go (NEW: SafeVault Mutex fixture)
+```
+
+Subject suggestion:
+`test(retrieval): 12-fixture multi-keyword + B1 concurrency gold-set lock`
+
+### Commit C — docs: drift correction + overview/audit
+
+```
+docs/SCHEMA.md           (M: Mutex + acquires/releases/accessed_under_lock no longer slot-reserved)
+docs/PROJECT-OVERVIEW.md (NEW: 3-stream index, 5-surface map, cross-link doc map)
+docs/CAPABILITY-AUDIT.md (NEW: R-Build/R-Query/R-Accuracy gap matrix, Lane X/Y plan)
+docs/CONTINUITY.md       (M: §1 snapshot + §5 next-action queue + §9 commit split — this section)
+```
+
+Subject suggestion:
+`docs: PROJECT-OVERVIEW + CAPABILITY-AUDIT + B1 drift fix in SCHEMA`
+
+The three commits are independent (A's tests pass with stock fixtures; B
+recalibrates the fixtures against the new SearchFTS behaviour A introduced;
+C is text-only). Land in A → B → C order if pre-commit hooks gate by
+behaviour change; otherwise any order works.
 
 ## 8. Conventions in this repo
 
