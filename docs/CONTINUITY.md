@@ -72,12 +72,12 @@ lands.
 
 | ID | Action | Estimate | Trigger |
 |---|---|---|---|
-| **Lane-X commit** | Stage + commit the in-tree Lane X changes (3 logical groups — see §9) | 10 min | user authorises commit |
-| **T-14** | `pkg/mcphandlers/` public surface — load-bearing cks S1 unblock | 2-3 h | Lane X committed |
-| **ckg-NEW-2/3/4** | PR breadcrumb (`pkg/types.Node.RecentPRs` + temporal slice) | 4-6 h | bundle with T-14 in one public-surface PR (CKS-INTEGRATION §5 rationale) |
-| **ckg-NEW-9** | `pkg/bm25` external-import stability test | 1 h | same PR as T-14 |
-| **search_text precision tightening** | statement-node whitelist filter OR CamelCase tokeniser — current fixtures lock the *with-statement-leak* behaviour; the future PR intentionally fails these fixtures and re-narrows expecteds | 2-4 h | independent of Stream C |
-| **ckg-NEW-5/8** | 12 ckv-fixture mirror task YAMLs + Stage B harness over the synthetic→stable-net corpus | 3-4 h | T-14 done (cks side can consume) |
+| **T-14 (parallel surface)** | ✅ Done. `pkg/mcphandlers/` created with the 8 Register*, `RegisterAll`, and `NewLLMSafeReader`. internal/mcp kept intact as the production path; cks can now `import .../pkg/mcphandlers` without internal/ access. Smoke tests cover the cks-side wiring pattern. | — | — |
+| **T-14b (cleanup)** | Migrate internal/mcp into shims over pkg/mcphandlers (or delete + move test files). Single source of truth; clears the short-lived code duplication. Optional — landing this is a maintenance-only refactor with no behavioural change | 1-2 h | T-14 committed, any time after |
+| **ckg-NEW-2/3/4** | PR breadcrumb (`pkg/types.Node.RecentPRs` + temporal slice + `pkg/store.Reader.GetNodePRs`) — new feature, not a code move. Bundle with ckg-NEW-9 in one public-surface PR per CKS-INTEGRATION §5 | 4-6 h | T-14 landed |
+| **ckg-NEW-9** | `pkg/bm25` external-import stability — `pkg/bm25/example_external_test.go` + SemVer doc in `pkg/bm25/doc.go` | 1 h | bundle with ckg-NEW-2/3/4 |
+| **search_text precision tightening** | statement-node whitelist filter OR CamelCase tokeniser — current fixtures lock the *with-statement-leak* behaviour; the future PR intentionally fails R05/R06/R07/R10 and re-narrows expecteds | 2-4 h | independent of Stream C |
+| **ckg-NEW-5/8** | 12 ckv-fixture mirror task YAMLs + Stage B harness over the synthetic→stable-net corpus | 3-4 h | cks-side import smoke done |
 | **Defer** | CKG-3 (Option C dir-routing), EV1 Phase 3 CI (user-manual snippet ready), W-A/W-B/W-C resume, HANDOFF T-12/T-13 (now fixture-covered by R11/R12 + the Stream B design slots) | — | per CKS-INTEGRATION §3.4 / §8 |
 
 The Stream A follow-ups (C prompt-V2 / D smartContext audit / E LLM-task

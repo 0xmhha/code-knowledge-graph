@@ -163,7 +163,7 @@ These do not affect ckg's standalone capability but block the *step after*
 
 | ID | Work | Source doc | Status |
 |---|---|---|---|
-| T-14 | `pkg/mcphandlers/` public registration surface — currently cks cannot import the 8-tool registrations because they live in `internal/mcp/`. cks S1 entry blocker. | `eval/stablenet/HANDOFF.md` | P0, open |
+| T-14 | `pkg/mcphandlers/` public registration surface — currently cks cannot import the 8-tool registrations because they live in `internal/mcp/`. cks S1 entry blocker. | `eval/stablenet/HANDOFF.md` | **✅ done (2026-05-26)** — pkg/mcphandlers with 8 Register*, RegisterAll, NewLLMSafeReader, and cks-style smoke tests. internal/mcp kept as the production path; cleanup PR (T-14b) tracks the eventual shim migration. |
 | ckg-NEW-2/3/4 | PR breadcrumb metadata on Node + temporal slicing + accessor (R12) | `eval/stablenet/CKS-INTEGRATION-2026-05-23.md §3.2` | P0, open |
 | ckg-NEW-9 | `pkg/bm25` external-import stability (R13 3-leg) | CKS-INTEGRATION §3.5 | P1, open |
 
