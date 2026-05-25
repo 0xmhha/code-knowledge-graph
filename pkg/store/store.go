@@ -37,6 +37,7 @@ package store
 
 import (
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // Reader is the read-only graph surface — the canonical entry point for
@@ -56,6 +57,12 @@ type SearchFTSOptions = persist.SearchFTSOptions
 // FindSymbolOptions configures filter push-down for Reader.FindSymbol
 // (Language, Kinds). Zero value means "no filter" (CKG-4).
 type FindSymbolOptions = persist.FindSymbolOptions
+
+// PRRef is the public alias for the build-time-derived PR breadcrumb
+// (ckg-NEW-2). External consumers (cks, ckv) read this via
+// Reader.GetNodePRs; see pkg/types.PRRef for the field semantics and
+// the temporal-slicing contract.
+type PRRef = types.PRRef
 
 // ErrInvalidMetric is returned by Reader.TopNodes when the metric
 // argument is not one of the supported column names. HTTP layers

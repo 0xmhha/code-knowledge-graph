@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -125,6 +126,24 @@ CREATE TABLE IF NOT EXISTS pending_refs (
     PRIMARY KEY (file_path, src_id, target_qname, edge_type, line)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_refs_file ON pending_refs(file_path);
+
+-- ckg-NEW-2/3/4 (schema 1.12): PR breadcrumb. Mirrors the SQLite
+-- node_prs table (see internal/persist/schema.sql). merged_at uses
+-- TIMESTAMP WITH TIME ZONE on the PG side so the column type carries
+-- semantics rather than relying on text ordering; the Go layer still
+-- normalises to UTC before binding.
+CREATE TABLE IF NOT EXISTS node_prs (
+    node_id    TEXT    NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+    number     INTEGER NOT NULL,
+    title      TEXT,
+    summary    TEXT,
+    base_sha   TEXT,
+    head_sha   TEXT,
+    merged_at  TIMESTAMP WITH TIME ZONE NOT NULL,
+    repo       TEXT,
+    PRIMARY KEY (node_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_node_prs_merged ON node_prs(merged_at DESC);
 `
 
 // pgNodeColumns is the SELECT column list for every node query. COALESCE
@@ -193,7 +212,7 @@ func OpenPostgresCold(dsn string) (Store, error) {
 	// Wipe data first (tables may not exist yet on very first run — ignore error).
 	// TRUNCATE … CASCADE handles FK ordering automatically.
 	_, _ = pool.Exec(background,
-		`TRUNCATE TABLE pending_refs, topic_tree, pkg_tree, blobs, edges, nodes, manifest CASCADE`)
+		`TRUNCATE TABLE node_prs, pending_refs, topic_tree, pkg_tree, blobs, edges, nodes, manifest CASCADE`)
 	if err := s.Migrate(); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("migrate postgres cold: %w", err)
@@ -482,6 +501,82 @@ func (s *pgStore) InsertPendingRefs(refs []PendingRefRow) error {
 		}
 	}
 	return br.Close()
+}
+
+// InsertNodePRs writes ckg-NEW-2 PR breadcrumbs into PG. ON CONFLICT
+// UPDATE rather than DO NOTHING because the rebuild path frequently
+// has updated title/summary text for the same (node_id, number) — see
+// the SQLite mirror for the rationale.
+func (s *pgStore) InsertNodePRs(byNode map[string][]types.PRRef) error {
+	if s.ro {
+		panic("pgStore: InsertNodePRs called on read-only store")
+	}
+	if len(byNode) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	const q = `INSERT INTO node_prs
+        (node_id, number, title, summary, base_sha, head_sha, merged_at, repo)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT (node_id, number) DO UPDATE SET
+            title     = EXCLUDED.title,
+            summary   = EXCLUDED.summary,
+            base_sha  = EXCLUDED.base_sha,
+            head_sha  = EXCLUDED.head_sha,
+            merged_at = EXCLUDED.merged_at,
+            repo      = EXCLUDED.repo`
+	count := 0
+	for nodeID, refs := range byNode {
+		for _, r := range refs {
+			batch.Queue(q, nodeID, r.Number, r.Title, r.Summary,
+				r.BaseSHA, r.HeadSHA, r.MergedAtUTC.UTC(), r.Repo)
+			count++
+		}
+	}
+	br := s.pool.SendBatch(background, batch)
+	defer br.Close()
+	for i := 0; i < count; i++ {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("insert node_pr: %w", err)
+		}
+	}
+	return br.Close()
+}
+
+// GetNodePRs is the PG mirror of sqliteStore.GetNodePRs. Uses native
+// TIMESTAMPTZ comparison rather than the SQLite text-ordering trick;
+// the API contract (descending, cutoff-exclusive) is identical.
+func (s *pgStore) GetNodePRs(nodeID string, cutoff time.Time) ([]types.PRRef, error) {
+	sql := `SELECT number,
+        COALESCE(title, ''), COALESCE(summary, ''),
+        COALESCE(base_sha, ''), COALESCE(head_sha, ''),
+        merged_at, COALESCE(repo, '')
+        FROM node_prs WHERE node_id = $1`
+	args := []any{nodeID}
+	if !cutoff.IsZero() {
+		sql += ` AND merged_at < $2`
+		args = append(args, cutoff.UTC())
+	}
+	sql += ` ORDER BY merged_at DESC`
+	rows, err := s.pool.Query(background, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("node_prs for %s: %w", nodeID, err)
+	}
+	defer rows.Close()
+	var out []types.PRRef
+	for rows.Next() {
+		var r types.PRRef
+		if err := rows.Scan(&r.Number, &r.Title, &r.Summary,
+			&r.BaseSHA, &r.HeadSHA, &r.MergedAtUTC, &r.Repo); err != nil {
+			return nil, fmt.Errorf("scan node_pr: %w", err)
+		}
+		r.MergedAtUTC = r.MergedAtUTC.UTC()
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate node_prs: %w", err)
+	}
+	return out, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

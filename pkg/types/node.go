@@ -146,4 +146,13 @@ type Node struct {
 	// can have either, both, or neither — and security tooling
 	// consumes both to characterise the full re-entrancy surface.
 	HasHighLevelSelfCall bool `json:"has_high_level_self_call,omitempty"`
+	// RecentPRs (ckg-NEW-2, schema 1.12, 2026-05-26): build-time-
+	// derived list of pull requests whose merge commit touched lines
+	// overlapping this node's [StartLine, EndLine] range. Populated
+	// on demand — the canonical fetch path is
+	// store.Reader.GetNodePRs (ckg-NEW-4) with an explicit cutoff,
+	// not eager joining on every nodes read. JSON omits the field
+	// when nil so existing payloads (HTTP / MCP / chunked export)
+	// stay byte-identical until a caller asks for breadcrumbs.
+	RecentPRs []PRRef `json:"recent_prs,omitempty"`
 }

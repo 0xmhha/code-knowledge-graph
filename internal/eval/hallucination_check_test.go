@@ -2,6 +2,7 @@ package eval
 
 import (
 	"testing"
+	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
@@ -71,6 +72,9 @@ func (f *fakeStore) ExportChunked(_ string, _, _ int) error           { return n
 func (f *fakeStore) AmbiguousMetaNodes() ([]types.Node, error)        { return nil, nil }
 func (f *fakeStore) AllNodes() ([]types.Node, error)                  { return nil, nil }
 func (f *fakeStore) AllEdges() ([]types.Edge, error)                  { return nil, nil }
+func (f *fakeStore) GetNodePRs(_ string, _ time.Time) ([]types.PRRef, error) {
+	return nil, nil
+}
 
 func lower(s string) string {
 	b := make([]byte, len(s))

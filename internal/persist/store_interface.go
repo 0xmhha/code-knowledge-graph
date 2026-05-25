@@ -16,6 +16,7 @@ package persist
 
 import (
 	"errors"
+	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -136,6 +137,20 @@ type StoreReader interface {
 	// streaming-unaware (callers want everything in memory).
 	AllNodes() ([]types.Node, error)
 	AllEdges() ([]types.Edge, error)
+
+	// GetNodePRs returns every PR breadcrumb recorded against nodeID
+	// whose merge timestamp is strictly before cutoff (ckg-NEW-3
+	// temporal slicing). Pass time.Time{} (zero value) to disable the
+	// cutoff and return the full history.
+	//
+	// Order: descending by merge timestamp — most recent first, so
+	// "show me the last N changes around this symbol" requires no
+	// client-side sort. Empty slice (not error) when the node has no
+	// recorded PRs or every match was filtered out by the cutoff.
+	//
+	// See pkg/types.PRRef for the record schema and the build-time
+	// derivation (internal/buildpipe.ScanPRHistory).
+	GetNodePRs(nodeID string, cutoff time.Time) ([]types.PRRef, error)
 }
 
 // StoreWriter is the write surface used by buildpipe to materialise a graph
@@ -155,6 +170,13 @@ type StoreWriter interface {
 	// cross-file ref so the next partial build can replay Pass 2 over a
 	// merged dirty + cached input. Schema 1.5.
 	InsertPendingRefs(refs []PendingRefRow) error
+
+	// InsertNodePRs writes the PR breadcrumb map (ckg-NEW-2, schema
+	// 1.12). Keyed by node ID; the slice value is the full list of
+	// PRs whose merge commit overlapped the node's source range.
+	// Idempotent — node_prs has PRIMARY KEY (node_id, number), so
+	// re-runs with INSERT OR REPLACE rewrite the existing rows.
+	InsertNodePRs(byNode map[string][]types.PRRef) error
 
 	// Per-file delete (A3 incremental cache). Drops every node whose
 	// file_path matches; FK ON DELETE CASCADE wipes the dependent edges

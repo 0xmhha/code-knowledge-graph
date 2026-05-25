@@ -114,3 +114,33 @@ CREATE TABLE IF NOT EXISTS pending_refs (
   PRIMARY KEY (file_path, src_id, target_qname, edge_type, line)
 );
 CREATE INDEX IF NOT EXISTS idx_pending_refs_file ON pending_refs(file_path);
+
+-- Node PRs (ckg-NEW-2/3/4, schema 1.12): build-time-derived list of pull
+-- requests whose merge commit touched lines overlapping a graph node's
+-- [start_line, end_line] range. Populated by
+-- internal/buildpipe.ScanPRHistory from `git log --merges` output plus
+-- the (#NNN) suffix convention; PR title + first-line summary come
+-- straight from the merge commit message (no gh API roundtrip required
+-- for the squash-merge 80% case).
+--
+-- FK node_id → nodes(id) ON DELETE CASCADE matches the file lifecycle
+-- (same pattern as edges/blobs/pending_refs): when a node's source file
+-- drops via DeleteNodesByFilePath, the breadcrumb follows automatically.
+--
+-- merged_at is RFC3339 UTC text so SQLite's lexicographic ordering
+-- doubles as chronological ordering — drives the cutoff filter in
+-- StoreReader.GetNodePRs (the cks evaluation harness uses cutoff to
+-- prevent hindsight-leakage when answering "what did we know at
+-- base_sha?").
+CREATE TABLE IF NOT EXISTS node_prs (
+  node_id    TEXT    NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  number     INTEGER NOT NULL,
+  title      TEXT,
+  summary    TEXT,
+  base_sha   TEXT,
+  head_sha   TEXT,
+  merged_at  TEXT    NOT NULL,
+  repo       TEXT,
+  PRIMARY KEY (node_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_node_prs_merged ON node_prs(merged_at);

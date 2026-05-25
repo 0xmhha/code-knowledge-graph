@@ -86,7 +86,7 @@ import (
 //
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.11"
+const SchemaVersion = "1.12"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

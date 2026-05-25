@@ -372,6 +372,21 @@ func runCold(opt Options, log *slog.Logger,
 	if err := store.InsertPendingRefs(allPending); err != nil {
 		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
+	// ckg-NEW-2 PR breadcrumb (schema 1.12): scan git log for PR-tagged
+	// commits and persist the node ↔ PR mapping. Runs after the node
+	// rows land so the node_prs FK has its targets. Failure here is
+	// logged but non-fatal — PR metadata is strictly additive and a
+	// missing remote (non-git source tree, sparse clone, etc.) must
+	// not break the cold build.
+	prByNode, prErr := ScanPRHistory(opt.SrcRoot, g.Nodes)
+	if prErr != nil {
+		log.Warn("scan pr_history failed; node_prs left empty", "err", prErr)
+	} else if len(prByNode) > 0 {
+		if err := store.InsertNodePRs(prByNode); err != nil {
+			return persist.Manifest{}, fmt.Errorf("persist node_prs: %w", err)
+		}
+		log.Info("pr_history emitted", "nodes_with_prs", len(prByNode))
+	}
 	log.Debug("persist.end")
 
 	m := buildManifestSkeleton(opt, len(goFiles), len(files.TS), len(files.Sol), len(files.Proto),

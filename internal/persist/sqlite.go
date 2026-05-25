@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -1442,6 +1443,85 @@ func (s *sqliteStore) InsertPendingRefs(refs []PendingRefRow) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// InsertNodePRs writes PR breadcrumbs for ckg-NEW-2. INSERT OR REPLACE
+// (rather than OR IGNORE) because the rebuild path frequently has new
+// title/summary text for the same (node_id, number) — keeping the latest
+// commit-message-derived metadata is more useful than rejecting the
+// update. PRIMARY KEY (node_id, number) bounds duplicates per node.
+func (s *sqliteStore) InsertNodePRs(byNode map[string][]types.PRRef) error {
+	if len(byNode) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO node_prs
+		(node_id, number, title, summary, base_sha, head_sha, merged_at, repo)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for nodeID, refs := range byNode {
+		for _, r := range refs {
+			if _, err := stmt.Exec(nodeID, r.Number, r.Title, r.Summary,
+				r.BaseSHA, r.HeadSHA, r.MergedAtUTC.UTC().Format(time.RFC3339), r.Repo); err != nil {
+				return fmt.Errorf("insert node_pr %s #%d: %w", nodeID, r.Number, err)
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+// GetNodePRs returns the PR breadcrumbs for a single node, descending
+// by merge timestamp, optionally truncated to merges before cutoff
+// (ckg-NEW-3). The cutoff comparison runs in SQL as a string comparison
+// against the RFC3339-UTC text stored in merged_at — lexicographic
+// ordering coincides with chronological ordering for that format, so
+// no datetime() coercion is needed.
+func (s *sqliteStore) GetNodePRs(nodeID string, cutoff time.Time) ([]types.PRRef, error) {
+	sql := `SELECT number,
+		COALESCE(title, ''), COALESCE(summary, ''),
+		COALESCE(base_sha, ''), COALESCE(head_sha, ''),
+		merged_at, COALESCE(repo, '')
+		FROM node_prs WHERE node_id = ?`
+	args := []any{nodeID}
+	if !cutoff.IsZero() {
+		sql += ` AND merged_at < ?`
+		args = append(args, cutoff.UTC().Format(time.RFC3339))
+	}
+	sql += ` ORDER BY merged_at DESC`
+	rows, err := s.db.Query(sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("node_prs for %s: %w", nodeID, err)
+	}
+	defer rows.Close()
+	var out []types.PRRef
+	for rows.Next() {
+		var (
+			r        types.PRRef
+			mergedAt string
+		)
+		if err := rows.Scan(&r.Number, &r.Title, &r.Summary,
+			&r.BaseSHA, &r.HeadSHA, &mergedAt, &r.Repo); err != nil {
+			return nil, fmt.Errorf("scan node_pr: %w", err)
+		}
+		if mergedAt != "" {
+			t, perr := time.Parse(time.RFC3339, mergedAt)
+			if perr == nil {
+				r.MergedAtUTC = t.UTC()
+			}
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate node_prs: %w", err)
+	}
+	return out, nil
 }
 
 // PendingRefsByFilePath returns every pending_refs row where file_path matches.

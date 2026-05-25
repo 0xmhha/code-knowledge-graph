@@ -3,6 +3,7 @@ package persist
 import (
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
@@ -63,6 +64,9 @@ func (m *mockStoreReader) SubgraphByQname(_ string, _ int) ([]types.Node, []type
 }
 func (m *mockStoreReader) Search(_ string, _ int) ([]types.Node, error) { return nil, nil }
 func (m *mockStoreReader) SearchWithOpts(_ string, _ int, _ SearchFTSOptions) ([]types.Node, error) {
+	return nil, nil
+}
+func (m *mockStoreReader) GetNodePRs(_ string, _ time.Time) ([]types.PRRef, error) {
 	return nil, nil
 }
 func (m *mockStoreReader) SearchFTS(_ string, _ int, _ SearchFTSOptions) ([]SearchHit, error) {
