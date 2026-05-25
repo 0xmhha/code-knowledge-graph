@@ -130,19 +130,35 @@ func registerGetSubgraph(s *server.MCPServer, store persist.StoreReader) {
 // for ASCII, LIKE substring fallback for CJK). Goes through attachBlobs
 // so the response shape matches find_symbol / find_callers / get_subgraph
 // — LLM clients can parse one schema across the toolbox.
+//
+// mode = "or" (default) joins multi-token queries with FTS5 OR so any one
+// match surfaces a candidate, then BM25 + PageRank + usage rerank.
+// mode = "and" tightens to "every token must appear in the hit's name +
+// qualified_name + signature + doc_comment" — the AND fixture work
+// (eval/retrieval/R06-R10) lives on this branch. CJK input ignores mode;
+// substring matching is single-pattern by design.
+//
+// language pushes a `WHERE language = ?` filter into the FTS5 query when
+// non-empty (CKG-2). Empty string preserves prior behaviour.
 func registerSearchText(s *server.MCPServer, store persist.StoreReader) {
 	tool := mcp.NewTool("search_text",
-		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input."),
+		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input. mode=\"or\" (default) ORs multi-token queries; mode=\"and\" requires every token to appear in each hit's indexed columns. language filters the result set to a single source language (go|ts|sol)."),
 		mcp.WithString("query", mcp.Required()),
 		mcp.WithNumber("top_k", mcp.DefaultNumber(10)),
 		mcp.WithString("language"),
+		mcp.WithString("mode"),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		q := req.GetString("query", "")
 		top := int(req.GetFloat("top_k", 10))
 		incl := req.GetBool("include_blobs", false)
-		hits, err := store.Search(q, top)
+		lang := req.GetString("language", "")
+		mode := req.GetString("mode", "")
+		hits, err := store.SearchWithOpts(q, top, persist.SearchFTSOptions{
+			Language: lang,
+			Mode:     mode,
+		})
 		if err != nil {
 			return nil, err
 		}

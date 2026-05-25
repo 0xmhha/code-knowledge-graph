@@ -154,7 +154,14 @@ func runSearchText(r persist.StoreReader, args map[string]any) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
-	nodes, err := r.Search(q, limit)
+	opts := persist.SearchFTSOptions{}
+	if lang, ok := args["language"].(string); ok {
+		opts.Language = lang
+	}
+	if mode, ok := args["mode"].(string); ok {
+		opts.Mode = mode
+	}
+	nodes, err := r.SearchWithOpts(q, limit, opts)
 	if err != nil {
 		return nil, err
 	}

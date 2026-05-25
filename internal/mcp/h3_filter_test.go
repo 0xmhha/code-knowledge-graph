@@ -178,6 +178,9 @@ func TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta(t *testing.T) {
 		{"QueryNodes", func() ([]types.Node, error) { return safe.QueryNodes("", 100) }},
 		{"TopNodes", func() ([]types.Node, error) { return safe.TopNodes("pagerank", 100) }},
 		{"Search", func() ([]types.Node, error) { return safe.Search("anything", 100) }},
+		{"SearchWithOpts", func() ([]types.Node, error) {
+			return safe.SearchWithOpts("anything", 100, persist.SearchFTSOptions{Mode: "and"})
+		}},
 		{"SearchFTS", func() ([]types.Node, error) {
 			hits, err := safe.SearchFTS("anything", 100, persist.SearchFTSOptions{})
 			if err != nil {
@@ -303,6 +306,10 @@ func (f *fakeStore) SubgraphByQname(qname string, depth int) ([]types.Node, []ty
 }
 
 func (f *fakeStore) Search(q string, limit int) ([]types.Node, error) {
+	return f.nodes, nil
+}
+
+func (f *fakeStore) SearchWithOpts(q string, limit int, _ persist.SearchFTSOptions) ([]types.Node, error) {
 	return f.nodes, nil
 }
 

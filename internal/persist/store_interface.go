@@ -80,9 +80,16 @@ type StoreReader interface {
 
 	// Search
 	Search(q string, limit int) ([]types.Node, error)
+	// SearchWithOpts is Search with explicit SearchFTSOptions. Adds
+	// AND-mode and Language filtering to the routed search path.
+	// Options apply on the FTS branch only; the CJK substring fallback
+	// ignores them (substring matching has no multi-token semantics).
+	// Returns the same []types.Node shape as Search so callers can
+	// migrate incrementally without touching their result handling.
+	SearchWithOpts(q string, limit int, opts SearchFTSOptions) ([]types.Node, error)
 	// SearchFTS returns FTS matches with BM25-derived relevance scores.
 	// See SearchHit for the meaning of Score (normalized) vs RawScore.
-	// See SearchFTSOptions for filter push-down (currently Language only).
+	// See SearchFTSOptions for filter push-down + Mode.
 	SearchFTS(q string, limit int, opts SearchFTSOptions) ([]SearchHit, error)
 
 	// Source bodies

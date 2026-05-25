@@ -18,6 +18,24 @@ type SearchFTSOptions struct {
 	// Language pushes a WHERE language = ? predicate into the SQL.
 	// Empty string disables the predicate (no language filter).
 	Language string
+
+	// Mode selects how multi-token queries combine. The zero value
+	// (empty string) preserves the historical OR-broadening behaviour:
+	// rewriteFTSQuery joins tokens with FTS5 OR so any one match
+	// surfaces a candidate, then BM25 + PageRank + usage rerank.
+	//
+	// Mode = "and" engages a post-FTS filter that drops hits whose
+	// FTS-indexed columns (name + qualified_name + signature +
+	// doc_comment) miss any query token. Mirrors the
+	// pkg/evidence/BuildPack Mode="and" semantics so external
+	// consumers see consistent AND behaviour across the search and
+	// evidence surfaces. Implementation over-fetches (limit × 3,
+	// floor 30) before filtering to preserve recall.
+	//
+	// Mode = "or" is accepted as a synonym of the zero value for
+	// callers that want to be explicit. Any other value is treated
+	// as "or" (forward-compatible — future modes are append-only).
+	Mode string
 }
 
 // SearchHit pairs a node with its full-text search relevance score.

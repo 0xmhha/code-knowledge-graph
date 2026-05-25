@@ -53,6 +53,9 @@ func (f *fakeStore) SubgraphByQname(_ string, _ int) ([]types.Node, []types.Edge
 	return nil, nil, nil
 }
 func (f *fakeStore) Search(_ string, _ int) ([]types.Node, error) { return nil, nil }
+func (f *fakeStore) SearchWithOpts(_ string, _ int, _ pkgstore.SearchFTSOptions) ([]types.Node, error) {
+	return nil, nil
+}
 func (f *fakeStore) SearchFTS(_ string, _ int, _ pkgstore.SearchFTSOptions) ([]pkgstore.SearchHit, error) {
 	return nil, nil
 }

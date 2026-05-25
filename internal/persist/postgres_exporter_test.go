@@ -62,6 +62,9 @@ func (m *mockStoreReader) SubgraphByQname(_ string, _ int) ([]types.Node, []type
 	return nil, nil, nil
 }
 func (m *mockStoreReader) Search(_ string, _ int) ([]types.Node, error) { return nil, nil }
+func (m *mockStoreReader) SearchWithOpts(_ string, _ int, _ SearchFTSOptions) ([]types.Node, error) {
+	return nil, nil
+}
 func (m *mockStoreReader) SearchFTS(_ string, _ int, _ SearchFTSOptions) ([]SearchHit, error) {
 	return nil, nil
 }

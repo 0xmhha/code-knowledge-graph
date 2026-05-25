@@ -644,6 +644,16 @@ func (s *sqliteStore) GetBlob(id string) ([]byte, error) {
 // over-fetching) is the CKG-2 fix that removes cks's FilterOverfetchRatio=3
 // workaround.
 func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]SearchHit, error) {
+	// Mode="and" over-fetches before applying the per-token presence
+	// filter so the post-filter doesn't starve recall on small pages.
+	// The 3× ratio mirrors the cks workaround that CKG-2 retired
+	// (FilterOverfetchRatio=3); the floor of 30 keeps tiny pages
+	// (limit=1, 5) from collapsing to zero survivors when a single
+	// hit happens to miss the AND set.
+	effectiveLimit := limit
+	if opts.Mode == "and" {
+		effectiveLimit = max(limit*3, 30)
+	}
 	sql := `SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
@@ -659,7 +669,7 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 		args = append(args, opts.Language)
 	}
 	sql += ` ORDER BY raw_score DESC LIMIT ?`
-	args = append(args, limit)
+	args = append(args, effectiveLimit)
 
 	rows, err := s.db.Query(sql, args...)
 	if err != nil {
@@ -669,6 +679,15 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 	hits, err := scanSearchHits(rows)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Mode == "and" {
+		tokens := tokenizeAndQuery(q)
+		if len(tokens) > 1 {
+			hits = filterHitsByAllTokens(hits, tokens)
+		}
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
 	}
 	normalizeSearchHits(hits)
 	return hits, nil
@@ -686,10 +705,19 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 // queries silently `not_found`); both now call this and get the same
 // behaviour.
 func (s *sqliteStore) Search(q string, limit int) ([]types.Node, error) {
+	return s.SearchWithOpts(q, limit, SearchFTSOptions{})
+}
+
+// SearchWithOpts threads SearchFTSOptions (Language filter, Mode for
+// AND/OR multi-token combining) through the same router as Search.
+// CJK input is still resolved by the substring fallback — opts is
+// dropped on that branch because substring search has no notion of
+// per-token AND/OR.
+func (s *sqliteStore) SearchWithOpts(q string, limit int, opts SearchFTSOptions) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, SearchFTSOptions{})
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -823,6 +851,68 @@ func trimFTSToken(t string) string {
 	return strings.TrimFunc(t, func(r rune) bool {
 		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_')
 	})
+}
+
+// tokenizeAndQuery extracts the lowercased token set that
+// SearchFTSOptions.Mode="and" requires to appear in every hit.
+// Separator set matches rewriteFTSQuery (whitespace + "." + `"`) so
+// the AND filter operates over the same surface FTS5 itself tokenises;
+// boundary punctuation is stripped via trimFTSToken so prose tail
+// punctuation ("Vault.deposit?") doesn't leak into the required set.
+// Empty / single-token queries collapse the filter at the caller — they
+// don't need an AND-of-one check.
+func tokenizeAndQuery(q string) []string {
+	fields := strings.FieldsFunc(q, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '.' || r == '"'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		t := trimFTSToken(f)
+		if t == "" {
+			continue
+		}
+		lower := strings.ToLower(t)
+		// FTS5 reserved keywords are syntax, not search terms. Caller
+		// may pass either the raw user query ("foo bar") or a power-
+		// user / rewriteFTSQuery expression ("foo* OR bar*"); both
+		// must yield the same AND token set {foo, bar}. Without this
+		// filter the OR/AND/NOT tokens leak into containsAll and any
+		// hit that happens to include the literal word "or" would
+		// pass while real hits get dropped.
+		switch lower {
+		case "or", "and", "not":
+			continue
+		}
+		out = append(out, lower)
+	}
+	return out
+}
+
+// filterHitsByAllTokens drops hits whose FTS-indexed columns (name +
+// qualified_name + signature + doc_comment) miss any token. Mirrors
+// pkg/evidence/containsAll's semantics — a token is "present" iff it
+// occurs as a case-insensitive substring of the concatenated haystack.
+// Substring (not whole-token) so dotted identifiers and snake_case
+// fragments survive the FTS5 tokeniser splits without false negatives.
+func filterHitsByAllTokens(hits []SearchHit, tokens []string) []SearchHit {
+	if len(tokens) == 0 {
+		return hits
+	}
+	out := hits[:0]
+	for _, h := range hits {
+		hay := strings.ToLower(h.Node.Name + " " + h.Node.QualifiedName + " " + h.Node.Signature + " " + h.Node.DocComment)
+		ok := true
+		for _, t := range tokens {
+			if !strings.Contains(hay, t) {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // SearchSubstr is a non-FTS fallback for queries the FTS5 unicode61

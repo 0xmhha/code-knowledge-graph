@@ -926,10 +926,17 @@ func (s *pgStore) pgEdgesPointingTo(ids []string, edgeTypes []string) ([]types.E
 // Search routes between FTS (English text) and substring fallback (CJK).
 // Uses the same routing logic as the SQLite implementation.
 func (s *pgStore) Search(q string, limit int) ([]types.Node, error) {
+	return s.SearchWithOpts(q, limit, SearchFTSOptions{})
+}
+
+// SearchWithOpts threads SearchFTSOptions through the routed search
+// path; the CJK substring fallback drops opts (no multi-token AND/OR
+// semantics there). Mirrors sqliteStore.SearchWithOpts for backend parity.
+func (s *pgStore) SearchWithOpts(q string, limit int, opts SearchFTSOptions) ([]types.Node, error) {
 	if hasNonASCII(q) {
 		return s.SearchSubstr(q, limit)
 	}
-	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, SearchFTSOptions{})
+	hits, err := s.SearchFTS(rewriteFTSQuery(q), limit, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -957,6 +964,13 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 	// Strip the trailing '*' that rewriteFTSQuery appends — plainto_tsquery
 	// handles prefix matching internally via lexeme stemming.
 	qclean := strings.TrimRight(q, "*")
+	// Mode="and": over-fetch so the per-token presence filter has
+	// recall headroom (mirrors the SQLite backend; see sqlite.go::
+	// SearchFTS for the 3× ratio + floor 30 reasoning).
+	effectiveLimit := limit
+	if opts.Mode == "and" {
+		effectiveLimit = max(limit*3, 30)
+	}
 	sql := `SELECT ` + pgNodeColumns + `,
             ts_rank(search_vector, plainto_tsquery('english', $1)) AS raw_score
         FROM nodes
@@ -969,7 +983,7 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 		next++
 	}
 	sql += fmt.Sprintf(` ORDER BY raw_score DESC LIMIT $%d`, next)
-	args = append(args, limit)
+	args = append(args, effectiveLimit)
 
 	rows, err := s.pool.Query(background, sql, args...)
 	if err != nil {
@@ -979,6 +993,15 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 	hits, err := scanPGSearchHits(rows)
 	if err != nil {
 		return nil, err
+	}
+	if opts.Mode == "and" {
+		tokens := tokenizeAndQuery(q)
+		if len(tokens) > 1 {
+			hits = filterHitsByAllTokens(hits, tokens)
+		}
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
 	}
 	normalizeSearchHits(hits)
 	return hits, nil
