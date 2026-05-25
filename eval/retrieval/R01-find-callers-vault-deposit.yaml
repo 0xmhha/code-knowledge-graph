@@ -13,6 +13,7 @@ probe:
 expected:
   symbols:
     - "api.Handler.HandleDeposit"
+    - "service.SafeVault.SafeDeposit"  # B1 lock wrapper added by R11/R12 work
 scoring:
   recall_min: 1.0
-  precision_min: 0.0
+  precision_min: 1.0

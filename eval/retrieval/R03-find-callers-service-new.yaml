@@ -12,6 +12,7 @@ probe:
 expected:
   symbols:
     - "api.NewHandler"
+    - "service.NewSafeVault"   # B1 lock wrapper constructor (concurrent.go)
 scoring:
   recall_min: 1.0
-  precision_min: 0.0
+  precision_min: 1.0

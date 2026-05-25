@@ -1,0 +1,26 @@
+id: R11-find-symbol-mutex
+description: |
+  find_symbol with Kinds=[Mutex] returns the SafeVault's mutex field
+  by its bare name "mu". Locks the B1 Stage 1 Mutex node emission
+  (internal/parse/golang/concurrency.go::scanStructForMutex): if the
+  concurrency parser stops emitting Mutex nodes, FindSymbol returns
+  an empty set and recall fails.
+
+  The qname carries the `#mutex` suffix that emitMutexNode appends to
+  disambiguate from the same-position Field node (G9 collision fix).
+probe:
+  tool: find_symbol
+  args:
+    # qname is `pkg.Type.field#mutex`; suffix-matching on "mu#mutex"
+    # finds it via SQLite's `qualified_name LIKE '%.mu#mutex'` (the
+    # bare segment "mu" doesn't carry the #mutex disambiguator added
+    # by scanStructForMutex, so a name of "mu" would not match).
+    name: "mu#mutex"
+    exact: false
+    kinds: ["Mutex"]
+expected:
+  symbols:
+    - "service.SafeVault.mu#mutex"
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

@@ -1,12 +1,12 @@
 {
-  "graph": "eval/.synthetic-data",
-  "fixtures_total": 5,
-  "passed": 5,
+  "graph": "/tmp/ckg-x5-check",
+  "fixtures_total": 12,
+  "passed": 12,
   "failed": 0,
   "aggregate": {
     "recall": 1,
-    "precision": 0.6,
-    "f1": 0.7499999999999999
+    "precision": 1,
+    "f1": 1
   },
   "results": [
     {
@@ -21,6 +21,7 @@
         "f1": 1
       },
       "got": [
+        "service.SafeVault.SafeDeposit",
         "api.Handler.HandleDeposit"
       ]
     },
@@ -51,7 +52,8 @@
         "f1": 1
       },
       "got": [
-        "api.NewHandler"
+        "api.NewHandler",
+        "service.NewSafeVault"
       ]
     },
     {
@@ -66,29 +68,138 @@
         "f1": 1
       },
       "got": [
+        "service.SafeVault.vault",
+        "Vault",
         "service.Vault",
         "api.Handler.vault"
       ]
     },
     {
-      "id": "R05-search-text-deposit",
+      "id": "R05-search-text-vault-deposit-and-go",
       "tool": "search_text",
       "pass": true,
       "pass_recall": true,
       "pass_precision": true,
       "score": {
-        "recall": 0.6666666666666666,
-        "precision": 0.3333333333333333,
-        "f1": 0.4444444444444444,
-        "missing": [
-          "api.Handler.HandleDeposit"
-        ],
-        "extra": [
-          "domain.DepositRequest.Amount",
-          "domain.DepositRequest.From",
-          "service.Vault.Deposit#IfStmt@276",
-          "service.Vault.Deposit#ReturnStmt@378"
-        ]
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit",
+        "service.Vault.Deposit#IfStmt@276",
+        "service.Vault.Deposit#ReturnStmt@378",
+        "service.SafeVault.SafeDeposit",
+        "service.SafeVault"
+      ]
+    },
+    {
+      "id": "R06-search-text-vault-or-deposit-go",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit",
+        "domain.DepositRequest",
+        "service.Vault.Deposit#IfStmt@276",
+        "service.Vault.Deposit#ReturnStmt@378",
+        "domain.DepositRequest.Amount",
+        "domain.DepositRequest.From",
+        "service.Vault",
+        "service.SafeVault.vault",
+        "api.Handler.vault",
+        "service.Vault.wallets",
+        "service/go-backend/service/vault.go",
+        "hunk:df5709b17394fa012dd795c4a5d73bebb3af409b:go-backend/service/vault.go:0",
+        "service.SafeVault.SafeDeposit",
+        "service.NewSafeVault",
+        "service.SafeVault"
+      ]
+    },
+    {
+      "id": "R07-search-text-three-token-and",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit",
+        "service.Vault.Deposit#IfStmt@276",
+        "service.Vault.Deposit#ReturnStmt@378",
+        "service.SafeVault.SafeDeposit#ReturnStmt@1046",
+        "service.SafeVault.SafeDeposit#CallSite@1053",
+        "service.SafeVault.SafeDeposit#CallSite@1031",
+        "service.SafeVault.SafeDeposit#CallSite@1012",
+        "service.SafeVault.SafeDeposit",
+        "service.SafeVault"
+      ]
+    },
+    {
+      "id": "R08-search-text-vault-language-ts",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "VaultService",
+        "Vault",
+        "import:../services/vault",
+        "import:../contracts/Vault",
+        "Vault.deposit",
+        "VaultService.depositFn",
+        "VaultService.constructor",
+        "VaultService.depositFn#ReturnStmt@146",
+        "Vault.deposit#ReturnStmt@104",
+        "Vault.deposit#CallSite@111",
+        "VaultService.depositFn#CallSite@153",
+        "file:ts-frontend/src/contracts/Vault.ts",
+        "file:ts-frontend/src/services/vault.ts"
+      ]
+    },
+    {
+      "id": "R09-search-text-vault-language-sol",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "Vault",
+        "Vault.deposit",
+        "Vault.nonZero",
+        "file:sol-contract/contracts/Vault.sol"
+      ]
+    },
+    {
+      "id": "R10-search-text-deposit-strict-go",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
       },
       "got": [
         "domain.DepositRequest",
@@ -97,6 +208,36 @@
         "domain.DepositRequest.From",
         "service.Vault.Deposit#IfStmt@276",
         "service.Vault.Deposit#ReturnStmt@378"
+      ]
+    },
+    {
+      "id": "R11-find-symbol-mutex",
+      "tool": "find_symbol",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.SafeVault.mu#mutex"
+      ]
+    },
+    {
+      "id": "R12-find-callees-safedeposit",
+      "tool": "find_callees",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit"
       ]
     }
   ]

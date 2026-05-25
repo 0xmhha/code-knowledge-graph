@@ -1,0 +1,48 @@
+id: R06-search-text-vault-or-deposit-go
+description: |
+  Multi-keyword OR mode (explicit) in language=go: "Vault deposit"
+  returns every Go node carrying either token in any FTS-indexed column.
+  Locks the OR-broadening contract that mode=or (and the zero-value
+  default) share — callers that want maximum recall over a topic rely
+  on this behaviour. Pairs with R05 to surface the AND ↔ OR delta.
+
+  Precision target is intentionally loose (0.5) because OR mode is a
+  recall-first surface; the BM25 + PageRank + usage rerank pushes the
+  most relevant hits to the top, but every "vault" or "deposit" token
+  bearer is a valid candidate.
+probe:
+  tool: search_text
+  args:
+    query: "Vault deposit"
+    mode: "or"
+    language: "go"
+    top_k: 20
+expected:
+  # Symbol-level matches first
+  symbols:
+    - service.Vault.Deposit
+    - service.Vault
+    - api.Handler.vault
+    - domain.DepositRequest
+    - domain.DepositRequest.Amount
+    - domain.DepositRequest.From
+    - service.Vault.wallets
+    # B1 concurrent.go additions
+    - service.SafeVault
+    - service.SafeVault.vault
+    - service.SafeVault.SafeDeposit
+    - service.NewSafeVault
+    # Statement-level children (qname prefix carries token)
+    - service.Vault.Deposit#IfStmt@276
+    - service.Vault.Deposit#ReturnStmt@378
+    # File / hunk nodes whose path or qname matches
+    - service/go-backend/service/vault.go
+    - hunk:df5709b17394fa012dd795c4a5d73bebb3af409b:go-backend/service/vault.go:0
+  # api.Handler.HandleDeposit is intentionally absent — FTS5 unicode61
+  # tokeniser does not split CamelCase, so "deposit*" does not match
+  # the single token "HandleDeposit". Future trigram tokeniser work
+  # would lift this constraint; the fixture would then need to add
+  # HandleDeposit (intended positive regression).
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

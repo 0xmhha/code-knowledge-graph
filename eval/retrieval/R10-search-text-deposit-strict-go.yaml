@@ -1,0 +1,33 @@
+id: R10-search-text-deposit-strict-go
+description: |
+  Single-keyword precision target: "Deposit" with language=go must
+  return exactly the three Go nodes whose FTS-indexed columns contain
+  the token. Captures the original R05 intent (single-token search)
+  but ratchets precision_min from 0.0 to 1.0 — possible now that the
+  language pushdown filter (CKG-2) strips TS Vault.deposit /
+  VaultService.depositFn and the Sol Deposited event from the result.
+
+  If a future code change introduces additional Go nodes with
+  "deposit" in their indexed columns, the fixture must be widened
+  in the same PR (recall stays achievable, precision tightens).
+probe:
+  tool: search_text
+  args:
+    query: "Deposit"
+    language: "go"
+    top_k: 20
+expected:
+  symbols:
+    - service.Vault.Deposit
+    - domain.DepositRequest
+    - domain.DepositRequest.Amount         # field's qname carries "Deposit"
+    - domain.DepositRequest.From
+    - service.Vault.Deposit#IfStmt@276     # statement children
+    - service.Vault.Deposit#ReturnStmt@378
+  # api.Handler.HandleDeposit is intentionally absent — FTS5 unicode61
+  # does not split CamelCase, so "deposit*" prefix doesn't match the
+  # token "HandleDeposit". Documents the limitation for future
+  # trigram-tokeniser work (which would re-add HandleDeposit).
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

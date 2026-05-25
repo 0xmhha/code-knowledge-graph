@@ -1,0 +1,22 @@
+id: R09-search-text-vault-language-sol
+description: |
+  Language filter pushdown over Solidity: "Vault" with language=sol
+  returns only Sol nodes whose FTS-indexed columns contain the token.
+  Pairs with R08 to lock the language pushdown for all three supported
+  languages. The Sol synthetic corpus has a single "Vault" contract,
+  so this fixture also doubles as a "no cross-language bleed" guard.
+probe:
+  tool: search_text
+  args:
+    query: "Vault"
+    language: "sol"
+    top_k: 20
+expected:
+  symbols:
+    - Vault                              # contract
+    - Vault.deposit                      # method (qname carries "vault" via contract prefix)
+    - Vault.nonZero                      # modifier
+    - file:sol-contract/contracts/Vault.sol
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

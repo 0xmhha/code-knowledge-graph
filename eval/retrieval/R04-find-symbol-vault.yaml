@@ -14,8 +14,10 @@ probe:
     exact: false
 expected:
   symbols:
-    - "service.Vault"
-    - "api.Handler.vault"
+    - "Vault"                   # TS class — bare qname (no module prefix in TS parser)
+    - "service.Vault"           # Go struct
+    - "api.Handler.vault"       # Go field (ASCII case-insensitive LIKE match)
+    - "service.SafeVault.vault" # B1 lock wrapper field (concurrent.go)
 scoring:
   recall_min: 1.0
   precision_min: 1.0

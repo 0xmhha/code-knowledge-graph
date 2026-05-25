@@ -1,0 +1,19 @@
+id: R12-find-callees-safedeposit
+description: |
+  find_callees on the lock-protected SafeDeposit wrapper must surface
+  service.Vault.Deposit — the function it delegates to inside the
+  critical section. Pairs with R11: R11 locks Mutex *node* emission,
+  R12 locks the *call edge* through the lock-wrapping function, which
+  in turn is the chain the B1 acquires_lock / accessed_under_lock
+  edges anchor on.
+probe:
+  tool: find_callees
+  args:
+    qname: "service.SafeVault.SafeDeposit"
+    depth: 2
+expected:
+  symbols:
+    - "service.Vault.Deposit"
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0

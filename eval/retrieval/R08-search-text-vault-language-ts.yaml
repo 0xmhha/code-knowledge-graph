@@ -1,0 +1,36 @@
+id: R08-search-text-vault-language-ts
+description: |
+  Language filter pushdown over TypeScript: "Vault" with language=ts
+  returns only TS nodes whose FTS-indexed columns contain the token.
+  Locks the CKG-2 language pushdown across non-Go languages — Go's
+  service.Vault and Sol's Vault contract must NOT surface here despite
+  carrying the keyword. Imports (`import:../contracts/Vault`) count
+  toward recall because the path token includes "Vault".
+probe:
+  tool: search_text
+  args:
+    query: "Vault"
+    language: "ts"
+    top_k: 20
+expected:
+  symbols:
+    # Classes
+    - Vault
+    - VaultService
+    # Methods
+    - Vault.deposit
+    - VaultService.depositFn
+    - VaultService.constructor
+    # Statement children
+    - Vault.deposit#ReturnStmt@104
+    - Vault.deposit#CallSite@111
+    - VaultService.depositFn#ReturnStmt@146
+    - VaultService.depositFn#CallSite@153
+    # Imports + file nodes (path tokens include "vault")
+    - import:../contracts/Vault
+    - import:../services/vault
+    - file:ts-frontend/src/contracts/Vault.ts
+    - file:ts-frontend/src/services/vault.ts
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0
