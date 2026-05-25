@@ -161,6 +161,13 @@ func runSearchText(r persist.StoreReader, args map[string]any) ([]string, error)
 	if mode, ok := args["mode"].(string); ok {
 		opts.Mode = mode
 	}
+	if kindsRaw, ok := args["node_kinds"].([]any); ok {
+		for _, k := range kindsRaw {
+			if s, ok := k.(string); ok {
+				opts.NodeKinds = append(opts.NodeKinds, types.NodeType(s))
+			}
+		}
+	}
 	nodes, err := r.SearchWithOpts(q, limit, opts)
 	if err != nil {
 		return nil, err

@@ -654,6 +654,16 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 	if opts.Mode == "and" {
 		effectiveLimit = max(limit*3, 30)
 	}
+	// NodeKinds: zero value (nil or empty) defaults to symbol-only.
+	// Pushed down as a `WHERE n.type IN (...)` predicate so the FTS
+	// index can shed statement/meta/path rows before BM25 scoring
+	// even sees them — cheaper than a post-filter and keeps the
+	// over-fetch math (Mode="and") honest because the filtered set
+	// IS the candidate pool the post-filter then narrows further.
+	kinds := opts.NodeKinds
+	if len(kinds) == 0 {
+		kinds = types.SymbolNodeTypes()
+	}
 	sql := `SELECT n.id, n.type, n.name, n.qualified_name, n.file_path,
 		n.start_line, n.end_line, n.start_byte, n.end_byte, n.language,
 		COALESCE(n.visibility,''), COALESCE(n.signature,''), COALESCE(n.doc_comment,''),
@@ -667,6 +677,10 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 	if opts.Language != "" {
 		sql += ` AND n.language = ?`
 		args = append(args, opts.Language)
+	}
+	sql += ` AND n.type IN (` + placeholders(len(kinds)) + `)`
+	for _, k := range kinds {
+		args = append(args, string(k))
 	}
 	sql += ` ORDER BY raw_score DESC LIMIT ?`
 	args = append(args, effectiveLimit)

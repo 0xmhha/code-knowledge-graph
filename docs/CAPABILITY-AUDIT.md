@@ -151,7 +151,7 @@ go-stablenet (2,142 files) with ckv-mirror fixtures (12 PRs from
 
 | Gap | Recommended work | Priority |
 |---|---|---|
-| `search_text` precision shortfall (R05) | Two paths: (a) tighten `rewriteFTSQuery` for short tokens — drop tokens shorter than 4 chars in prefix-tag stage; or (b) add a `mode=and` to `search_text` (Section 3.2 work item) and update R05 expected to use AND mode. Recommend (b) — addresses the AND/OR gap simultaneously. | P0 (couples with §3.2 first row) |
+| `search_text` precision shortfall (R05) | **✅ done (2026-05-26)** via the X-NodeKinds work — `SearchFTSOptions.NodeKinds` whitelist with a default symbol-only filter strips statement / Commit / Hunk / Import / Export rows at the SQL layer. R05/R06/R07/R08/R10 expecteds narrowed accordingly, aggregate R=P=F1=1.00 across 12 fixtures. | done |
 | Stage B harness over 12 ckv-fixture-mirror tasks | **ckg-NEW-5 + ckg-NEW-8** from CKS-INTEGRATION. YAML authoring + harness wiring. Stage B then measures the 14-task × 4-baseline matrix on the real corpus. | P0 |
 | Retrieval scorer cannot distinguish "off-target" candidates from "ranked-lower-but-relevant" | Current scorer is symbol-set match. Multi-keyword AND/OR queries return ranked lists where MRR matters. Add an optional `top_k` field on `Scoring` and an MRR scoring path. | P1 |
 | No regression alert when precision drops | `make eval` exits 0 even when precision dips. The CI gate (EV1 Phase 3, deferred for manual user application) reads recall_min/precision_min thresholds but defaults to 0 for `search_text`. Need a recommended-threshold scan that fails when committed thresholds tighten and break. | P1 (rolls in with EV1 Phase 3) |

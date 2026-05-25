@@ -971,6 +971,13 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 	if opts.Mode == "and" {
 		effectiveLimit = max(limit*3, 30)
 	}
+	// NodeKinds: nil/empty defaults to symbol-only — mirrors the
+	// SQLite backend so the public Reader contract behaves the same
+	// way regardless of which store is mounted.
+	kinds := opts.NodeKinds
+	if len(kinds) == 0 {
+		kinds = types.SymbolNodeTypes()
+	}
 	sql := `SELECT ` + pgNodeColumns + `,
             ts_rank(search_vector, plainto_tsquery('english', $1)) AS raw_score
         FROM nodes
@@ -982,6 +989,18 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 		args = append(args, opts.Language)
 		next++
 	}
+	// IN clause with positional placeholders ($N, $N+1, ...).
+	inClause := ` AND type IN (`
+	for i, k := range kinds {
+		if i > 0 {
+			inClause += ", "
+		}
+		inClause += fmt.Sprintf("$%d", next)
+		args = append(args, string(k))
+		next++
+	}
+	inClause += ")"
+	sql += inClause
 	sql += fmt.Sprintf(` ORDER BY raw_score DESC LIMIT $%d`, next)
 	args = append(args, effectiveLimit)
 

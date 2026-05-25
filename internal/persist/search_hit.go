@@ -1,6 +1,8 @@
 package persist
 
-import "github.com/0xmhha/code-knowledge-graph/pkg/types"
+import (
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
+)
 
 // SearchFTSOptions configures filter push-down for StoreReader.SearchFTS.
 // Zero value means "no filter" — every match passes through.
@@ -36,6 +38,22 @@ type SearchFTSOptions struct {
 	// callers that want to be explicit. Any other value is treated
 	// as "or" (forward-compatible — future modes are append-only).
 	Mode string
+
+	// NodeKinds restricts the result set to specific node types. The
+	// zero value (nil slice) applies the *default symbol-only filter*:
+	// search_text returns only the types that types.NodeType.IsSymbol
+	// reports true for, which strips statement-level nodes
+	// (IfStmt/LoopStmt/CallSite/ReturnStmt/SwitchStmt/AwaitPoint),
+	// meta nodes (Commit/Hunk), and path-only nodes (Import/Export)
+	// from FTS hits that match purely on the enclosing symbol's qname
+	// prefix.
+	//
+	// To surface every node type the FTS index matched, pass an
+	// explicit slice — typically types.AllNodeTypes() — or list the
+	// specific kinds you need. An empty (non-nil) slice is treated
+	// the same as nil and applies the default symbol filter; callers
+	// that mean "match nothing" should not call SearchFTS at all.
+	NodeKinds []types.NodeType
 }
 
 // SearchHit pairs a node with its full-text search relevance score.

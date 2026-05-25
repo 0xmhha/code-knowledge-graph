@@ -1,5 +1,5 @@
 {
-  "graph": "/tmp/ckg-x5-check",
+  "graph": "/tmp/ckg-x6-check",
   "fixtures_total": 12,
   "passed": 12,
   "failed": 0,
@@ -87,8 +87,6 @@
       },
       "got": [
         "service.Vault.Deposit",
-        "service.Vault.Deposit#IfStmt@276",
-        "service.Vault.Deposit#ReturnStmt@378",
         "service.SafeVault.SafeDeposit",
         "service.SafeVault"
       ]
@@ -107,8 +105,6 @@
       "got": [
         "service.Vault.Deposit",
         "domain.DepositRequest",
-        "service.Vault.Deposit#IfStmt@276",
-        "service.Vault.Deposit#ReturnStmt@378",
         "domain.DepositRequest.Amount",
         "domain.DepositRequest.From",
         "service.Vault",
@@ -116,7 +112,6 @@
         "api.Handler.vault",
         "service.Vault.wallets",
         "service/go-backend/service/vault.go",
-        "hunk:df5709b17394fa012dd795c4a5d73bebb3af409b:go-backend/service/vault.go:0",
         "service.SafeVault.SafeDeposit",
         "service.NewSafeVault",
         "service.SafeVault"
@@ -135,12 +130,6 @@
       },
       "got": [
         "service.Vault.Deposit",
-        "service.Vault.Deposit#IfStmt@276",
-        "service.Vault.Deposit#ReturnStmt@378",
-        "service.SafeVault.SafeDeposit#ReturnStmt@1046",
-        "service.SafeVault.SafeDeposit#CallSite@1053",
-        "service.SafeVault.SafeDeposit#CallSite@1031",
-        "service.SafeVault.SafeDeposit#CallSite@1012",
         "service.SafeVault.SafeDeposit",
         "service.SafeVault"
       ]
@@ -159,15 +148,9 @@
       "got": [
         "VaultService",
         "Vault",
-        "import:../services/vault",
-        "import:../contracts/Vault",
         "Vault.deposit",
         "VaultService.depositFn",
         "VaultService.constructor",
-        "VaultService.depositFn#ReturnStmt@146",
-        "Vault.deposit#ReturnStmt@104",
-        "Vault.deposit#CallSite@111",
-        "VaultService.depositFn#CallSite@153",
         "file:ts-frontend/src/contracts/Vault.ts",
         "file:ts-frontend/src/services/vault.ts"
       ]
@@ -205,9 +188,7 @@
         "domain.DepositRequest",
         "service.Vault.Deposit",
         "domain.DepositRequest.Amount",
-        "domain.DepositRequest.From",
-        "service.Vault.Deposit#IfStmt@276",
-        "service.Vault.Deposit#ReturnStmt@378"
+        "domain.DepositRequest.From"
       ]
     },
     {

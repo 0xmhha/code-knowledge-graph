@@ -12,17 +12,14 @@ probe:
     language: "go"
     top_k: 20
 expected:
+  # Symbol-only after the X-NodeKinds default. Both Method qnames
+  # ("service.Vault.Deposit", "service.SafeVault.SafeDeposit")
+  # carry all three tokens via their package + receiver + name
+  # segments; their statement children no longer surface.
   symbols:
     - service.Vault.Deposit
-    - service.Vault.Deposit#IfStmt@276    # qname prefix carries all 3 tokens
-    - service.Vault.Deposit#ReturnStmt@378
-    # B1 concurrent.go: SafeDeposit's qname carries service + Vault + Deposit
     - service.SafeVault
     - service.SafeVault.SafeDeposit
-    - service.SafeVault.SafeDeposit#ReturnStmt@1046
-    - service.SafeVault.SafeDeposit#CallSite@1012
-    - service.SafeVault.SafeDeposit#CallSite@1031
-    - service.SafeVault.SafeDeposit#CallSite@1053
 scoring:
   recall_min: 1.0
   precision_min: 1.0

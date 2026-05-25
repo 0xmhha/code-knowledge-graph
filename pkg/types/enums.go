@@ -129,6 +129,55 @@ func AllNodeTypes() []NodeType {
 	}
 }
 
+// IsSymbol reports whether t is a "symbol-level" node — a code unit
+// (function, type, field, package, file, endpoint, …) that a coding
+// agent's keyword search would normally want to surface. Returns
+// false for:
+//
+//   - Statement nodes (IfStmt, LoopStmt, CallSite, ReturnStmt,
+//     SwitchStmt, AwaitPoint) — control-flow markers whose qname
+//     carries the enclosing function's prefix, which makes them
+//     false-positive FTS hits on a keyword that names the enclosing
+//     symbol.
+//   - Meta nodes (Commit, Hunk) — git-history rows surfaced via
+//     evidence_for_intent, not the symbol search path.
+//   - Path-only nodes (Import, Export) — their FTS columns carry
+//     module paths, so a query like "Vault" matches every import of
+//     contracts/Vault even when the consumer wanted the class itself.
+//
+// search_text (pkg/mcphandlers + internal/persist.SearchFTS) uses
+// IsSymbol as the default whitelist when SearchFTSOptions.NodeKinds
+// is nil. Callers that want the full surface (statement nodes
+// included) pass an explicit NodeKinds slice — typically
+// types.AllNodeTypes().
+func (t NodeType) IsSymbol() bool {
+	switch t {
+	case NodeIfStmt, NodeLoopStmt, NodeCallSite, NodeReturnStmt, NodeSwitchStmt,
+		NodeAwaitPoint,
+		NodeCommit, NodeHunk,
+		NodeImport, NodeExport:
+		return false
+	default:
+		return true
+	}
+}
+
+// SymbolNodeTypes returns the symbol-level subset of AllNodeTypes —
+// the default whitelist for search_text when no explicit NodeKinds
+// is supplied. Stable ordering tracks AllNodeTypes (callers must not
+// key on positional indices; see TestAllNodeTypes_Stable for the
+// invariant).
+func SymbolNodeTypes() []NodeType {
+	all := AllNodeTypes()
+	out := make([]NodeType, 0, len(all))
+	for _, t := range all {
+		if t.IsSymbol() {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // EdgeType enumerates the 41 edge kinds (spec §5.2; v0.2 schema 1.1 added 3
 // lock edges; schema 1.3 appended listens_on / handles_message / rpc_calls
 // for CKS G5 Distributed; schema 1.4 appended changed_in / blame for CKS

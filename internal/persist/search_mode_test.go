@@ -49,6 +49,72 @@ func fn(id, name, qname, signature, doc string) types.Node {
 	}
 }
 
+// TestSearchFTS_NodeKinds_DefaultSymbolOnly locks the post-X-NodeKinds
+// contract: with NodeKinds omitted, SearchFTS hides statement-level
+// nodes (IfStmt/ReturnStmt/CallSite/…) and meta nodes (Hunk/Commit)
+// from the result set, even when their qname prefix carries the query
+// token. Captures the "search returns symbol units, not internal
+// AST control flow rows" intent that drives the search_text default
+// in pkg/mcphandlers.
+func TestSearchFTS_NodeKinds_DefaultSymbolOnly(t *testing.T) {
+	store := openSeededStore(t, []types.Node{
+		fn("a", "Deposit", "service.Vault.Deposit", "vault deposit handler", "."),
+		{ID: "b", Type: types.NodeIfStmt,
+			Name: "deposit-if", QualifiedName: "service.Vault.Deposit#IfStmt@123",
+			FilePath: "x.go", Language: "go", Confidence: types.ConfExtracted},
+		{ID: "c", Type: types.NodeHunk,
+			Name: "hunk", QualifiedName: "hunk:abc:x.go:0",
+			FilePath: "x.go", Language: "go", Confidence: types.ConfExtracted},
+	})
+
+	hits, err := store.SearchFTS("deposit*", 10, persist.SearchFTSOptions{})
+	if err != nil {
+		t.Fatalf("SearchFTS: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, h := range hits {
+		ids[h.Node.ID] = true
+	}
+	if !ids["a"] {
+		t.Errorf("symbol-only default: expected method node 'a' in hits, got %v", ids)
+	}
+	if ids["b"] {
+		t.Errorf("symbol-only default: did not expect IfStmt 'b', got %v", ids)
+	}
+	if ids["c"] {
+		t.Errorf("symbol-only default: did not expect Hunk 'c', got %v", ids)
+	}
+}
+
+// TestSearchFTS_NodeKinds_ExplicitOptsOut documents the escape
+// hatch: an explicit NodeKinds slice overrides the default. Pass
+// types.AllNodeTypes (or any subset that includes statement / meta
+// kinds) to recover the pre-narrowing behaviour for callers that
+// specifically need control-flow context (e.g. a future tool that
+// answers "which IfStmt mentions Vault.Deposit").
+func TestSearchFTS_NodeKinds_ExplicitOptsOut(t *testing.T) {
+	store := openSeededStore(t, []types.Node{
+		fn("a", "Deposit", "service.Vault.Deposit", "deposit", "."),
+		{ID: "b", Type: types.NodeIfStmt,
+			Name: "deposit-if", QualifiedName: "service.Vault.Deposit#IfStmt@123",
+			FilePath: "x.go", Language: "go", Confidence: types.ConfExtracted},
+	})
+
+	hits, err := store.SearchFTS("deposit*", 10, persist.SearchFTSOptions{
+		NodeKinds: types.AllNodeTypes(),
+	})
+	if err != nil {
+		t.Fatalf("SearchFTS: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, h := range hits {
+		ids[h.Node.ID] = true
+	}
+	if !ids["a"] || !ids["b"] {
+		t.Errorf("explicit AllNodeTypes: expected both symbol + statement nodes, got %v", ids)
+	}
+}
+
 // TestSearchFTS_OrMode_DefaultBehaviour locks the pre-Mode-option contract:
 // zero-value SearchFTSOptions preserves the historical OR-broadening so
 // queries with one matching token still surface their candidate.

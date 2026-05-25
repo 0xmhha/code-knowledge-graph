@@ -19,10 +19,11 @@ probe:
     language: "go"
     top_k: 20
 expected:
+  # Symbol-only after the X-NodeKinds default (statement-level
+  # IfStmt/ReturnStmt children no longer surface; their qname
+  # prefix matches were noise driven by FTS column indexing).
   symbols:
     - service.Vault.Deposit                       # the Method node itself
-    - service.Vault.Deposit#IfStmt@276            # statement child — qname prefix carries both tokens
-    - service.Vault.Deposit#ReturnStmt@378
     - service.SafeVault                           # B1 lock wrapper struct (vault + deposit-via-SafeDeposit)
     - service.SafeVault.SafeDeposit               # B1 lock wrapper method
 scoring:

@@ -13,6 +13,10 @@ probe:
     language: "ts"
     top_k: 20
 expected:
+  # Symbol-only after the X-NodeKinds default. Statement children
+  # (CallSite / ReturnStmt) and Import nodes are now filtered at the
+  # FTS layer; File nodes stay (the file path is still a useful
+  # symbol-search target).
   symbols:
     # Classes
     - Vault
@@ -21,14 +25,7 @@ expected:
     - Vault.deposit
     - VaultService.depositFn
     - VaultService.constructor
-    # Statement children
-    - Vault.deposit#ReturnStmt@104
-    - Vault.deposit#CallSite@111
-    - VaultService.depositFn#ReturnStmt@146
-    - VaultService.depositFn#CallSite@153
-    # Imports + file nodes (path tokens include "vault")
-    - import:../contracts/Vault
-    - import:../services/vault
+    # File nodes (path tokens carry "vault")
     - file:ts-frontend/src/contracts/Vault.ts
     - file:ts-frontend/src/services/vault.ts
 scoring:

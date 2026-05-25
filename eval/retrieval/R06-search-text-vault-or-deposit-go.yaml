@@ -18,7 +18,9 @@ probe:
     language: "go"
     top_k: 20
 expected:
-  # Symbol-level matches first
+  # Symbol-only after the X-NodeKinds default (statement-level
+  # children and the hunk meta-node no longer surface — those were
+  # FTS noise driven by qname/path-prefix matching).
   symbols:
     - service.Vault.Deposit
     - service.Vault
@@ -32,17 +34,15 @@ expected:
     - service.SafeVault.vault
     - service.SafeVault.SafeDeposit
     - service.NewSafeVault
-    # Statement-level children (qname prefix carries token)
-    - service.Vault.Deposit#IfStmt@276
-    - service.Vault.Deposit#ReturnStmt@378
-    # File / hunk nodes whose path or qname matches
+    # File node — the path "go-backend/service/vault.go" carries
+    # the "vault" token; File is still a symbol-level NodeType so
+    # this entry passes the default whitelist.
     - service/go-backend/service/vault.go
-    - hunk:df5709b17394fa012dd795c4a5d73bebb3af409b:go-backend/service/vault.go:0
-  # api.Handler.HandleDeposit is intentionally absent — FTS5 unicode61
-  # tokeniser does not split CamelCase, so "deposit*" does not match
-  # the single token "HandleDeposit". Future trigram tokeniser work
-  # would lift this constraint; the fixture would then need to add
-  # HandleDeposit (intended positive regression).
+  # api.Handler.HandleDeposit is intentionally absent — FTS5
+  # unicode61 does not split CamelCase, so "deposit*" does not
+  # match the single token "HandleDeposit". Future trigram tokeniser
+  # work would lift this constraint; the fixture would then need to
+  # add HandleDeposit (intended positive regression).
 scoring:
   recall_min: 1.0
   precision_min: 1.0

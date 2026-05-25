@@ -17,13 +17,15 @@ probe:
     language: "go"
     top_k: 20
 expected:
+  # Symbol-only after the X-NodeKinds default — Method + Struct +
+  # Field that carry the "deposit" token. Statement children are
+  # filtered at the FTS layer; HandleDeposit stays absent for the
+  # FTS5-unicode61 CamelCase limitation documented below.
   symbols:
     - service.Vault.Deposit
     - domain.DepositRequest
     - domain.DepositRequest.Amount         # field's qname carries "Deposit"
     - domain.DepositRequest.From
-    - service.Vault.Deposit#IfStmt@276     # statement children
-    - service.Vault.Deposit#ReturnStmt@378
   # api.Handler.HandleDeposit is intentionally absent — FTS5 unicode61
   # does not split CamelCase, so "deposit*" prefix doesn't match the
   # token "HandleDeposit". Documents the limitation for future

@@ -7,6 +7,7 @@ import (
 	server "github.com/mark3labs/mcp-go/server"
 
 	"github.com/0xmhha/code-knowledge-graph/pkg/store"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // RegisterFindSymbol resolves an exact-or-suffix qname / name to nodes.
@@ -126,13 +127,22 @@ func RegisterGetSubgraph(s *server.MCPServer, reader store.Reader) {
 // FTS-indexed columns; useful for precise multi-keyword retrieval.
 // language pushes a `WHERE language = ?` filter into the SQL when
 // non-empty (CKG-2).
+//
+// node_kinds is the optional whitelist of node types to return. The
+// default (omitted / empty) applies a symbol-only filter that strips
+// statement-level rows (IfStmt/LoopStmt/CallSite/ReturnStmt/SwitchStmt/
+// AwaitPoint), meta rows (Commit/Hunk), and path-only rows
+// (Import/Export). Pass an explicit array — typically the full set
+// produced by types.AllNodeTypes — to disable the default narrowing
+// and surface every FTS match.
 func RegisterSearchText(s *server.MCPServer, reader store.Reader) {
 	tool := mcp.NewTool("search_text",
-		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input. mode=\"or\" (default) ORs multi-token queries; mode=\"and\" requires every token to appear in each hit's indexed columns. language filters the result set to a single source language (go|ts|sol)."),
+		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input. mode=\"or\" (default) ORs multi-token queries; mode=\"and\" requires every token to appear in each hit's indexed columns. language filters the result set to a single source language (go|ts|sol). node_kinds is an optional whitelist of node types; omit it to apply the default symbol-only filter (statement / Commit / Hunk / Import / Export rows are stripped because their FTS hits are typically noise from the enclosing symbol's qname prefix)."),
 		mcp.WithString("query", mcp.Required()),
 		mcp.WithNumber("top_k", mcp.DefaultNumber(10)),
 		mcp.WithString("language"),
 		mcp.WithString("mode"),
+		mcp.WithArray("node_kinds"),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -141,10 +151,17 @@ func RegisterSearchText(s *server.MCPServer, reader store.Reader) {
 		incl := req.GetBool("include_blobs", false)
 		lang := req.GetString("language", "")
 		mode := req.GetString("mode", "")
-		hits, err := reader.SearchWithOpts(q, top, store.SearchFTSOptions{
+		opts := store.SearchFTSOptions{
 			Language: lang,
 			Mode:     mode,
-		})
+		}
+		if raw := req.GetStringSlice("node_kinds", nil); raw != nil {
+			opts.NodeKinds = make([]types.NodeType, 0, len(raw))
+			for _, k := range raw {
+				opts.NodeKinds = append(opts.NodeKinds, types.NodeType(k))
+			}
+		}
+		hits, err := reader.SearchWithOpts(q, top, opts)
 		if err != nil {
 			return nil, err
 		}
