@@ -32,3 +32,29 @@ scoring:
 		t.Errorf("unexpected: %+v", tasks)
 	}
 }
+
+func TestLoadTasks_EnvExpansion(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CKG_TEST_SRC", "/opt/stablenet")
+	yaml := `
+id: T-env
+corpus: go-stablenet
+corpus_path: ${CKG_TEST_SRC}/core
+description: "test env expansion"
+expected_kind: symbol_set
+expected:
+  symbols: ["a.Foo"]
+scoring:
+  type: precision_recall
+`
+	if err := os.WriteFile(filepath.Join(dir, "env.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := eval.LoadTasks(filepath.Join(dir, "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tasks[0].CorpusPath != "/opt/stablenet/core" {
+		t.Errorf("corpus_path not expanded: got %q", tasks[0].CorpusPath)
+	}
+}

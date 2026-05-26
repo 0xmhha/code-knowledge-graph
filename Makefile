@@ -145,6 +145,60 @@ eval-baseline-update:
 	@echo "eval/baseline/ refreshed from eval/results/latest/"
 	@echo "Commit the change to lock the new baseline."
 
+# eval-stage-b: Stage B evaluation — runs 14 stable-net task YAMLs × 4
+# baselines against a go-stablenet graph. Requires:
+#   - STABLENET_SRC pointing at the go-stablenet checkout
+#     (default: ~/Work/github/stable-net/go-stablenet-latest)
+#   - LLM backend configured (ANTHROPIC_API_KEY or CLIWRAP_AGENT)
+#
+# The graph is built with --out-tag=auto-commit-hash so the output
+# directory encodes the source commit, enabling per-SHA baseline tracking.
+#
+# Output: eval/results/stage-b/{results.csv,report.md}
+#
+# Override defaults:
+#   make eval-stage-b STABLENET_SRC=/path/to/go-stablenet
+#   make eval-stage-b STAGE_B_BASELINES=alpha,delta
+#   make eval-stage-b STAGE_B_NRUNS=3
+STABLENET_SRC ?= $(HOME)/Work/github/stable-net/go-stablenet-latest
+STAGE_B_BASELINES ?= alpha,beta,gamma,delta
+STAGE_B_NRUNS ?= 1
+STAGE_B_GRAPH ?= /tmp/ckg-stablenet
+eval-stage-b: build-no-viewer
+	@[ -d "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC=$(STABLENET_SRC) not found"; exit 1; }
+	@mkdir -p eval/results/stage-b
+	@echo "=== Stage B: step 1/2 — build go-stablenet graph ==="
+	@# Build with --out-tag=auto-commit-hash; capture effective output dir.
+	@# The build prints "ckg: built N nodes / M edges into <dir>" to stderr.
+	EFFECTIVE_GRAPH=$$(./bin/ckg build \
+	    --src=$(STABLENET_SRC) \
+	    --out=$(STAGE_B_GRAPH) \
+	    --out-tag=auto-commit-hash \
+	    --lang=go 2>&1 | grep "built.*into" | sed 's/.*into //') && \
+	echo "  graph at: $$EFFECTIVE_GRAPH" && \
+	echo "" && \
+	echo "=== Stage B: step 2/2 — eval 14 tasks × $(STAGE_B_BASELINES) ===" && \
+	STABLENET_SRC=$(STABLENET_SRC) ./bin/ckg eval \
+	    --tasks='eval/stablenet/tasks/T*.yaml' \
+	    --graph=$$EFFECTIVE_GRAPH \
+	    --baselines=$(STAGE_B_BASELINES) \
+	    --llm-backend=$(LLM_BACKEND) \
+	    --llm=$(LLM_MODEL) \
+	    --n-runs=$(STAGE_B_NRUNS) \
+	    --out=eval/results/stage-b
+	@echo ""
+	@echo "=== Stage B Report ==="
+	@cat eval/results/stage-b/report.md
+
+# eval-stage-b-baseline-update: promote Stage B results to committed baseline.
+eval-stage-b-baseline-update:
+	@[ -d eval/results/stage-b ] || { echo "Run 'make eval-stage-b' first"; exit 1; }
+	@mkdir -p eval/baseline/stage-b
+	@cp eval/results/stage-b/results.csv eval/baseline/stage-b/
+	@cp eval/results/stage-b/report.md eval/baseline/stage-b/
+	@echo "eval/baseline/stage-b/ refreshed from eval/results/stage-b/"
+	@echo "Commit the change to lock the new Stage B baseline."
+
 # eval-llm-smoke: one-shot LLM-driven eval against the synthetic corpus
 # for the *alpha* baseline only. This is the fastest path to a real
 # correctness signal — alpha appends raw files to the prompt with no

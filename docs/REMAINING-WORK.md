@@ -49,6 +49,7 @@ In approximate session order, newest last:
 | **T-13** | impact_of_change 100-call determinism: `pkg/mcphandlers/impact_test.go:TestImpact_Deterministic_100`. 2026-05-27 |
 | **ckg-NEW-7** | `--out-tag` flag on `ckg build`: `auto-commit-hash` appends 12-char short SHA; literal values appended verbatim. Tests: `cmd/ckg/build_test.go`. 2026-05-27 |
 | **ckg-NEW-5** | 11 stable-net mirror fixture YAMLs (T04-T14) in `eval/stablenet/tasks/`. Total 14 tasks (3 existing + 11 new). All YAML-valid. Covers pr77/70/72/74/75/73/67/63/58/56/55. 2026-05-27 |
+| **ckg-NEW-8** | Stage B evaluation harness: `make eval-stage-b` target + `make eval-stage-b-baseline-update`. Env var expansion in corpus_path (`${STABLENET_SRC}`). Baseline dir `eval/baseline/stage-b/`. 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -60,11 +61,9 @@ data the synthetic corpus can't provide.
 
 ## 2. Priority queue
 
-### P0 — unblock cks Stage C, finish the cross-repo handoff
+### P0 — (empty: all items shipped)
 
-| ID | Work | Estimate | Prereq | Acceptance |
-|---|---|---|---|---|
-| **ckg-NEW-8** | Stage B evaluation harness — runs the 14 task YAMLs × 4 baselines, produces a single JSON per fixture, diffs against committed baseline | ~3-4 h | ckg-NEW-5 done | new `ckg stage-b` subcommand or `make eval-stage-b` target; baseline JSON committed under `eval/baseline/stage-b/`; the 14 fixtures all PASS at first commit |
+All P0 items shipped. cks Stage C integration is unblocked.
 
 ### P1 — (empty: all items shipped)
 
@@ -119,17 +118,16 @@ Updated 2026-05-27. Tier 1 + Tier 2 shipped this session.
 - ~~T-13~~ 100-call determinism test
 - ~~ckg-NEW-7~~ `--out-tag=auto-commit-hash`
 
-### Remaining — Tier 3 (~3-4 h)
+### All Tiers shipped (2026-05-27)
 
-1. **ckg-NEW-8** (3-4 h) — Stage B evaluation harness.
-   ckg-NEW-5 done (14 task YAMLs). Build go-stablenet graph with
-   `--out-tag=auto-commit-hash`, then run 14 tasks × 4 baselines
+P0 empty. P1 empty. Remaining work is P2 capability improvements
+and P3 within-language semantics — none blocking cks Stage C.
 
-### After Tier 3
-
-P0 row empties. P1 already empty. P2 capability work (CamelCase
-tokeniser, T-08, T-11) and P3 within-language semantics can resume
-as bandwidth allows.
+To run Stage B evaluation:
+```
+make eval-stage-b                     # build graph + run 14 tasks × 4 baselines
+make eval-stage-b-baseline-update     # promote results to baseline
+```
 
 ## 4. Cross-links
 

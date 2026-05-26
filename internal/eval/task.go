@@ -39,6 +39,8 @@ type Scoring struct {
 }
 
 // LoadTasks reads any *.yaml under glob (e.g. "eval/tasks/synthetic-*.yaml").
+// Environment variables in corpus_path (e.g. ${STABLENET_SRC}) are expanded
+// via os.ExpandEnv so task YAMLs stay portable across machines.
 func LoadTasks(glob string) ([]Task, error) {
 	paths, err := filepath.Glob(glob)
 	if err != nil {
@@ -53,6 +55,9 @@ func LoadTasks(glob string) ([]Task, error) {
 		var t Task
 		if err := yaml.Unmarshal(buf, &t); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
+		}
+		if t.CorpusPath != "" {
+			t.CorpusPath = os.ExpandEnv(t.CorpusPath)
 		}
 		tasks = append(tasks, t)
 	}
