@@ -509,4 +509,42 @@ func TestDumpFiles(t *testing.T) {
 			t.Errorf("unreadable file should be skipped, got: %q", out)
 		}
 	})
+
+	t.Run("test files excluded", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out := eval.DumpFiles(dir, 10, 4000)
+		if !strings.Contains(out, "main.go") {
+			t.Error("main.go should be included")
+		}
+		if strings.Contains(out, "main_test.go") {
+			t.Error("main_test.go should be excluded")
+		}
+	})
+
+	t.Run("testdata directory skipped", func(t *testing.T) {
+		dir := t.TempDir()
+		td := filepath.Join(dir, "testdata")
+		if err := os.MkdirAll(td, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(td, "fixture.go"), []byte("package testdata\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "real.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out := eval.DumpFiles(dir, 10, 4000)
+		if !strings.Contains(out, "real.go") {
+			t.Error("real.go should be included")
+		}
+		if strings.Contains(out, "fixture.go") {
+			t.Error("testdata/fixture.go should be excluded")
+		}
+	})
 }

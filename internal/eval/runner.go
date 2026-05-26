@@ -430,7 +430,13 @@ func isFileExtension(ext string) bool {
 func dumpFiles(root string, count, perFileLimit int) string {
 	var b strings.Builder
 	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if info.Name() == "testdata" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if count <= 0 {
@@ -438,6 +444,9 @@ func dumpFiles(root string, count, perFileLimit int) string {
 		}
 		ext := filepath.Ext(p)
 		if ext != ".go" && ext != ".ts" && ext != ".sol" {
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), "_test.go") {
 			return nil
 		}
 		buf, err := os.ReadFile(p)
