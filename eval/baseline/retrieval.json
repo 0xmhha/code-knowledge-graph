@@ -1,7 +1,7 @@
 {
   "graph": "eval/.synthetic-data",
-  "fixtures_total": 13,
-  "passed": 13,
+  "fixtures_total": 14,
+  "passed": 14,
   "failed": 0,
   "aggregate": {
     "recall": 1,
@@ -235,6 +235,21 @@
       "got": [
         "service.SafeVault.SafeDeposit",
         "api.Handler.HandleDeposit"
+      ]
+    },
+    {
+      "id": "R14-search-text-statement-opt-in",
+      "tool": "search_text",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.Vault.Deposit#IfStmt@276"
       ]
     }
   ]

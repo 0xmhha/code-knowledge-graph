@@ -1,0 +1,24 @@
+id: R14-search-text-statement-opt-in
+description: |
+  Opt-in to statement-level NodeKinds via explicit node_kinds filter.
+  The default search_text path excludes IfStmt/ReturnStmt etc. to keep
+  results symbol-focused (commit 1b18a49). This fixture verifies that
+  callers who DO want control-flow rows can pass node_kinds to get them.
+
+  "Deposit" with node_kinds=["IfStmt"] and language=go should surface
+  the IfStmt nodes inside Vault.Deposit and HandleDeposit whose
+  qualified_name contains "Deposit" in the FTS index. The fixture
+  validates the opt-in override works.
+probe:
+  tool: search_text
+  args:
+    query: "Deposit"
+    language: "go"
+    node_kinds: ["IfStmt"]
+    top_k: 20
+expected:
+  symbols:
+    - "service.Vault.Deposit#IfStmt@276"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.3

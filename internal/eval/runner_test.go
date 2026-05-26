@@ -3,6 +3,7 @@ package eval_test
 import (
 	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -424,7 +425,7 @@ func TestDumpFiles(t *testing.T) {
 	}
 
 	t.Run("only go/ts/sol included txt/md excluded", func(t *testing.T) {
-		out := eval.DumpFiles(tmp, 10, 4000)
+		out := eval.DumpFiles(tmp, 10, 4000, "test")
 		if strings.Contains(out, "d.txt") {
 			t.Error("d.txt should be excluded")
 		}
@@ -443,14 +444,14 @@ func TestDumpFiles(t *testing.T) {
 	})
 
 	t.Run("nested go file included via Walk", func(t *testing.T) {
-		out := eval.DumpFiles(tmp, 10, 4000)
+		out := eval.DumpFiles(tmp, 10, 4000, "test")
 		if !strings.Contains(out, "f.go") {
 			t.Error("nested/f.go should be included via Walk recursion")
 		}
 	})
 
 	t.Run("count limits number of files", func(t *testing.T) {
-		out := eval.DumpFiles(tmp, 2, 4000)
+		out := eval.DumpFiles(tmp, 2, 4000, "test")
 		// Count the number of "===" header occurrences
 		count := strings.Count(out, "===")
 		// Each file header has "=== name ===" → 2 occurrences per file
@@ -462,7 +463,7 @@ func TestDumpFiles(t *testing.T) {
 	})
 
 	t.Run("perFileLimit truncates content", func(t *testing.T) {
-		out := eval.DumpFiles(tmp, 10, 50)
+		out := eval.DumpFiles(tmp, 10, 50, "test")
 		// Split by file sections and check each body is at most 50 bytes
 		parts := strings.Split(out, "\n=== ")
 		for i, part := range parts {
@@ -484,7 +485,7 @@ func TestDumpFiles(t *testing.T) {
 	})
 
 	t.Run("nonexistent root returns empty string", func(t *testing.T) {
-		out := eval.DumpFiles("/path/that/does/not/exist/at/all", 5, 4000)
+		out := eval.DumpFiles("/path/that/does/not/exist/at/all", 5, 4000, "test")
 		if out != "" {
 			t.Errorf("want empty string for nonexistent root, got %q", out)
 		}
@@ -504,7 +505,7 @@ func TestDumpFiles(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(f, 0o644) })
 		// dumpFiles should silently skip the unreadable file (returns nil from Walk fn)
-		out := eval.DumpFiles(dir, 5, 4000)
+		out := eval.DumpFiles(dir, 5, 4000, "test")
 		if strings.Contains(out, "secret.go") {
 			t.Errorf("unreadable file should be skipped, got: %q", out)
 		}
@@ -518,7 +519,7 @@ func TestDumpFiles(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out := eval.DumpFiles(dir, 10, 4000)
+		out := eval.DumpFiles(dir, 10, 4000, "test")
 		if !strings.Contains(out, "main.go") {
 			t.Error("main.go should be included")
 		}
@@ -539,12 +540,31 @@ func TestDumpFiles(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "real.go"), []byte("package main\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out := eval.DumpFiles(dir, 10, 4000)
+		out := eval.DumpFiles(dir, 10, 4000, "test")
 		if !strings.Contains(out, "real.go") {
 			t.Error("real.go should be included")
 		}
 		if strings.Contains(out, "fixture.go") {
 			t.Error("testdata/fixture.go should be excluded")
+		}
+	})
+
+	t.Run("deterministic shuffle by seed", func(t *testing.T) {
+		dir := t.TempDir()
+		for i := 0; i < 10; i++ {
+			name := fmt.Sprintf("f%02d.go", i)
+			if err := os.WriteFile(filepath.Join(dir, name), []byte("package p\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		a := eval.DumpFiles(dir, 3, 4000, "seed-A")
+		b := eval.DumpFiles(dir, 3, 4000, "seed-A")
+		if a != b {
+			t.Error("same seed should produce identical output")
+		}
+		c := eval.DumpFiles(dir, 3, 4000, "seed-B")
+		if a == c {
+			t.Error("different seeds should (very likely) produce different file selection")
 		}
 	})
 }

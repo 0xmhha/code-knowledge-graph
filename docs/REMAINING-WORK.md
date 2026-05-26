@@ -17,7 +17,7 @@
   - `808086f` feat(pr-breadcrumb): symbol → PR history via build-time
     git log scan (ckg-NEW-2/3/4)
 - **Schema**: 1.12 (node_prs added by the most recent commit)
-- **Retrieval baseline**: 13/13 R=1.00 P=1.00 F1=1.00 (eval/baseline/retrieval.json)
+- **Retrieval baseline**: 14/14 R=1.00 P=1.00 F1=1.00 (eval/baseline/retrieval.json)
 - **Eval LLM baseline**: cycle 9, α=0.396 / β=0.746 / γ=0.688 /
   δ=0.825, halu β/δ 0.000 (eval-trajectory.md)
 - **6-axis emission**: all 40 edge types live except `awaits` (W-B
@@ -50,6 +50,8 @@ In approximate session order, newest last:
 | **ckg-NEW-7** | `--out-tag` flag on `ckg build`: `auto-commit-hash` appends 12-char short SHA; literal values appended verbatim. Tests: `cmd/ckg/build_test.go`. 2026-05-27 |
 | **ckg-NEW-5** | 11 stable-net mirror fixture YAMLs (T04-T14) in `eval/stablenet/tasks/`. Total 14 tasks (3 existing + 11 new). All YAML-valid. Covers pr77/70/72/74/75/73/67/63/58/56/55. 2026-05-27 |
 | **ckg-NEW-8** | Stage B evaluation harness: `make eval-stage-b` target + `make eval-stage-b-baseline-update`. Env var expansion in corpus_path (`${STABLENET_SRC}`). Baseline dir `eval/baseline/stage-b/`. 2026-05-27 |
+| **T-08** | dumpFiles deterministic shuffle seeded by task ID (`hash/fnv` + `math/rand`). Same seed → same files; different seeds → different selection. Tests: `TestDumpFiles/deterministic_shuffle_by_seed`. 2026-05-27 |
+| **search_text statement opt-in** | R14 fixture `eval/retrieval/R14-search-text-statement-opt-in.yaml` — validates `node_kinds=["IfStmt"]` opt-in overrides default symbol-only filter. Baseline 14/14. 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -74,10 +76,8 @@ All former P1 items shipped in the Tier 1 + Tier 2 session (2026-05-27).
 | ID | Work | Estimate | Notes |
 |---|---|---|---|
 | **CamelCase tokeniser** | Lift the FTS5 unicode61 limitation R10 documents — `HandleDeposit` should split into `handle` + `deposit` so `deposit*` prefix matches. Custom FTS5 tokeniser is C-extension territory (incompatible with modernc/sqlite); the cheap alternative is build-time pre-split, storing an extra `nodes.search_tokens` column the FTS5 content table indexes alongside name/qname | ~4-6 h | bumps schema; R10 expected widens to include HandleDeposit + every camelCase variant after the change |
-| **search_text statement-only opt-in** | Symmetric to the X-NodeKinds narrowing — a query like `node_kinds=["IfStmt","ReturnStmt"]` should work for callers that *do* want control-flow rows. Already mechanically possible (SearchFTSOptions.NodeKinds accepts any whitelist); needs a fixture + doc example | ~30 min | new R13 fixture under `eval/retrieval/` |
 | **T-03** | file:line citation validator (new `pkg/eval` subpackage or `internal/eval/citation.go`) | ~2 h | HANDOFF T-03 |
 | **T-06** | 27 LLM-eval task YAMLs (T04-T30) under `eval/tasks/` | ~3-4 h | depends on ckg-NEW-5's stable-net coverage |
-| **T-08** | dumpFiles deterministic shuffle (seeded by task ID) | ~30 min | HANDOFF T-08; depends on T-07 |
 | **T-11** | Incremental index time KPI — `ckg bench-index` subcommand | ~2-3 h | HANDOFF T-11 |
 | **T-15** | task YAML ↔ known-issues.jsonl sync tool — `eval/stablenet/sync_tasks.py` | ~1-2 h | HANDOFF T-15; depends on T-06 |
 

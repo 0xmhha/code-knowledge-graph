@@ -5,6 +5,8 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -128,7 +130,7 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 
 	if b == BaselineAlpha {
 		// Append raw context: dump 5 random files from the corpus root.
-		user += "\n\n--- raw files ---\n" + dumpFiles(t.CorpusPath, 5, 4000)
+		user += "\n\n--- raw files ---\n" + dumpFiles(t.CorpusPath, 5, 4000, t.ID)
 	}
 
 	// V0 simplification: we don't actually loop tool_use round-trips here.
@@ -427,8 +429,8 @@ func isFileExtension(ext string) bool {
 	return false
 }
 
-func dumpFiles(root string, count, perFileLimit int) string {
-	var b strings.Builder
+func dumpFiles(root string, count, perFileLimit int, seed string) string {
+	var candidates []string
 	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -439,9 +441,6 @@ func dumpFiles(root string, count, perFileLimit int) string {
 			}
 			return nil
 		}
-		if count <= 0 {
-			return filepath.SkipAll
-		}
 		ext := filepath.Ext(p)
 		if ext != ".go" && ext != ".ts" && ext != ".sol" {
 			return nil
@@ -449,17 +448,32 @@ func dumpFiles(root string, count, perFileLimit int) string {
 		if strings.HasSuffix(info.Name(), "_test.go") {
 			return nil
 		}
+		candidates = append(candidates, p)
+		return nil
+	})
+	if len(candidates) == 0 {
+		return ""
+	}
+	h := fnv.New64a()
+	h.Write([]byte(seed))
+	rng := rand.New(rand.NewSource(int64(h.Sum64())))
+	rng.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+	if count > 0 && len(candidates) > count {
+		candidates = candidates[:count]
+	}
+	var b strings.Builder
+	for _, p := range candidates {
 		buf, err := os.ReadFile(p)
 		if err != nil {
-			return nil
+			continue
 		}
 		if len(buf) > perFileLimit {
 			buf = buf[:perFileLimit]
 		}
 		fmt.Fprintf(&b, "\n=== %s ===\n%s\n", p, buf)
-		count--
-		return nil
-	})
+	}
 	return b.String()
 }
 
