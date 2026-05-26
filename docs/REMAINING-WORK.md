@@ -17,7 +17,7 @@
   - `808086f` feat(pr-breadcrumb): symbol → PR history via build-time
     git log scan (ckg-NEW-2/3/4)
 - **Schema**: 1.12 (node_prs added by the most recent commit)
-- **Retrieval baseline**: 12/12 R=1.00 P=1.00 F1=1.00 (eval/baseline/retrieval.json)
+- **Retrieval baseline**: 13/13 R=1.00 P=1.00 F1=1.00 (eval/baseline/retrieval.json)
 - **Eval LLM baseline**: cycle 9, α=0.396 / β=0.746 / γ=0.688 /
   δ=0.825, halu β/δ 0.000 (eval-trajectory.md)
 - **6-axis emission**: all 40 edge types live except `awaits` (W-B
@@ -42,6 +42,12 @@ In approximate session order, newest last:
 | 808086f | feat(pr-breadcrumb): ckg-NEW-2/3/4 — symbol → PR history |
 | **T-02** | extractSymbols normalisation — file-extension blacklist (30 exts) + receiver-style `*`/`&` strip. Impl: `internal/eval/runner.go:246-427`. Tests: `runner_internal_test.go` (`TestExtractSymbols_FileExtensionBlacklist`, `TestExtractSymbols_ReceiverNormalisation`) |
 | **T-09** | FTS sigil bypass narrowed to `*` + `"` only (parens/colon removed). Impl: `internal/persist/sqlite.go:805-809`. Partial fix 8e8bf9b, verified complete 2026-05-27 |
+| **ckg-NEW-9** | `pkg/bm25` external-import stability: `doc.go` (SemVer promise) + `example_external_test.go` (Scorer interface contract). 2026-05-27 |
+| **ckg-NEW-6** | qname canonical-helper usage guide: `pkg/store/doc.go` — FindSymbol→NeighborhoodByQname resolution pattern + normalisation rules. 2026-05-27 |
+| **T-07** | dumpFiles `_test.go`/`testdata` exclusion: `internal/eval/runner.go:432-441`. Tests: `runner_test.go` (test_files_excluded, testdata_directory_skipped). 2026-05-27 |
+| **T-12** | find_callers depth=3 fixture: `eval/retrieval/R13-find-callers-depth3.yaml`. Baseline 13/13 R=1.00 P=1.00 F1=1.00. 2026-05-27 |
+| **T-13** | impact_of_change 100-call determinism: `pkg/mcphandlers/impact_test.go:TestImpact_Deterministic_100`. 2026-05-27 |
+| **ckg-NEW-7** | `--out-tag` flag on `ckg build`: `auto-commit-hash` appends 12-char short SHA; literal values appended verbatim. Tests: `cmd/ckg/build_test.go`. 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -57,19 +63,12 @@ data the synthetic corpus can't provide.
 
 | ID | Work | Estimate | Prereq | Acceptance |
 |---|---|---|---|---|
-| **ckg-NEW-9** | `pkg/bm25` external-import stability — add `pkg/bm25/example_external_test.go` exercising the cks usage pattern + SemVer note in `pkg/bm25/doc.go` | ~1 h | none | external_test compiles + passes; doc covers the stability promise |
-| **T-07** | dumpFiles `_test.go` + testdata exclusion in `internal/eval/runner.go::dumpFiles` — current impl filters by extension only (`.go`/`.ts`/`.sol`), does not exclude test files or testdata dirs | ~15 min | none | `_test.go` files and `testdata/` dirs excluded from dump; existing `TestDumpFiles` updated |
 | **ckg-NEW-5** | 12 ckv-fixture mirror task YAMLs in `eval/stablenet/tasks/` (pr69 / pr70 / pr72 / pr74 / pr77 / pr75 / pr73 / pr67 / pr63 / pr58 / pr56 / pr55) — 3/14 YAMLs exist (T01/T02/T03), 11 remaining | ~2-3 h | go-stablenet checkout under `~/Work/github/stable-net/go-stablenet-latest` (already present per CONTINUITY §4) | each YAML loads under `ckg eval-retrieval`; `make eval` passes the 12 new fixtures against `/tmp/ckg-stablenet/graph.db` |
 | **ckg-NEW-8** | Stage B evaluation harness — runs the 12 mirror tasks × 4 baselines, produces a single JSON per fixture, diffs against committed baseline | ~3-4 h | ckg-NEW-5 lands | new `ckg stage-b` subcommand or `make eval-stage-b` target; baseline JSON committed under `eval/baseline/stage-b/`; the 12 fixtures all PASS at first commit |
 
-### P1 — close the HANDOFF P0 items the X-fixture work didn't already cover
+### P1 — (empty: all items shipped)
 
-| ID | Work | Estimate | Notes |
-|---|---|---|---|
-| **ckg-NEW-6** | qname canonical-helper usage guide (docs only) | ~30 min | one-page write-up in `pkg/store/doc.go` showing the cks wrapping pattern for qname normalisation |
-| **T-12** | find_callers depth>1 regression test (HANDOFF.md T-12) | ~30 min | partially covered by R01/R03 at depth=2; an explicit depth=3 fixture against go-stablenet would close the gap |
-| **T-13** | impact_of_change determinism — extend to 100-call regression | ~30 min | 2-call determinism already tested (`pkg/mcphandlers/impact_test.go:TestImpact_Deterministic` + `TestImpact_SelfGraph_Deterministic`); extend to 100-call loop with set comparison |
-| **ckg-NEW-7** | CKG-3 cross-snapshot policy — adopt Option C (directory routing, `--out-tag=auto-commit-hash`) per CKS-INTEGRATION §3.4 | ~1-2 h | adds the auto-tag flag to `ckg build`; `pr_history.go` git scan infra reusable; fixture runner's existing pattern (`/tmp/ckg-stablenet-${SHA}`) becomes the recommended convention |
+All former P1 items shipped in the Tier 1 + Tier 2 session (2026-05-27).
 
 ### P2 — capability improvements that aren't blocking anyone
 
@@ -99,49 +98,37 @@ introduces).
 
 | ID | Why deferred | Re-trigger |
 |---|---|---|
-| **CKG-3** decision | Reduced to a no-op once ckg-NEW-7 ships Option C (directory routing) | ckg-NEW-7 done |
+| **CKG-3** decision | Closed: ckg-NEW-7 shipped `--out-tag=auto-commit-hash` (Option C directory routing) 2026-05-27 | done |
 | **EV1 Phase 3** CI integration | Pre-commit hook policy blocks automated `.github/workflows/ci.yml` edits; the manual paste snippet is in `docs/todo-cks-dogfood-followups-2026-05-20.md §F` | User applies the snippet |
 | **B-2** cks `go.mod` ckg version bump | cks repo, separate session | user pushes ckg HEAD + cks-side session picks up |
 | **E2** cks workaround removal PR | cks repo, separate session | cks Stage C entry |
 | **viewer-session uncommitted files** | `internal/server/web_assets/index.html` + `web/viewer-next/README.md` were touched by the viewer working session, not the eval/cks session — left for the original author per CONTINUITY §7 | viewer session resumes |
 | **W-C lockdown series resume** | W7.5 / W9 V19 / W8 V28+ all fold into the W-B/W-C detector landing | P3 unpaused |
-| **HANDOFF T-12/T-13** | T-12: R01/R03 depth=2 fixtures cover the main path; depth=3 fixture remains under P1. T-13: 2-call determinism shipped (`TestImpact_Deterministic` + `TestImpact_SelfGraph_Deterministic` in `pkg/mcphandlers/impact_test.go`); 100-call loop remains under P1 | P1 done |
+| **HANDOFF T-12/T-13** | Both closed 2026-05-27. T-12: R13 depth=3 fixture shipped. T-13: 100-call `TestImpact_Deterministic_100` shipped | done |
 
 ## 3. Recommended next-session order
 
-Picking up from a clean local tree (commits already pushed).
-Updated 2026-05-27 after code-vs-doc cross-verification.
+Updated 2026-05-27. Tier 1 + Tier 2 shipped this session.
 
-### Tier 1 — immediate, no external deps (~2 h)
+### Shipped — Tier 1 + 2 (2026-05-27)
 
-1. **ckg-NEW-9** (1 h) — smallest P0, immediate cks Stage C unblock.
-   `pkg/bm25/` has no `doc.go` or `example_external_test.go`
-2. **ckg-NEW-6** (30 min) — docs only; bundles with NEW-9.
-   `pkg/store/doc.go` does not exist yet
-3. **T-07** (15 min) — `dumpFiles` `_test.go`/`testdata` exclusion.
-   Current `internal/eval/runner.go:440` filters by extension only.
-   Small fix, direct eval quality impact
+- ~~ckg-NEW-9~~ pkg/bm25 SemVer + external test
+- ~~ckg-NEW-6~~ pkg/store/doc.go qname guide
+- ~~T-07~~ dumpFiles exclusion
+- ~~T-12~~ R13 depth=3 fixture (13/13 baseline)
+- ~~T-13~~ 100-call determinism test
+- ~~ckg-NEW-7~~ `--out-tag=auto-commit-hash`
 
-### Tier 2 — moderate, partial infra exists (~2-3 h)
+### Remaining — Tier 3, external deps (~5-7 h)
 
-4. **T-12** (30 min) — depth=3 fixture. R01/R03 cover depth=2;
-   extend to depth=3 against go-stablenet
-5. **T-13** (30 min) — 100-call determinism loop.
-   `TestImpact_Deterministic` (2-call) already in
-   `pkg/mcphandlers/impact_test.go:447`; extend to 100-call set comparison
-6. **ckg-NEW-7** (1-2 h) — `--out-tag=auto-commit-hash` flag.
-   `pr_history.go` git scan infra reusable.
-   Should land before NEW-5 (sets directory routing convention)
+1. **ckg-NEW-5** (2-3 h) — 11 remaining stable-net mirror fixture
+   YAMLs (3/14 exist). Needs go-stablenet checkout.
+   `--out-tag=auto-commit-hash` now available for per-SHA directory routing
+2. **ckg-NEW-8** (3-4 h) — Stage B harness. Depends on NEW-5
 
-### Tier 3 — large, external deps (~5-7 h)
+### After Tier 3
 
-7. **ckg-NEW-5** (2-3 h) — 11 remaining stable-net mirror fixture
-   YAMLs (3/14 exist). Needs go-stablenet checkout
-8. **ckg-NEW-8** (3-4 h) — Stage B harness. Depends on NEW-5
-
-### After this sequence
-
-P0 row empties. P1 row empties. P2 capability work (CamelCase
+P0 row empties. P1 already empty. P2 capability work (CamelCase
 tokeniser, T-08, T-11) and P3 within-language semantics can resume
 as bandwidth allows.
 

@@ -1,7 +1,7 @@
 {
-  "graph": "/tmp/ckg-x6-check",
-  "fixtures_total": 12,
-  "passed": 12,
+  "graph": "eval/.synthetic-data",
+  "fixtures_total": 13,
+  "passed": 13,
   "failed": 0,
   "aggregate": {
     "recall": 1,
@@ -110,8 +110,8 @@
         "service.Vault",
         "service.SafeVault.vault",
         "api.Handler.vault",
-        "service.Vault.wallets",
         "service/go-backend/service/vault.go",
+        "service.Vault.wallets",
         "service.SafeVault.SafeDeposit",
         "service.NewSafeVault",
         "service.SafeVault"
@@ -219,6 +219,22 @@
       },
       "got": [
         "service.Vault.Deposit"
+      ]
+    },
+    {
+      "id": "R13-find-callers-depth3",
+      "tool": "find_callers",
+      "pass": true,
+      "pass_recall": true,
+      "pass_precision": true,
+      "score": {
+        "recall": 1,
+        "precision": 1,
+        "f1": 1
+      },
+      "got": [
+        "service.SafeVault.SafeDeposit",
+        "api.Handler.HandleDeposit"
       ]
     }
   ]

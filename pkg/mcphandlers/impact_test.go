@@ -468,6 +468,39 @@ func TestImpact_Deterministic(t *testing.T) {
 	}
 }
 
+// TestImpact_Deterministic_100 is the T-13 regression guard: 100
+// back-to-back calls with the same seed must all produce byte-identical
+// JSON. Go map iteration is randomised per process, so without the
+// explicit per-group sorts in pkg/impact this test would flap even on
+// two calls — at 100 iterations it is virtually certain to catch any
+// ordering regression.
+func TestImpact_Deterministic_100(t *testing.T) {
+	store := newFixtureStore(t)
+
+	baseline, err := computeImpact(store, "a.Greet", "", 2, false)
+	if err != nil {
+		t.Fatalf("baseline computeImpact: %v", err)
+	}
+	baselineJSON, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatalf("marshal baseline: %v", err)
+	}
+
+	for i := 1; i < 100; i++ {
+		got, err := computeImpact(store, "a.Greet", "", 2, false)
+		if err != nil {
+			t.Fatalf("iteration %d: %v", i, err)
+		}
+		gotJSON, err := json.Marshal(got)
+		if err != nil {
+			t.Fatalf("iteration %d marshal: %v", i, err)
+		}
+		if string(gotJSON) != string(baselineJSON) {
+			t.Fatalf("non-deterministic at iteration %d\nbaseline: %s\ngot:      %s", i, baselineJSON, gotJSON)
+		}
+	}
+}
+
 // TestImpact_SelfGraph_Deterministic dogfoods determinism on the project's
 // own self-graph (CKG built from itself). Skipped unless CKG_SELF_GRAPH_DB
 // is set so CI stays fast. Like TestImpact_SelfGraph but asserts byte

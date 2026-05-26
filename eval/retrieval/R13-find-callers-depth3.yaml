@@ -1,0 +1,21 @@
+id: R13-find-callers-depth3
+description: |
+  Depth=3 regression test for find_callers BFS traversal (T-12).
+  The synthetic corpus call chain is 2 hops deep at most:
+    HandleDeposit → Vault.Deposit ← SafeDeposit
+  Requesting depth=3 must return the same callers as depth=2
+  without duplicates, panics, or incorrect extra nodes. This
+  validates that the BFS terminates cleanly when the requested
+  depth exceeds the actual graph depth.
+probe:
+  tool: find_callers
+  args:
+    qname: "service.Vault.Deposit"
+    depth: 3
+expected:
+  symbols:
+    - "api.Handler.HandleDeposit"
+    - "service.SafeVault.SafeDeposit"
+scoring:
+  recall_min: 1.0
+  precision_min: 1.0
