@@ -1,0 +1,20 @@
+id: T08-pr75-wbft-futureview
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Explain the future-view check in WBFT consensus. How does
+  isTooFarFutureMessage decide to drop a message, and what thresholds
+  apply to sequence vs round differences? PR #75 prevents valid
+  next-sequence messages from being incorrectly dropped.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - core.Core.isTooFarFutureMessage
+    - core.errFutureViewTooFar
+related_pr: 75
+base_sha: 0bf2f4d1b
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

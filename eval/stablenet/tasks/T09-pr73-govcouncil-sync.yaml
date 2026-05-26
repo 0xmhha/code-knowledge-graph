@@ -1,0 +1,22 @@
+id: T09-pr73-govcouncil-sync
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Trace how Account.Extra bits (blacklisted, authorized) are synced with
+  GovCouncil contract storage slots during genesis initialization. PR #73
+  reconciles genesis config params with on-chain contract state.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - systemcontracts.initializeGovCouncil
+    - systemcontracts.initializeAddressSet
+    - types.AccountExtra.IsBlacklisted
+    - types.AccountExtra.SetBlacklisted
+    - types.AccountExtra.ValidateExtra
+related_pr: 73
+base_sha: 319b84d11
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

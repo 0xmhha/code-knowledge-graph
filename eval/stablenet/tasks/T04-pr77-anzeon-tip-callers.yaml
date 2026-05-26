@@ -1,0 +1,20 @@
+id: T04-pr77-anzeon-tip-callers
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Identify the function that decides whether AnzeonTipEnv.currentBlock should
+  refresh, and find all callers of SetCurrentBlock that pass header GasTip.
+  PR #77 added refresh-on-gasTip-change logic to AnzeonTipEnv.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - gasprice.AnzeonTipEnv.SetCurrentBlock
+    - gasprice.gasTipChanged
+    - gasprice.NewAnzeonTipEnv
+related_pr: 77
+base_sha: 98f05c2a0
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

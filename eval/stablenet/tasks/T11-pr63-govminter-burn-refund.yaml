@@ -1,0 +1,20 @@
+id: T11-pr63-govminter-burn-refund
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Describe the GovMinter v2 burn-refund mechanism introduced at the Boho
+  hardfork. How are burned coins tracked and how can they be reclaimed?
+  PR #63 added burn refund via _cleanupBurnDeposit and claimBurnRefund.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - systemcontracts.initializeMinter
+    - systemcontracts.GetBurnBalance
+    - systemcontracts.GetRefundableBalance
+related_pr: 63
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

@@ -1,0 +1,22 @@
+id: T05-pr70-effectivegasprice
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Find all implementations of effectiveGasPrice across transaction types
+  and the ethapi helper. PR #70 unified gas price derivation for receipts
+  across LegacyTx, AccessListTx, DynamicFeeTx, BlobTx, and others.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - ethapi.effectiveGasPrice
+    - types.LegacyTx.effectiveGasPrice
+    - types.AccessListTx.effectiveGasPrice
+    - types.DynamicFeeTx.effectiveGasPrice
+    - types.BlobTx.effectiveGasPrice
+related_pr: 70
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

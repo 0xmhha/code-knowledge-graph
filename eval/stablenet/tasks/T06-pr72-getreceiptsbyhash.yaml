@@ -1,0 +1,19 @@
+id: T06-pr72-getreceiptsbyhash
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Trace the eth_GetReceiptsByHash RPC call from the API handler to the
+  core blockchain reader. PR #72 added a new RPC method to fetch all
+  receipts for a canonical block by hash.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - ethapi.BlockChainAPI.GetReceiptsByHash
+    - BlockChain.GetReceiptsByHash
+related_pr: 72
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

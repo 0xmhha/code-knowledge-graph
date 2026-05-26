@@ -1,0 +1,21 @@
+id: T12-pr58-chainconfig-engine
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Explain how LoadChainConfigWithOverride prevents consensus engine
+  mismatch between stored and in-memory configurations. What is the
+  override application order? PR #58 loads chain config before engine init.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - genesis.LoadChainConfigWithOverride
+    - genesis.SetupGenesisBlockWithOverride
+    - genesis.applyOverrides
+    - genesis.validateAnzeonGenesisConfig
+related_pr: 58
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

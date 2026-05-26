@@ -48,6 +48,7 @@ In approximate session order, newest last:
 | **T-12** | find_callers depth=3 fixture: `eval/retrieval/R13-find-callers-depth3.yaml`. Baseline 13/13 R=1.00 P=1.00 F1=1.00. 2026-05-27 |
 | **T-13** | impact_of_change 100-call determinism: `pkg/mcphandlers/impact_test.go:TestImpact_Deterministic_100`. 2026-05-27 |
 | **ckg-NEW-7** | `--out-tag` flag on `ckg build`: `auto-commit-hash` appends 12-char short SHA; literal values appended verbatim. Tests: `cmd/ckg/build_test.go`. 2026-05-27 |
+| **ckg-NEW-5** | 11 stable-net mirror fixture YAMLs (T04-T14) in `eval/stablenet/tasks/`. Total 14 tasks (3 existing + 11 new). All YAML-valid. Covers pr77/70/72/74/75/73/67/63/58/56/55. 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -63,8 +64,7 @@ data the synthetic corpus can't provide.
 
 | ID | Work | Estimate | Prereq | Acceptance |
 |---|---|---|---|---|
-| **ckg-NEW-5** | 12 ckv-fixture mirror task YAMLs in `eval/stablenet/tasks/` (pr69 / pr70 / pr72 / pr74 / pr77 / pr75 / pr73 / pr67 / pr63 / pr58 / pr56 / pr55) — 3/14 YAMLs exist (T01/T02/T03), 11 remaining | ~2-3 h | go-stablenet checkout under `~/Work/github/stable-net/go-stablenet-latest` (already present per CONTINUITY §4) | each YAML loads under `ckg eval-retrieval`; `make eval` passes the 12 new fixtures against `/tmp/ckg-stablenet/graph.db` |
-| **ckg-NEW-8** | Stage B evaluation harness — runs the 12 mirror tasks × 4 baselines, produces a single JSON per fixture, diffs against committed baseline | ~3-4 h | ckg-NEW-5 lands | new `ckg stage-b` subcommand or `make eval-stage-b` target; baseline JSON committed under `eval/baseline/stage-b/`; the 12 fixtures all PASS at first commit |
+| **ckg-NEW-8** | Stage B evaluation harness — runs the 14 task YAMLs × 4 baselines, produces a single JSON per fixture, diffs against committed baseline | ~3-4 h | ckg-NEW-5 done | new `ckg stage-b` subcommand or `make eval-stage-b` target; baseline JSON committed under `eval/baseline/stage-b/`; the 14 fixtures all PASS at first commit |
 
 ### P1 — (empty: all items shipped)
 
@@ -119,12 +119,11 @@ Updated 2026-05-27. Tier 1 + Tier 2 shipped this session.
 - ~~T-13~~ 100-call determinism test
 - ~~ckg-NEW-7~~ `--out-tag=auto-commit-hash`
 
-### Remaining — Tier 3, external deps (~5-7 h)
+### Remaining — Tier 3 (~3-4 h)
 
-1. **ckg-NEW-5** (2-3 h) — 11 remaining stable-net mirror fixture
-   YAMLs (3/14 exist). Needs go-stablenet checkout.
-   `--out-tag=auto-commit-hash` now available for per-SHA directory routing
-2. **ckg-NEW-8** (3-4 h) — Stage B harness. Depends on NEW-5
+1. **ckg-NEW-8** (3-4 h) — Stage B evaluation harness.
+   ckg-NEW-5 done (14 task YAMLs). Build go-stablenet graph with
+   `--out-tag=auto-commit-hash`, then run 14 tasks × 4 baselines
 
 ### After Tier 3
 

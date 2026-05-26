@@ -1,0 +1,19 @@
+id: T07-pr74-txmaxsize
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Identify the constant that defines the maximum transaction size in the
+  legacy pool and its relationship to txSlotSize. PR #74 increased
+  txMaxSize to 256KB (8 slots × 32KB) to align with MaxCodeSize.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - legacypool.txMaxSize
+    - legacypool.txSlotSize
+related_pr: 74
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7

@@ -1,0 +1,22 @@
+id: T14-pr55-wbft-race
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}
+description: |
+  Identify the WBFT consensus fields that had race conditions and the
+  synchronisation primitives added to fix them. PR #55 added RWMutex
+  protection to roundChangeTimer, roundState, and lastSentTimeoutCanceled.
+expected_kind: symbol_set
+expected:
+  symbols:
+    - core.Core.IsCurrentProposal
+    - core.Core.newRoundChangeTimer
+    - core.roundState.SetRound
+    - core.roundState.SetSequence
+    - core.roundState.Round
+related_pr: 55
+base_sha: ""
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.7
+    recall: 0.7
