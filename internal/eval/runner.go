@@ -62,6 +62,11 @@ type Result struct {
 	// the lists are variable-length and would balloon CSV column
 	// count beyond what spreadsheet readers handle cleanly.
 	Hallucination HallucinationResult
+
+	// Citation is the per-response file:line accuracy check (T-03).
+	// Populated by runOne after scoreTask; measures whether the LLM's
+	// source citations point to real files and valid line ranges.
+	Citation CitationResult
 }
 
 // Run loops tasks × baselines × nRuns and writes results.csv plus
@@ -194,6 +199,10 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	if hErr != nil {
 		fmt.Fprintf(os.Stderr, "task %s/%s: hallucination check: %v (continuing)\n", t.ID, b, hErr)
 	}
+	cite, cErr := ValidateCitations(out.OutputText, store)
+	if cErr != nil {
+		fmt.Fprintf(os.Stderr, "task %s/%s: citation check: %v (continuing)\n", t.ID, b, cErr)
+	}
 	return Result{
 		TaskID: t.ID, Baseline: b,
 		UserPromptBytes: userPromptBytes,
@@ -202,6 +211,7 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 		Score:        score, LatencyMS: time.Since(start).Milliseconds(),
 		NumToolCalls: calls, Stale: stale, RawOutput: out.OutputText,
 		Hallucination: hallu,
+		Citation:      cite,
 	}, nil
 }
 

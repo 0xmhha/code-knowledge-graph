@@ -52,6 +52,7 @@ In approximate session order, newest last:
 | **ckg-NEW-8** | Stage B evaluation harness: `make eval-stage-b` target + `make eval-stage-b-baseline-update`. Env var expansion in corpus_path (`${STABLENET_SRC}`). Baseline dir `eval/baseline/stage-b/`. 2026-05-27 |
 | **T-08** | dumpFiles deterministic shuffle seeded by task ID (`hash/fnv` + `math/rand`). Same seed → same files; different seeds → different selection. Tests: `TestDumpFiles/deterministic_shuffle_by_seed`. 2026-05-27 |
 | **search_text statement opt-in** | R14 fixture `eval/retrieval/R14-search-text-statement-opt-in.yaml` — validates `node_kinds=["IfStmt"]` opt-in overrides default symbol-only filter. Baseline 14/14. 2026-05-27 |
+| **T-03** | file:line citation validator `internal/eval/citation.go`. ExtractCitations regex + ValidateCitations (file exists → line in node range). Integrated into runOne. Tests: 7 cases (extract + validate + integration). 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -76,7 +77,7 @@ All former P1 items shipped in the Tier 1 + Tier 2 session (2026-05-27).
 | ID | Work | Estimate | Notes |
 |---|---|---|---|
 | **CamelCase tokeniser** | Lift the FTS5 unicode61 limitation R10 documents — `HandleDeposit` should split into `handle` + `deposit` so `deposit*` prefix matches. Custom FTS5 tokeniser is C-extension territory (incompatible with modernc/sqlite); the cheap alternative is build-time pre-split, storing an extra `nodes.search_tokens` column the FTS5 content table indexes alongside name/qname | ~4-6 h | bumps schema; R10 expected widens to include HandleDeposit + every camelCase variant after the change |
-| **T-03** | file:line citation validator (new `pkg/eval` subpackage or `internal/eval/citation.go`) | ~2 h | HANDOFF T-03 |
+| ~~T-03~~ | ~~file:line citation validator~~ — shipped 2026-05-27, see Recently shipped | — | — |
 | **T-06** | 27 LLM-eval task YAMLs (T04-T30) under `eval/tasks/` | ~3-4 h | depends on ckg-NEW-5's stable-net coverage |
 | **T-11** | Incremental index time KPI — `ckg bench-index` subcommand | ~2-3 h | HANDOFF T-11 |
 | **T-15** | task YAML ↔ known-issues.jsonl sync tool — `eval/stablenet/sync_tasks.py` | ~1-2 h | HANDOFF T-15; depends on T-06 |
