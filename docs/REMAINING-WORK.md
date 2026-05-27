@@ -24,6 +24,21 @@ cks 통합은 ckg 기능 검증 완료 후 진행 (hold).
 | **Stage B 첫 실행** | `make eval-stage-b` — 30 task × 4 baselines × go-stablenet graph | ~1-2 h (LLM 호출 시간 포함) | ANTHROPIC_API_KEY 또는 CLIWRAP_AGENT 필요. 결과 → `eval/baseline/stage-b/` 커밋 |
 | **EV1 Phase 3** | CI workflow에 eval gate 추가 | ~30 min | `docs/todo-cks-dogfood-followups-2026-05-20.md §F` snippet 적용 |
 
+### Evaluation DB 관리
+
+```bash
+# HEAD graph 생성 (이미 존재하면 skip)
+make eval-build-dbs
+
+# 과거 커밋 graph도 함께 생성
+make eval-build-dbs AT_COMMITS="319b84d 0bf2f4d"
+
+# 강제 재빌드
+make eval-build-dbs FORCE=--force
+```
+
+Graph DB 저장 위치: `~/Work/github/tools/go-stable-code/stablenet-<short-sha>/`
+
 ## 2. Within-language semantics (paused)
 
 ckg 단독 검증 + cks 통합 이후에 필요성이 확인되면 재개.

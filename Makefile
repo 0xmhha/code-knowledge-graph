@@ -145,42 +145,69 @@ eval-baseline-update:
 	@echo "eval/baseline/ refreshed from eval/results/latest/"
 	@echo "Commit the change to lock the new baseline."
 
-# eval-stage-b: Stage B evaluation — runs 14 stable-net task YAMLs × 4
-# baselines against a go-stablenet graph. Requires:
-#   - STABLENET_SRC pointing at the go-stablenet checkout
-#     (default: ~/Work/github/stable-net/go-stablenet-latest)
+# Persistent evaluation DB directory. Graphs are stored here keyed by
+# commit hash so they survive across sessions and don't need rebuilding.
+# Override: make eval-stage-b EVAL_DB_ROOT=/other/path
+STABLENET_SRC ?= $(HOME)/Work/github/stable-net/go-stablenet-latest
+EVAL_DB_ROOT  ?= $(HOME)/Work/github/tools/go-stable-code
+
+# eval-build-dbs: pre-build evaluation graphs into EVAL_DB_ROOT.
+# Skips if graph.db already exists (use --force to rebuild).
+# Builds HEAD by default; pass AT_COMMITS for additional snapshots.
+#
+# Examples:
+#   make eval-build-dbs                                 # HEAD only
+#   make eval-build-dbs AT_COMMITS="319b84d 0bf2f4d"   # HEAD + two past commits
+#   make eval-build-dbs FORCE=--force                   # rebuild all
+FORCE ?=
+AT_COMMITS ?=
+eval-build-dbs: build-no-viewer
+	@[ -d "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC=$(STABLENET_SRC) not found"; exit 1; }
+	@mkdir -p $(EVAL_DB_ROOT)
+	@echo "=== Building HEAD graph ==="
+	./bin/ckg build \
+	    --src=$(STABLENET_SRC) \
+	    --out=$(EVAL_DB_ROOT)/stablenet \
+	    --out-tag=auto-commit-hash \
+	    --lang=go $(FORCE)
+	@for sha in $(AT_COMMITS); do \
+	    echo ""; \
+	    echo "=== Building graph at $$sha ==="; \
+	    ./bin/ckg build \
+	        --src=$(STABLENET_SRC) \
+	        --at-commit=$$sha \
+	        --out=$(EVAL_DB_ROOT)/stablenet \
+	        --out-tag=auto-commit-hash \
+	        --lang=go $(FORCE); \
+	done
+	@echo ""
+	@echo "=== Evaluation DBs in $(EVAL_DB_ROOT) ==="
+	@ls -d $(EVAL_DB_ROOT)/stablenet-* 2>/dev/null || echo "(none)"
+
+# eval-stage-b: Stage B evaluation — runs 30 stable-net task YAMLs × 4
+# baselines against a pre-built go-stablenet graph.
+# Requires:
+#   - Pre-built graph in EVAL_DB_ROOT (run `make eval-build-dbs` first)
 #   - LLM backend configured (ANTHROPIC_API_KEY or CLIWRAP_AGENT)
 #
-# The graph is built with --out-tag=auto-commit-hash so the output
-# directory encodes the source commit, enabling per-SHA baseline tracking.
-#
 # Output: eval/results/stage-b/{results.csv,report.md}
-#
-# Override defaults:
-#   make eval-stage-b STABLENET_SRC=/path/to/go-stablenet
-#   make eval-stage-b STAGE_B_BASELINES=alpha,delta
-#   make eval-stage-b STAGE_B_NRUNS=3
-STABLENET_SRC ?= $(HOME)/Work/github/stable-net/go-stablenet-latest
 STAGE_B_BASELINES ?= alpha,beta,gamma,delta
 STAGE_B_NRUNS ?= 1
-STAGE_B_GRAPH ?= /tmp/ckg-stablenet
 eval-stage-b: build-no-viewer
 	@[ -d "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC=$(STABLENET_SRC) not found"; exit 1; }
 	@mkdir -p eval/results/stage-b
-	@echo "=== Stage B: step 1/2 — build go-stablenet graph ==="
-	@# Build with --out-tag=auto-commit-hash; capture effective output dir.
-	@# The build prints "ckg: built N nodes / M edges into <dir>" to stderr.
-	EFFECTIVE_GRAPH=$$(./bin/ckg build \
+	@# Resolve HEAD graph path; build if missing.
+	@GRAPH_DIR=$$(./bin/ckg build \
 	    --src=$(STABLENET_SRC) \
-	    --out=$(STAGE_B_GRAPH) \
+	    --out=$(EVAL_DB_ROOT)/stablenet \
 	    --out-tag=auto-commit-hash \
-	    --lang=go 2>&1 | grep "built.*into" | sed 's/.*into //') && \
-	echo "  graph at: $$EFFECTIVE_GRAPH" && \
+	    --lang=go 2>&1 | grep -E "(already exists at|built.*into)" | sed 's/.*at //;s/.*into //;s/ .*//' ) && \
+	echo "=== Stage B: graph at $$GRAPH_DIR ===" && \
 	echo "" && \
-	echo "=== Stage B: step 2/2 — eval 14 tasks × $(STAGE_B_BASELINES) ===" && \
+	echo "=== Stage B: eval 30 tasks × $(STAGE_B_BASELINES) ===" && \
 	STABLENET_SRC=$(STABLENET_SRC) ./bin/ckg eval \
 	    --tasks='eval/stablenet/tasks/T*.yaml' \
-	    --graph=$$EFFECTIVE_GRAPH \
+	    --graph=$$GRAPH_DIR \
 	    --baselines=$(STAGE_B_BASELINES) \
 	    --llm-backend=$(LLM_BACKEND) \
 	    --llm=$(LLM_MODEL) \

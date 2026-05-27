@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -43,5 +45,38 @@ func TestResolveOutDir_AutoCommitHash_NonGitDir(t *testing.T) {
 	_, err := resolveOutDir("/tmp/out", "auto-commit-hash", t.TempDir())
 	if err == nil {
 		t.Error("expected error for non-git directory")
+	}
+}
+
+func TestGraphExists_True(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "graph.db"), []byte("x"), 0o644)
+	if !graphExists(dir) {
+		t.Error("should detect existing graph.db")
+	}
+}
+
+func TestGraphExists_False(t *testing.T) {
+	if graphExists(t.TempDir()) {
+		t.Error("should return false for empty dir")
+	}
+}
+
+func TestCheckoutWorktree_NonGitDir(t *testing.T) {
+	_, _, err := checkoutWorktree(t.TempDir(), "HEAD")
+	if err == nil {
+		t.Error("expected error for non-git directory")
+	}
+}
+
+func TestCheckoutWorktree_Success(t *testing.T) {
+	wt, cleanup, err := checkoutWorktree(".", "HEAD")
+	if err != nil {
+		t.Fatalf("checkoutWorktree: %v", err)
+	}
+	defer cleanup()
+
+	if _, err := os.Stat(filepath.Join(wt, "go.mod")); err != nil {
+		t.Errorf("worktree should contain go.mod: %v", err)
 	}
 }

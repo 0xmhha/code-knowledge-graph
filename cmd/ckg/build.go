@@ -13,9 +13,9 @@ import (
 )
 
 func newBuildCmd() *cobra.Command {
-	var src, out, outTag, dbDsn, filesFrom string
+	var src, out, outTag, atCommit, dbDsn, filesFrom string
 	var langs []string
-	var noCache, rebuildMetrics, strictValidate, lockPropagation bool
+	var noCache, force, rebuildMetrics, strictValidate, lockPropagation bool
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
@@ -26,13 +26,30 @@ func newBuildCmd() *cobra.Command {
 			}
 			defer cleanup()
 
-			effectiveOut, err := resolveOutDir(out, outTag, src)
+			effectiveSrc := src
+			var worktreeCleanup func()
+			if atCommit != "" {
+				wt, clean, err := checkoutWorktree(src, atCommit)
+				if err != nil {
+					return err
+				}
+				effectiveSrc = wt
+				worktreeCleanup = clean
+				defer worktreeCleanup()
+			}
+
+			effectiveOut, err := resolveOutDir(out, outTag, effectiveSrc)
 			if err != nil {
 				return err
 			}
 
+			if !force && !noCache && graphExists(effectiveOut) {
+				fmt.Fprintf(os.Stderr, "ckg: graph already exists at %s (use --force to rebuild)\n", effectiveOut)
+				return nil
+			}
+
 			m, err := buildpipe.Run(buildpipe.Options{
-				SrcRoot:         src,
+				SrcRoot:         effectiveSrc,
 				OutDir:          effectiveOut,
 				Languages:       langs,
 				Logger:          log,
@@ -56,6 +73,10 @@ func newBuildCmd() *cobra.Command {
 	cmd.Flags().StringVar(&out, "out", "", "output directory (required)")
 	cmd.Flags().StringVar(&outTag, "out-tag", "",
 		`suffix appended to --out directory; "auto-commit-hash" appends the source tree's path-aware HEAD commit (short SHA)`)
+	cmd.Flags().StringVar(&atCommit, "at-commit", "",
+		"build from a specific git commit using git worktree (leaves --src working tree untouched)")
+	cmd.Flags().BoolVar(&force, "force", false,
+		"rebuild even if graph.db already exists at the output directory")
 	cmd.Flags().StringSliceVar(&langs, "lang", []string{"auto"}, "languages: auto|go,ts,sol")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false,
 		"bypass A3 incremental cache; full rebuild from scratch")
@@ -74,10 +95,52 @@ func newBuildCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveOutDir applies --out-tag to --out. When tag is empty, out is
-// returned unchanged. "auto-commit-hash" resolves the path-aware HEAD
-// of srcRoot and appends "-<short-sha>" to out. Any other value is
-// appended verbatim as "-<tag>".
+// graphExists returns true if the output directory already has a graph.db.
+func graphExists(outDir string) bool {
+	info, err := os.Stat(filepath.Join(outDir, "graph.db"))
+	return err == nil && !info.IsDir()
+}
+
+// checkoutWorktree creates a temporary git worktree at the given commit
+// and returns the worktree path + cleanup function.
+func checkoutWorktree(repoSrc, commit string) (string, func(), error) {
+	absRepo, err := filepath.Abs(repoSrc)
+	if err != nil {
+		return "", nil, err
+	}
+	toplevel, err := exec.Command("git", "-C", absRepo, "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", nil, fmt.Errorf("--at-commit: %s is not a git repository", repoSrc)
+	}
+	repoRoot := strings.TrimSpace(string(toplevel))
+
+	fullSHA, err := exec.Command("git", "-C", repoRoot, "rev-parse", commit).Output()
+	if err != nil {
+		return "", nil, fmt.Errorf("--at-commit: cannot resolve %q: %w", commit, err)
+	}
+	sha := strings.TrimSpace(string(fullSHA))
+	short := sha
+	if len(short) > 12 {
+		short = short[:12]
+	}
+
+	wtDir, err := os.MkdirTemp("", "ckg-worktree-"+short+"-*")
+	if err != nil {
+		return "", nil, err
+	}
+	if out, err := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", wtDir, sha).CombinedOutput(); err != nil {
+		os.RemoveAll(wtDir)
+		return "", nil, fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	cleanup := func() {
+		exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", wtDir).Run()
+		os.RemoveAll(wtDir)
+	}
+	return wtDir, cleanup, nil
+}
+
+// resolveOutDir applies --out-tag to --out.
 func resolveOutDir(out, tag, srcRoot string) (string, error) {
 	if tag == "" {
 		return out, nil
@@ -99,7 +162,6 @@ func resolveOutDir(out, tag, srcRoot string) (string, error) {
 	return out + "-" + tag, nil
 }
 
-// srcCommitHash returns the path-aware HEAD commit SHA for srcRoot.
 func srcCommitHash(srcRoot string) (string, error) {
 	absRoot, err := filepath.Abs(srcRoot)
 	if err != nil {
