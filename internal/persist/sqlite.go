@@ -875,10 +875,22 @@ func rewriteFTSQuery(q string) string {
 	// tightening above) lines up with the FTS5 tokeniser's own
 	// behaviour — it indexes dotted identifiers as separate
 	// tokens, so the rewriter has nothing to lose by matching that
-	// semantics. `-` is also a separator because FTS5 interprets it
-	// as NOT; "refresh-on-gasTip-change" must split into separate tokens.
+	// Split on whitespace + punctuation that FTS5 would misinterpret:
+	//   .  dotted identifiers (Vault.deposit → Vault, deposit)
+	//   "  embedded quotes in prose
+	//   -  FTS5 NOT operator (refresh-on-change → refresh, on, change)
+	//   /  path separators (consensus/wbft/core → consensus, wbft, core)
+	//   :  colon (port:443, file:line patterns)
+	//   ,  comma-separated lists
+	//   ;  semicolons in prose
+	//   () [] {} grouping punctuation
 	fields := strings.FieldsFunc(q, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '.' || r == '"' || r == '-'
+		switch r {
+		case ' ', '\t', '\n', '.', '"', '-', '/', ':', ',', ';',
+			'(', ')', '[', ']', '{', '}', '<', '>':
+			return true
+		}
+		return false
 	})
 	if len(fields) == 0 {
 		return q
