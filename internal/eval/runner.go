@@ -113,10 +113,13 @@ func Run(ctx context.Context, tasks []Task, baselines []Baseline,
 		fmt.Fprintf(os.Stderr, "ckg eval: %d/%d (task,baseline,run) triples failed; report H1/H2 may be biased\n", dropped, expected)
 	}
 
-	if err := writeCSV(filepath.Join(outDir, "results.csv"), results); err != nil {
-		return results, err
+	csvPath := filepath.Join(outDir, "results.csv")
+	existing := readCSV(csvPath)
+	merged := mergeResults(existing, results)
+	if err := writeCSV(csvPath, merged); err != nil {
+		return merged, err
 	}
-	if err := WriteReport(filepath.Join(outDir, "report.md"), results); err != nil {
+	if err := WriteReport(filepath.Join(outDir, "report.md"), merged); err != nil {
 		return results, err
 	}
 	return results, nil
@@ -520,6 +523,80 @@ func smartContext(store pkgstore.Reader, query string) (string, error) {
 func jsonString(v any) string {
 	buf, _ := json.Marshal(v)
 	return string(buf)
+}
+
+func readCSV(path string) []Result {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+	records, err := r.ReadAll()
+	if err != nil || len(records) < 2 {
+		return nil
+	}
+	var out []Result
+	for _, rec := range records[1:] {
+		if len(rec) < 15 {
+			continue
+		}
+		score, _ := strconv.ParseFloat(rec[7], 64)
+		latency, _ := strconv.ParseInt(rec[8], 10, 64)
+		haluTotal, _ := strconv.Atoi(rec[11])
+		haluCount, _ := strconv.Atoi(rec[12])
+		haluRate, _ := strconv.ParseFloat(rec[13], 64)
+		upb, _ := strconv.Atoi(rec[3])
+		it, _ := strconv.Atoi(rec[4])
+		ot, _ := strconv.Atoi(rec[5])
+		ct, _ := strconv.Atoi(rec[6])
+		tc, _ := strconv.Atoi(rec[9])
+		ri, _ := strconv.Atoi(rec[2])
+		out = append(out, Result{
+			TaskID: rec[0], Baseline: Baseline(rec[1]), RunIdx: ri,
+			UserPromptBytes: upb,
+			InputTokens:     it, OutputTokens: ot, CachedTokens: ct,
+			Score: score, LatencyMS: latency, NumToolCalls: tc,
+			Stale: rec[10] == "true",
+			Hallucination: HallucinationResult{
+				Total:        haluTotal,
+				Hallucinated: make([]string, haluCount),
+				Rate:         haluRate,
+			},
+			RawOutput: rec[14],
+		})
+	}
+	return out
+}
+
+func mergeResults(old, new_ []Result) []Result {
+	type key struct {
+		task     string
+		baseline Baseline
+		run      int
+	}
+	m := make(map[key]Result, len(old)+len(new_))
+	var order []key
+	for _, r := range old {
+		k := key{r.TaskID, r.Baseline, r.RunIdx}
+		if _, exists := m[k]; !exists {
+			order = append(order, k)
+		}
+		m[k] = r
+	}
+	for _, r := range new_ {
+		k := key{r.TaskID, r.Baseline, r.RunIdx}
+		if _, exists := m[k]; !exists {
+			order = append(order, k)
+		}
+		m[k] = r
+	}
+	out := make([]Result, 0, len(order))
+	for _, k := range order {
+		out = append(out, m[k])
+	}
+	return out
 }
 
 func writeCSV(path string, rows []Result) error {

@@ -895,6 +895,9 @@ func rewriteFTSQuery(q string) string {
 		if len(t) < 3 {
 			continue
 		}
+		if isFTS5Reserved(t) {
+			continue
+		}
 		if len(t) >= 4 {
 			parts = append(parts, t+"*")
 		} else {
@@ -905,6 +908,17 @@ func rewriteFTSQuery(q string) string {
 		return q
 	}
 	return strings.Join(parts, " OR ")
+}
+
+// isFTS5Reserved returns true for tokens that FTS5 interprets as operators
+// or column names rather than search terms. Passing these through
+// rewriteFTSQuery causes "no such column" or syntax errors.
+func isFTS5Reserved(t string) bool {
+	switch strings.ToLower(t) {
+	case "and", "or", "not", "near":
+		return true
+	}
+	return false
 }
 
 // trimFTSToken strips leading/trailing characters that would confuse FTS5's
