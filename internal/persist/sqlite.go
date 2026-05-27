@@ -875,9 +875,10 @@ func rewriteFTSQuery(q string) string {
 	// tightening above) lines up with the FTS5 tokeniser's own
 	// behaviour — it indexes dotted identifiers as separate
 	// tokens, so the rewriter has nothing to lose by matching that
-	// semantics.
+	// semantics. `-` is also a separator because FTS5 interprets it
+	// as NOT; "refresh-on-gasTip-change" must split into separate tokens.
 	fields := strings.FieldsFunc(q, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '.' || r == '"'
+		return r == ' ' || r == '\t' || r == '\n' || r == '.' || r == '"' || r == '-'
 	})
 	if len(fields) == 0 {
 		return q
