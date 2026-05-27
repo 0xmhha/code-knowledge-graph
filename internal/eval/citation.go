@@ -12,11 +12,11 @@ import (
 // CitationResult is the per-response classification of file:line
 // citations extracted from an LLM output (T-03).
 type CitationResult struct {
-	Total         int
-	FileExists    int
-	LineInNode    int
-	Hallucinated  []Citation
-	Precision     float64
+	Total        int
+	FileExists   int
+	LineInNode   int
+	Hallucinated []Citation
+	Precision    float64
 }
 
 // Citation is a single file:line reference extracted from LLM output.

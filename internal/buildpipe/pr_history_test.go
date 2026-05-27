@@ -195,7 +195,7 @@ func TestRangesOverlap(t *testing.T) {
 		a1, a2, b1, b2 int
 		want           bool
 	}{
-		{1, 5, 3, 8, true},  // partial overlap
+		{1, 5, 3, 8, true},   // partial overlap
 		{1, 5, 6, 10, false}, // no overlap, b above a
 		{6, 10, 1, 5, false}, // no overlap, a above b
 		{1, 10, 5, 6, true},  // a contains b

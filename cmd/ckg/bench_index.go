@@ -14,18 +14,18 @@ import (
 )
 
 type benchIndexResult struct {
-	SrcRoot        string  `json:"src_root"`
-	FullBuildMS    int64   `json:"full_build_ms"`
-	FullNodes      int     `json:"full_nodes"`
-	FullEdges      int     `json:"full_edges"`
-	IncrBuildMS    int64   `json:"incr_build_ms"`
-	IncrNodes      int     `json:"incr_nodes"`
-	IncrEdges      int     `json:"incr_edges"`
-	SpeedupRatio   float64 `json:"speedup_ratio"`
-	ModifiedFile   string  `json:"modified_file"`
-	Iterations     int     `json:"iterations"`
-	IncrP50MS      int64   `json:"incr_p50_ms,omitempty"`
-	IncrP95MS      int64   `json:"incr_p95_ms,omitempty"`
+	SrcRoot      string  `json:"src_root"`
+	FullBuildMS  int64   `json:"full_build_ms"`
+	FullNodes    int     `json:"full_nodes"`
+	FullEdges    int     `json:"full_edges"`
+	IncrBuildMS  int64   `json:"incr_build_ms"`
+	IncrNodes    int     `json:"incr_nodes"`
+	IncrEdges    int     `json:"incr_edges"`
+	SpeedupRatio float64 `json:"speedup_ratio"`
+	ModifiedFile string  `json:"modified_file"`
+	Iterations   int     `json:"iterations"`
+	IncrP50MS    int64   `json:"incr_p50_ms,omitempty"`
+	IncrP95MS    int64   `json:"incr_p95_ms,omitempty"`
 }
 
 func newBenchIndexCmd() *cobra.Command {
