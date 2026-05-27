@@ -892,17 +892,13 @@ func rewriteFTSQuery(q string) string {
 	parts := make([]string, 0, len(fields))
 	for _, t := range fields {
 		t = trimFTSToken(t)
-		if len(t) < 3 {
+		if len(t) < 4 {
 			continue
 		}
 		if isFTS5Reserved(t) {
 			continue
 		}
-		if len(t) >= 4 {
-			parts = append(parts, t+"*")
-		} else {
-			parts = append(parts, t)
-		}
+		parts = append(parts, t+"*")
 	}
 	if len(parts) == 0 {
 		return q

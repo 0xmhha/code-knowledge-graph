@@ -22,7 +22,7 @@ func TestRewriteFTSQuery_TrailingPunctuation(t *testing.T) {
 		// Multi-token branch — each token sanitised independently, joined with " OR ".
 		{"natural sentence with period",
 			"How does block validation work in consensus.",
-			"How OR does* OR block* OR validation* OR work* OR consensus*"},
+			"does* OR block* OR validation* OR work* OR consensus*"},
 		{"trailing semicolon multi",
 			"WBFT prepare quorum;",
 			"WBFT* OR prepare* OR quorum*"},
@@ -128,7 +128,7 @@ func TestRewriteFTSQuery_DottedIdentifierSplit(t *testing.T) {
 			// `the` survives as a 3-char token under the existing
 			// drop<3 stop-word heuristic and stays bare (4+ rule
 			// for the prefix-wildcard tail).
-			want: "find* OR callers* OR Vault* OR deposit* OR the OR synthetic* OR corpus*",
+			want: "find* OR callers* OR Vault* OR deposit* OR synthetic* OR corpus*",
 		},
 		{
 			name: "trailing period still trims (regression check)",
@@ -168,7 +168,7 @@ func TestRewriteFTSQuery_PowerUserGate(t *testing.T) {
 		{
 			"prose with parentheses",
 			"Where does (NewBlockChain) get called",
-			"Where* OR does* OR NewBlockChain* OR get OR called*",
+			"Where* OR does* OR NewBlockChain* OR called*",
 		},
 		// Trailing colon (common in prose) no longer triggers passthrough.
 		{
