@@ -1,0 +1,18 @@
+id: T19-wbft-proposal-lifecycle
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  Trace the lifecycle of a block proposal in WBFT from the proposer's
+  perspective. How does the proposer build the preprepare message, what
+  does it include, and how do other validators verify it before entering
+  the prepare phase?
+expected_kind: rubric
+expected:
+  rubric:
+    - proposer selection check
+    - preprepare message construction
+    - block hash verification by validators
+    - transition to prepare phase
+    - timeout handling for missing proposals
+scoring:
+  type: rubric

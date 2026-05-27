@@ -1,0 +1,18 @@
+id: T27-trie-commit-pruning
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/trie
+description: |
+  Explain the trie commit and pruning lifecycle. How does Trie.Commit
+  produce a node set, how does the triedb database batch and persist
+  those nodes, and what pruning strategy removes stale trie data after
+  a configurable number of blocks?
+expected_kind: rubric
+expected:
+  rubric:
+    - Trie.Commit node set production
+    - triedb batch persistence
+    - pruning trigger condition
+    - reference counting or generation tracking
+    - disk cleanup of stale nodes
+scoring:
+  type: rubric

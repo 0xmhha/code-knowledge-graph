@@ -1,0 +1,17 @@
+id: T22-statedb-commit-pipeline
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core/state
+description: |
+  Explain the StateDB commit pipeline from dirty state to persisted
+  trie nodes. Cover IntermediateRoot, Commit, and how the journal
+  tracks reverts. What role does the snapshot layer play during commit?
+expected_kind: rubric
+expected:
+  rubric:
+    - IntermediateRoot computation
+    - StateDB.Commit flow
+    - journal and revert mechanism
+    - snapshot integration during commit
+    - trie node persistence
+scoring:
+  type: rubric

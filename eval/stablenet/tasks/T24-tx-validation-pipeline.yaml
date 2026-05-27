@@ -1,0 +1,18 @@
+id: T24-tx-validation-pipeline
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core/txpool
+description: |
+  Trace the transaction validation pipeline from submission to pool
+  inclusion. Cover ValidateTransaction, ValidateTransactionWithState,
+  nonce ordering, gas price checks, and how fee-delegation transactions
+  are handled differently.
+expected_kind: rubric
+expected:
+  rubric:
+    - ValidateTransaction checks
+    - state-dependent validation
+    - nonce ordering enforcement
+    - gas price and tip validation
+    - fee delegation special handling
+scoring:
+  type: rubric

@@ -1,0 +1,21 @@
+id: T21-systemcontract-upgrade-codepatch
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/systemcontracts
+description: |
+  Write a code patch that adds a new v3 GovConfig system contract
+  artifact that activates at a future hard fork. Show the directory
+  where the artifact JSON goes, the embed directive update, and the
+  registration in GovContractUpgrades.
+expected_kind: code_patch
+expected:
+  must_use_symbols:
+    - GovContractUpgrades
+    - InjectContracts
+  must_call:
+    - embed.FS
+  must_not_break_signature: true
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.5
+    recall: 0.5

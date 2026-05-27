@@ -1,0 +1,18 @@
+id: T18-wbft-backlog-replay
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  Explain the WBFT message backlog mechanism. When are incoming consensus
+  messages stored rather than processed immediately? How does the backlog
+  replay work when the node catches up to the correct round/sequence?
+  Mention isTooFarFutureMessage and the backlog data structure.
+expected_kind: rubric
+expected:
+  rubric:
+    - future message detection
+    - backlog storage structure
+    - replay trigger condition
+    - isTooFarFutureMessage guard
+    - message ordering on replay
+scoring:
+  type: rubric

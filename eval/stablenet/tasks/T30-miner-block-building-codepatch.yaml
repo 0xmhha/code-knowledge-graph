@@ -1,0 +1,21 @@
+id: T30-miner-block-building-codepatch
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/miner
+description: |
+  Write a code patch that adds a new transaction ordering strategy to
+  the miner's block building pipeline. Show where commitWork selects
+  transactions, how the pending set is consumed, and where the new
+  ordering hook should be inserted.
+expected_kind: code_patch
+expected:
+  must_use_symbols:
+    - worker.commitWork
+    - Miner.Pending
+  must_call:
+    - TxPool.Pending
+  must_not_break_signature: true
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.5
+    recall: 0.5

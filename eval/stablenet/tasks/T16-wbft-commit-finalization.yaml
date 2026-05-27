@@ -1,0 +1,18 @@
+id: T16-wbft-commit-finalization
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  Describe how WBFT finalizes a block after the commit phase. What
+  conditions must hold for a commit to succeed, how is the committed
+  block sealed, and what happens to the state after finalization?
+  Reference specific function names in consensus/wbft/core/.
+expected_kind: rubric
+expected:
+  rubric:
+    - commit quorum threshold
+    - committed seal construction
+    - block insertion into chain
+    - state cleanup after commit
+    - next sequence transition
+scoring:
+  type: rubric

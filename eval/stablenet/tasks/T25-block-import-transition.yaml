@@ -1,0 +1,18 @@
+id: T25-block-import-transition
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core
+description: |
+  Describe the block import and state transition process in
+  core.BlockChain. How does InsertChain validate the block, apply
+  transactions, update the state root, and handle reorgs? What role
+  does the consensus engine play during import?
+expected_kind: rubric
+expected:
+  rubric:
+    - InsertChain entry point
+    - block header verification
+    - transaction execution and state root
+    - consensus engine Finalize call
+    - chain reorganization handling
+scoring:
+  type: rubric

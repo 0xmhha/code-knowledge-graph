@@ -1,0 +1,20 @@
+id: T26-genesis-init-codepatch
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core
+description: |
+  Write a code patch that adds a new precompiled contract address to
+  the genesis alloc for the Boho fork. Show how to register the prealloc
+  entry in genesis.go and wire it into the chain config's fork schedule.
+expected_kind: code_patch
+expected:
+  must_use_symbols:
+    - Genesis.Alloc
+    - ChainConfig
+  must_call:
+    - SetupGenesisBlockWithOverride
+  must_not_break_signature: true
+scoring:
+  type: precision_recall
+  threshold:
+    precision: 0.5
+    recall: 0.5

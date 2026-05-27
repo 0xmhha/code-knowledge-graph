@@ -1,0 +1,18 @@
+id: T20-govstaking-deposit-flow
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/systemcontracts
+description: |
+  Describe the GovStaking deposit and withdrawal flow. How does a
+  validator stake tokens via the system contract, what state transitions
+  occur in the contract storage, and how does unstaking work including
+  any lockup period?
+expected_kind: rubric
+expected:
+  rubric:
+    - deposit entry point
+    - staking state storage slots
+    - validator registration
+    - withdrawal lockup period
+    - unstaking state transition
+scoring:
+  type: rubric

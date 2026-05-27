@@ -1,0 +1,18 @@
+id: T29-eth-sync-flow
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/eth
+description: |
+  Trace the eth protocol handler sync flow. How does the handler decide
+  when to start syncing, how does it select peers for sync, and what
+  is the handshake sequence when two nodes establish an eth protocol
+  connection?
+expected_kind: rubric
+expected:
+  rubric:
+    - sync trigger in chainSyncer
+    - peer selection for sync
+    - eth protocol handshake
+    - block announcement propagation
+    - sync completion detection
+scoring:
+  type: rubric

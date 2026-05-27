@@ -1,0 +1,18 @@
+id: T17-wbft-validator-set
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  How is the WBFT validator set determined and updated? Explain where
+  the validator list comes from (genesis vs on-chain governance), how
+  a new validator joining affects the quorum size, and how the proposer
+  rotation selects the next block producer.
+expected_kind: rubric
+expected:
+  rubric:
+    - validator set source
+    - quorum size calculation
+    - proposer rotation algorithm
+    - validator set update mechanism
+    - governance contract integration
+scoring:
+  type: rubric

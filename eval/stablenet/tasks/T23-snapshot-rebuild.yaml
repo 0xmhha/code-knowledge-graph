@@ -1,0 +1,18 @@
+id: T23-snapshot-rebuild
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core/state/snapshot
+description: |
+  How does the snapshot tree rebuild process work? When is a rebuild
+  triggered, how does it iterate through the state trie to populate
+  the snapshot layers, and how does it handle concurrent block processing
+  during the rebuild?
+expected_kind: rubric
+expected:
+  rubric:
+    - rebuild trigger condition
+    - state trie iteration
+    - snapshot layer population
+    - concurrent block handling
+    - rebuild completion signaling
+scoring:
+  type: rubric

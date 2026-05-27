@@ -1,0 +1,18 @@
+id: T28-state-sync-recovery
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/core
+description: |
+  How does a node recover state from peers using snap sync? Describe
+  the account and storage trie download phases, how the snapshot is
+  reconstructed from downloaded data, and how the node transitions from
+  snap sync to full block processing.
+expected_kind: rubric
+expected:
+  rubric:
+    - snap sync initiation
+    - account trie download
+    - storage trie download
+    - snapshot reconstruction
+    - transition to full processing
+scoring:
+  type: rubric

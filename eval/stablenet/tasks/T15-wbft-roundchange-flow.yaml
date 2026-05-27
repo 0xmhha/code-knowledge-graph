@@ -1,0 +1,18 @@
+id: T15-wbft-roundchange-flow
+corpus: go-stablenet
+corpus_path: ${STABLENET_SRC}/consensus/wbft
+description: |
+  Explain the WBFT round change protocol flow end-to-end. Cover what
+  triggers a round change, how the broadcast propagates to peers, what
+  validations the receiving node performs, and how the new round is
+  established once enough round-change messages arrive.
+expected_kind: rubric
+expected:
+  rubric:
+    - round change trigger condition
+    - broadcastRoundChange message construction
+    - round change certificate quorum
+    - new round establishment
+    - timer reset after round change
+scoring:
+  type: rubric
