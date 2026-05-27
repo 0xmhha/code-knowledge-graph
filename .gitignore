@@ -30,6 +30,9 @@ coverage.out
 # Local test build outputs (graph.db + manifest.json from ad-hoc `ckg build` runs)
 /go-stable-code/
 
+# Machine-local environment (STABLENET_SRC, EVAL_DB_ROOT etc.)
+.env.local
+
 # Local Claude settings
 .claude/settings.local.json
 

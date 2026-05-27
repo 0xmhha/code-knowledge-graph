@@ -145,11 +145,17 @@ eval-baseline-update:
 	@echo "eval/baseline/ refreshed from eval/results/latest/"
 	@echo "Commit the change to lock the new baseline."
 
-# Persistent evaluation DB directory. Graphs are stored here keyed by
-# commit hash so they survive across sessions and don't need rebuilding.
-# Override: make eval-stage-b EVAL_DB_ROOT=/other/path
-STABLENET_SRC ?= $(HOME)/Work/github/stable-net/go-stablenet-latest
-EVAL_DB_ROOT  ?= $(HOME)/Work/github/tools/go-stable-code
+# Machine-local paths — override via environment or .env.local:
+#   STABLENET_SRC  path to go-stablenet checkout
+#   EVAL_DB_ROOT   persistent directory for evaluation graph DBs
+#
+# No defaults — these MUST be set. .env.local is gitignored and
+# sourced automatically if present:
+#   echo 'export STABLENET_SRC=~/Work/github/stable-net/go-stablenet-latest' >> .env.local
+#   echo 'export EVAL_DB_ROOT=~/Work/github/tools/go-stable-code'           >> .env.local
+-include .env.local
+STABLENET_SRC ?=
+EVAL_DB_ROOT  ?=
 
 # eval-build-dbs: pre-build evaluation graphs into EVAL_DB_ROOT.
 # Skips if graph.db already exists (use --force to rebuild).
@@ -162,6 +168,8 @@ EVAL_DB_ROOT  ?= $(HOME)/Work/github/tools/go-stable-code
 FORCE ?=
 AT_COMMITS ?=
 eval-build-dbs: build-no-viewer
+	@[ -n "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC not set. Add it to .env.local"; exit 1; }
+	@[ -n "$(EVAL_DB_ROOT)" ]  || { echo "ERROR: EVAL_DB_ROOT not set. Add it to .env.local"; exit 1; }
 	@[ -d "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC=$(STABLENET_SRC) not found"; exit 1; }
 	@mkdir -p $(EVAL_DB_ROOT)
 	@echo "=== Building HEAD graph ==="
@@ -194,6 +202,8 @@ eval-build-dbs: build-no-viewer
 STAGE_B_BASELINES ?= alpha,beta,gamma,delta
 STAGE_B_NRUNS ?= 1
 eval-stage-b: build-no-viewer
+	@[ -n "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC not set. Add it to .env.local"; exit 1; }
+	@[ -n "$(EVAL_DB_ROOT)" ]  || { echo "ERROR: EVAL_DB_ROOT not set. Add it to .env.local"; exit 1; }
 	@[ -d "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC=$(STABLENET_SRC) not found"; exit 1; }
 	@mkdir -p eval/results/stage-b
 	@# Resolve HEAD graph path; build if missing.
