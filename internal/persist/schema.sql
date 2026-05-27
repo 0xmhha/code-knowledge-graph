@@ -31,7 +31,12 @@ CREATE TABLE IF NOT EXISTS nodes (
   -- HasExternalCall, HasInheritanceMROFallback. Future markers slot
   -- into the JSON without further schema migration. Pre-1.9 DBs are
   -- migrated by ensureAttrsColumn at Open() time.
-  attrs          TEXT
+  attrs          TEXT,
+  -- search_tokens (schema 1.13): pre-split camelCase/snake_case tokens
+  -- from name + qualified_name, space-separated. Indexed by nodes_fts so
+  -- prefix queries like "deposit*" match "HandleDeposit" via the split
+  -- token "deposit". Generated at build time by pkg/bm25.Tokenize.
+  search_tokens  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file  ON nodes(file_path);
@@ -86,7 +91,7 @@ CREATE TABLE IF NOT EXISTS blobs (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
-  name, qualified_name, signature, doc_comment,
+  name, qualified_name, signature, doc_comment, search_tokens,
   content='nodes', content_rowid='rowid'
 );
 

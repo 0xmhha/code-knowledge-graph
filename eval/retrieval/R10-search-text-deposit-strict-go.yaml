@@ -1,15 +1,10 @@
 id: R10-search-text-deposit-strict-go
 description: |
   Single-keyword precision target: "Deposit" with language=go must
-  return exactly the three Go nodes whose FTS-indexed columns contain
-  the token. Captures the original R05 intent (single-token search)
-  but ratchets precision_min from 0.0 to 1.0 — possible now that the
-  language pushdown filter (CKG-2) strips TS Vault.deposit /
-  VaultService.depositFn and the Sol Deposited event from the result.
-
-  If a future code change introduces additional Go nodes with
-  "deposit" in their indexed columns, the fixture must be widened
-  in the same PR (recall stays achievable, precision tightens).
+  return all Go symbol nodes whose name/qname or search_tokens
+  contain the token "deposit". Since schema 1.13 the search_tokens
+  column carries camelCase-split tokens, so HandleDeposit and
+  SafeDeposit now match via the "deposit" sub-token.
 probe:
   tool: search_text
   args:
@@ -17,19 +12,13 @@ probe:
     language: "go"
     top_k: 20
 expected:
-  # Symbol-only after the X-NodeKinds default — Method + Struct +
-  # Field that carry the "deposit" token. Statement children are
-  # filtered at the FTS layer; HandleDeposit stays absent for the
-  # FTS5-unicode61 CamelCase limitation documented below.
   symbols:
     - service.Vault.Deposit
     - domain.DepositRequest
-    - domain.DepositRequest.Amount         # field's qname carries "Deposit"
+    - domain.DepositRequest.Amount
     - domain.DepositRequest.From
-  # api.Handler.HandleDeposit is intentionally absent — FTS5 unicode61
-  # does not split CamelCase, so "deposit*" prefix doesn't match the
-  # token "HandleDeposit". Documents the limitation for future
-  # trigram-tokeniser work (which would re-add HandleDeposit).
+    - api.Handler.HandleDeposit            # matched via search_tokens camelCase split (schema 1.13)
+    - service.SafeVault.SafeDeposit        # matched via search_tokens camelCase split
 scoring:
   recall_min: 1.0
   precision_min: 1.0

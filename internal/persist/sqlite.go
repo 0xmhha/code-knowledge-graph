@@ -10,6 +10,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/cluster"
+	"github.com/0xmhha/code-knowledge-graph/pkg/bm25"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
@@ -99,6 +100,9 @@ func (s *sqliteStore) Migrate() error {
 	if err := ensureAttrsColumn(s.db); err != nil {
 		return fmt.Errorf("migrate attrs on nodes: %w", err)
 	}
+	if err := ensureSearchTokensColumn(s.db); err != nil {
+		return fmt.Errorf("migrate search_tokens on nodes: %w", err)
+	}
 	return nil
 }
 
@@ -134,6 +138,56 @@ func ensureAttrsColumn(db *sql.DB) error {
 		return fmt.Errorf("alter nodes add attrs: %w", err)
 	}
 	return nil
+}
+
+// ensureSearchTokensColumn ALTER-adds nodes.search_tokens on pre-1.13 DBs.
+func ensureSearchTokensColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(nodes)`)
+	if err != nil {
+		return fmt.Errorf("table_info(nodes): %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "search_tokens" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE nodes ADD COLUMN search_tokens TEXT`); err != nil {
+		return fmt.Errorf("alter nodes add search_tokens: %w", err)
+	}
+	return nil
+}
+
+// buildSearchTokens generates space-separated camelCase/snake_case split
+// tokens from name and qualified_name. Indexed by FTS5 so prefix queries
+// like "deposit*" match "HandleDeposit" via the split token "deposit".
+func buildSearchTokens(name, qname string) string {
+	seen := map[string]struct{}{}
+	var tokens []string
+	for _, input := range []string{name, qname} {
+		for _, t := range bm25.Tokenize(input) {
+			if _, dup := seen[t]; dup {
+				continue
+			}
+			seen[t] = struct{}{}
+			tokens = append(tokens, t)
+		}
+	}
+	return strings.Join(tokens, " ")
 }
 
 // ensureDispatchKindColumn ALTER-adds <table>.dispatch_kind on schema-1.6
@@ -194,19 +248,20 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO nodes
 		(id, type, name, qualified_name, file_path, start_line, end_line,
 		 start_byte, end_byte, language, visibility, signature, doc_comment,
-		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind, attrs)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind, attrs, search_tokens)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 	for _, n := range nodes {
 		attrs := marshalNodeAttrs(&n)
+		tokens := buildSearchTokens(n.Name, n.QualifiedName)
 		if _, err := stmt.Exec(n.ID, n.Type, n.Name, n.QualifiedName, n.FilePath,
 			n.StartLine, n.EndLine, n.StartByte, n.EndByte, n.Language,
 			n.Visibility, n.Signature, n.DocComment, n.Complexity,
 			n.InDegree, n.OutDegree, n.PageRank, n.UsageScore,
-			string(n.Confidence), n.SubKind, attrs); err != nil {
+			string(n.Confidence), n.SubKind, attrs, tokens); err != nil {
 			return fmt.Errorf("insert node %s: %w", n.ID, err)
 		}
 	}

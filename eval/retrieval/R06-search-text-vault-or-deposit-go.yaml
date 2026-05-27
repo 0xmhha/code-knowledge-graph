@@ -38,11 +38,11 @@ expected:
     # the "vault" token; File is still a symbol-level NodeType so
     # this entry passes the default whitelist.
     - service/go-backend/service/vault.go
-  # api.Handler.HandleDeposit is intentionally absent — FTS5
-  # unicode61 does not split CamelCase, so "deposit*" does not
-  # match the single token "HandleDeposit". Future trigram tokeniser
-  # work would lift this constraint; the fixture would then need to
-  # add HandleDeposit (intended positive regression).
+    # Schema 1.13 camelCase search_tokens: "vault" sub-token now
+    # surfaces these additional nodes.
+    - api.Handler.HandleDeposit
+    - service.SafeVault.mu
+    - service.SafeVault.mu#mutex
 scoring:
   recall_min: 1.0
   precision_min: 1.0

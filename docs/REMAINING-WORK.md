@@ -16,7 +16,7 @@
     NodeKinds, opt-out via whitelist
   - `808086f` feat(pr-breadcrumb): symbol → PR history via build-time
     git log scan (ckg-NEW-2/3/4)
-- **Schema**: 1.12 (node_prs added by the most recent commit)
+- **Schema**: 1.13 (search_tokens camelCase pre-split column)
 - **Retrieval baseline**: 14/14 R=1.00 P=1.00 F1=1.00 (eval/baseline/retrieval.json)
 - **Eval LLM baseline**: cycle 9, α=0.396 / β=0.746 / γ=0.688 /
   δ=0.825, halu β/δ 0.000 (eval-trajectory.md)
@@ -56,6 +56,7 @@ In approximate session order, newest last:
 | **T-11** | `ckg bench-index` subcommand: full build (cold) → touch 1 file → incremental build, reports speedup ratio + p50/p95 with --iterations. Source copied to temp dir to avoid modifying original. JSON/text output. 2026-05-27 |
 | **T-06** | 16 additional task YAMLs (T15-T30) in `eval/stablenet/tasks/`. Total 30 tasks: symbol_set=12, rubric=15, code_patch=3. Covers WBFT (8), system contracts (6), core blockchain (8), eth handler (5), misc (3). 2026-05-27 |
 | **T-15** | `eval/stablenet/sync_tasks.py`: bidirectional sync YAML ↔ known-issues.jsonl. `--check` for drift detection, `--apply` for YAML→JSONL write. Requires PyYAML. 2026-05-27 |
+| **CamelCase tokeniser** | Schema 1.13: `nodes.search_tokens TEXT` column with `pkg/bm25.Tokenize` pre-split. `nodes_fts` now indexes 5 columns. `HandleDeposit` → `handle deposit` tokens. R10/R06 fixtures widened. Baseline 14/14. 2026-05-27 |
 
 The cumulative effect: user's R-Build / R-Query / R-Accuracy
 north-star (`docs/CAPABILITY-AUDIT.md §1`) is closed on the
@@ -79,7 +80,7 @@ All former P1 items shipped in the Tier 1 + Tier 2 session (2026-05-27).
 
 | ID | Work | Estimate | Notes |
 |---|---|---|---|
-| **CamelCase tokeniser** | Lift the FTS5 unicode61 limitation R10 documents — `HandleDeposit` should split into `handle` + `deposit` so `deposit*` prefix matches. Custom FTS5 tokeniser is C-extension territory (incompatible with modernc/sqlite); the cheap alternative is build-time pre-split, storing an extra `nodes.search_tokens` column the FTS5 content table indexes alongside name/qname | ~4-6 h | bumps schema; R10 expected widens to include HandleDeposit + every camelCase variant after the change |
+| ~~CamelCase tokeniser~~ | ~~FTS5 camelCase pre-split~~ — shipped 2026-05-27 (schema 1.13) | — | — |
 | ~~T-03~~ | ~~file:line citation validator~~ — shipped 2026-05-27, see Recently shipped | — | — |
 | ~~T-06~~ | ~~27 LLM-eval task YAMLs~~ — shipped 2026-05-27 (T15-T30 added, total 30) | — | — |
 | ~~T-11~~ | ~~Incremental index time KPI~~ — shipped 2026-05-27, see Recently shipped | — | — |

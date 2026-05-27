@@ -5,8 +5,8 @@
   "failed": 0,
   "aggregate": {
     "recall": 1,
-    "precision": 1,
-    "f1": 1
+    "precision": 0.9285714285714286,
+    "f1": 0.962962962962963
   },
   "results": [
     {
@@ -107,12 +107,15 @@
         "domain.DepositRequest",
         "domain.DepositRequest.Amount",
         "domain.DepositRequest.From",
-        "service.Vault",
-        "service.SafeVault.vault",
-        "api.Handler.vault",
-        "service/go-backend/service/vault.go",
-        "service.Vault.wallets",
         "service.SafeVault.SafeDeposit",
+        "service.Vault",
+        "api.Handler.vault",
+        "service.SafeVault.vault",
+        "service.Vault.wallets",
+        "service/go-backend/service/vault.go",
+        "api.Handler.HandleDeposit",
+        "service.SafeVault.mu",
+        "service.SafeVault.mu#mutex",
         "service.NewSafeVault",
         "service.SafeVault"
       ]
@@ -148,9 +151,9 @@
       "got": [
         "VaultService",
         "Vault",
-        "Vault.deposit",
-        "VaultService.depositFn",
         "VaultService.constructor",
+        "VaultService.depositFn",
+        "Vault.deposit",
         "file:ts-frontend/src/contracts/Vault.ts",
         "file:ts-frontend/src/services/vault.ts"
       ]
@@ -188,7 +191,9 @@
         "domain.DepositRequest",
         "service.Vault.Deposit",
         "domain.DepositRequest.Amount",
-        "domain.DepositRequest.From"
+        "domain.DepositRequest.From",
+        "api.Handler.HandleDeposit",
+        "service.SafeVault.SafeDeposit"
       ]
     },
     {
@@ -245,11 +250,17 @@
       "pass_precision": true,
       "score": {
         "recall": 1,
-        "precision": 1,
-        "f1": 1
+        "precision": 0.3333333333333333,
+        "f1": 0.5,
+        "extra": [
+          "api.Handler.HandleDeposit#IfStmt@337",
+          "api.Handler.HandleDeposit#IfStmt@445"
+        ]
       },
       "got": [
-        "service.Vault.Deposit#IfStmt@276"
+        "service.Vault.Deposit#IfStmt@276",
+        "api.Handler.HandleDeposit#IfStmt@337",
+        "api.Handler.HandleDeposit#IfStmt@445"
       ]
     }
   ]
