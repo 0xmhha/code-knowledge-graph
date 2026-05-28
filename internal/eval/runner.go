@@ -137,35 +137,19 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	user := t.Description
 
 	if b == BaselineAlpha {
-		// Append raw context: dump 5 random files from the corpus root.
-		user += "\n\n--- raw files ---\n" + dumpFiles(t.CorpusPath, 5, 4000, t.ID)
+		// α: "정답 코드가 포함된 파일의 전체 내용" — task-aware file dump.
+		// Resolves task.Expected.Symbols (or Description keywords as
+		// fallback) to file paths, then emits each file's full source.
+		user += "\n\n--- raw files ---\n" + alphaFileDump(store, t)
 	}
 
-	// V0 simplification: we don't actually loop tool_use round-trips here.
-	// For β/γ/δ we *pre-call* the chosen tool against Store and append the
-	// JSON result to the user prompt as if the LLM had received it. This
-	// preserves the token-savings hypothesis test even without a tool loop.
-	//
-	// β fix (2026-05-22): the original SubgraphByQname("", 99) call relied
-	// on an empty qname expanding to the whole graph. It does not — the
-	// BFS-by-qname path resolves the empty string to zero root nodes and
-	// returns an empty subgraph, so β's LLM received the literal string
-	// "[]" as its context and answered something like "the get_subgraph
-	// result is empty, so I can't find any symbols." Score=0.000 on the
-	// first 4-axis smoke run was the symptom.
-	//
-	// The intent of β was "whole-graph dump in one pre-call", so we now
-	// substitute TopNodes("pagerank", 200) + AllEdges() — bounded enough
-	// to be safe on large graphs (synthetic fixtures fit comfortably
-	// under 200 nodes) and meaningful because pagerank's top slots are
-	// the hub symbols a tool-augmented LLM would have asked about first.
 	if b == BaselineBeta {
-		nodes, nErr := store.TopNodes("pagerank", 200)
-		edges, eErr := store.AllEdges()
-		if nErr == nil && eErr == nil {
-			user += "\n\n--- get_subgraph result ---\nNodes:\n" + jsonString(nodes) +
-				"\nEdges:\n" + jsonString(edges)
-		}
+		// β: "관련된 그래프 전체" — task-aware subgraph dump.
+		// Search task description → top candidates → 1-hop neighborhood
+		// → emit all nodes + edges in the relevant region. Distinct from
+		// δ in that β supplies the raw subgraph without summarization or
+		// token-budget packing.
+		user += "\n\n--- get_subgraph result ---\n" + betaSubgraphDump(store, t)
 	}
 	if b == BaselineDelta {
 		// 2026-05-22 (post-V3 smoke run): smartContext was failing
