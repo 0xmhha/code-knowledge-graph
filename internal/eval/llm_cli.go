@@ -133,12 +133,11 @@ func NewCLIClient(opts CLIClientOptions) (*CLIClient, error) {
 // error return so the runner surfaces both: the original spawn
 // failure on stderr from runOne, and this Close error from the
 // final Run return value.
-// CompleteWithTools is not supported by the CLI backend — the
-// `claude -p` subprocess does not expose Anthropic's tool_use
-// protocol. Use --llm-backend=api for γ baseline measurements.
+// CompleteWithTools runs the γ multi-turn tool-use loop via the
+// prompt-based protocol. See gamma_loop.go.
 func (c *CLIClient) CompleteWithTools(ctx context.Context, system, user string,
 	store pkgstore.Reader) (LLMResult, error) {
-	return LLMResult{}, ErrToolsUnsupported
+	return runGammaPromptLoop(ctx, c, system, user, store)
 }
 
 func (c *CLIClient) Close() (err error) {

@@ -29,19 +29,16 @@ type LLMResult struct {
 // both implement it. Close releases backend-specific resources (e.g.,
 // shutting down a cli-wrapper Manager); APIClient.Close is a no-op.
 //
-// CompleteWithTools runs the γ multi-turn tool-use loop. Only APIClient
-// implements this against Anthropic's native tool_use protocol; CLIClient
-// returns ErrToolsUnsupported so callers can fall back to plain text.
+// CompleteWithTools runs the γ multi-turn tool-use loop via prompt-based
+// pseudo-tool-use (see gamma_loop.go). Both backends implement the same
+// protocol on top of plain Complete calls — no API-specific support
+// required.
 type LLMClient interface {
 	Complete(ctx context.Context, system, user string) (LLMResult, error)
 	CompleteWithTools(ctx context.Context, system, user string,
 		store pkgstore.Reader) (LLMResult, error)
 	Close() error
 }
-
-// ErrToolsUnsupported is returned by backends that do not implement
-// CompleteWithTools (currently only the CLI backend).
-var ErrToolsUnsupported = errors.New("tool-use not supported by this LLM backend; use --llm-backend=api")
 
 // APIClient wraps the Anthropic Messages API. Construct one per ckg eval run.
 type APIClient struct {
@@ -89,21 +86,11 @@ func (l *APIClient) Complete(ctx context.Context, system, user string) (LLMResul
 	return out, nil
 }
 
-// CompleteWithTools runs a multi-turn tool-use loop. See gamma_loop.go.
+// CompleteWithTools runs the γ multi-turn tool-use loop via the
+// prompt-based protocol. See gamma_loop.go.
 func (l *APIClient) CompleteWithTools(ctx context.Context, system, user string,
 	store pkgstore.Reader) (LLMResult, error) {
-	res, err := runGammaLoop(ctx, l.c, l.model, system, user, store)
-	if err != nil {
-		return LLMResult{}, err
-	}
-	return LLMResult{
-		OutputText:        res.outputText,
-		InputTokens:       res.inputTokens,
-		OutputTokens:      res.outputTokens,
-		CacheReadTokens:   res.cacheRead,
-		CacheCreateTokens: res.cacheCreate,
-		NumToolCalls:      res.totalToolCalls,
-	}, nil
+	return runGammaPromptLoop(ctx, l, system, user, store)
 }
 
 // Close releases resources. APIClient holds none; this is a no-op so the

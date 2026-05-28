@@ -4,195 +4,155 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
-
-	anthropic "github.com/anthropics/anthropic-sdk-go"
 
 	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
 )
 
-// γ tool-use loop — V1 (2026-05-28). Replaces the V0 placeholder where
-// γ shipped tool names in the system prompt but never executed them.
-// LLM now calls find_symbol/find_callers/find_callees/get_subgraph/
-// search_text via Anthropic's tool_use protocol; each call dispatches
-// in-process to the same pkgstore.Reader the other baselines use, then
-// the result feeds the next LLM turn until stop_reason="end_turn".
+// γ tool-use loop — V2 (2026-05-28). Prompt-based pseudo-tool-use:
+// the LLM is instructed to emit <tool_call name="...">{json}</tool_call>
+// blocks; the runner parses these, executes each call against the
+// local pkgstore.Reader, and feeds the results back as tool_result
+// markup in the next user turn. Loops until the LLM responds without
+// any tool_call blocks (final answer) or gammaMaxTurns is hit.
+//
+// V2 replaces V1's native Anthropic tool_use protocol so γ works with
+// any LLM backend, including the Claude CLI subprocess.
 
 const (
-	gammaMaxTurns     = 8 // upper bound on LLM↔tool round-trips per task
-	gammaSearchLimit  = 20
-	gammaDepth        = 2
-	gammaDefaultModel = "claude-sonnet-4-6"
-	gammaMaxTokens    = 4096
+	gammaMaxTurns    = 8
+	gammaSearchLimit = 20
+	gammaDepth       = 2
 )
 
-// gammaResult mirrors LLMResult but tracks the total turn count for
-// the multi-turn cost analysis (number of tool calls + 1 final text).
-type gammaResult struct {
-	outputText     string
-	inputTokens    int
-	outputTokens   int
-	cacheRead      int
-	cacheCreate    int
-	turnCount      int
-	totalToolCalls int
-}
+const gammaToolInstructions = `You have access to retrieval tools to explore a code knowledge graph. Use them to gather the information needed to answer the user's question.
 
-// gammaToolDefs returns the JSON schemas for the 5 retrieval tools the
-// LLM may call during γ. Schemas mirror the MCP tool surface so a
-// future migration to a real MCP loop stays mechanical.
-func gammaToolDefs() []anthropic.ToolUnionParam {
-	return []anthropic.ToolUnionParam{
-		toolOf("find_symbol",
-			"Find symbols by name (exact or partial). Returns matching nodes with file paths.",
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"name": map[string]any{"type": "string", "description": "symbol name to find"},
-				},
-				"required": []string{"name"},
-			}),
-		toolOf("find_callers",
-			"Find functions/methods that call the given symbol. Returns caller nodes.",
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"qname": map[string]any{"type": "string", "description": "qualified name of the callee"},
-				},
-				"required": []string{"qname"},
-			}),
-		toolOf("find_callees",
-			"Find functions/methods that the given symbol calls. Returns callee nodes.",
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"qname": map[string]any{"type": "string", "description": "qualified name of the caller"},
-				},
-				"required": []string{"qname"},
-			}),
-		toolOf("get_subgraph",
-			"Get the subgraph around a symbol (BFS expansion up to depth).",
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"qname": map[string]any{"type": "string"},
-					"depth": map[string]any{"type": "integer", "description": "BFS depth (1-3)"},
-				},
-				"required": []string{"qname"},
-			}),
-		toolOf("search_text",
-			"Full-text search across symbol names, qnames, signatures, docs.",
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"query": map[string]any{"type": "string"},
-				},
-				"required": []string{"query"},
-			}),
-	}
-}
+Available tools:
+- find_symbol(name): Find symbols by exact or partial name. Returns matching nodes with file paths.
+- find_callers(qname): Find callers of a symbol. Returns caller nodes.
+- find_callees(qname): Find callees of a symbol. Returns callee nodes.
+- get_subgraph(qname, depth): BFS expansion around a symbol. Returns nodes + edges.
+- search_text(query): Full-text search across names, qnames, signatures, docs.
 
-func toolOf(name, desc string, schema map[string]any) anthropic.ToolUnionParam {
-	return anthropic.ToolUnionParam{
-		OfTool: &anthropic.ToolParam{
-			Name:        name,
-			Description: anthropic.String(desc),
-			InputSchema: anthropic.ToolInputSchemaParam{
-				Type:       "object",
-				Properties: schema["properties"],
-			},
-		},
-	}
-}
+To call one or more tools, emit XML blocks in your response. Each block must use this exact format:
 
-// runGammaLoop executes a multi-turn tool-use conversation. Each LLM
-// turn either ends with a text answer (stop_reason="end_turn") or
-// requests one or more tool calls (stop_reason="tool_use"). Tool calls
-// dispatch to the local store; their results feed the next turn.
-//
-// Returns when the LLM stops requesting tools, or when gammaMaxTurns
-// is hit (whichever first). The accumulated input/output tokens cover
-// the entire conversation.
-func runGammaLoop(ctx context.Context, c *anthropic.Client, model, system, user string,
-	store pkgstore.Reader) (gammaResult, error) {
-	tools := gammaToolDefs()
-	messages := []anthropic.MessageParam{
-		anthropic.NewUserMessage(anthropic.NewTextBlock(user)),
-	}
-	var res gammaResult
+<tool_call name="TOOL_NAME">
+{"arg": "value"}
+</tool_call>
+
+Multiple tool_call blocks per turn are allowed; they are all executed and the results are appended to the next user turn. Argument JSON must be on a single line or properly formatted; do not include code fences.
+
+When you have enough information, respond with your final answer in plain text — no <tool_call> tags. Reference specific symbols and file:line locations.`
+
+// runGammaPromptLoop is the entry point γ uses for both LLM backends.
+// It piggybacks on llm.Complete (single-turn text completion) and
+// implements the multi-turn loop on top via prompt-based tool calls.
+func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
+	store pkgstore.Reader) (LLMResult, error) {
+
+	fullSystem := system + "\n\n" + gammaToolInstructions
+
+	// userMsg accumulates the original task + each turn's tool results
+	// so the LLM sees the full conversation history on every Complete.
+	userMsg := user
+
+	var totalInput, totalOutput, totalCacheRead, totalCacheCreate int
+	var totalToolCalls int
+	var lastOutput string
 
 	for turn := 0; turn < gammaMaxTurns; turn++ {
-		res.turnCount = turn + 1
-
-		msg, err := c.Messages.New(ctx, anthropic.MessageNewParams{
-			Model:     anthropic.Model(model),
-			MaxTokens: gammaMaxTokens,
-			System:    []anthropic.TextBlockParam{{Text: system}},
-			Messages:  messages,
-			Tools:     tools,
-		})
+		res, err := llm.Complete(ctx, fullSystem, userMsg)
 		if err != nil {
-			return res, fmt.Errorf("turn %d: %w", turn, err)
+			return LLMResult{}, fmt.Errorf("turn %d: %w", turn, err)
 		}
 
-		res.inputTokens += int(msg.Usage.InputTokens)
-		res.outputTokens += int(msg.Usage.OutputTokens)
-		res.cacheRead += int(msg.Usage.CacheReadInputTokens)
-		res.cacheCreate += int(msg.Usage.CacheCreationInputTokens)
+		totalInput += res.InputTokens
+		totalOutput += res.OutputTokens
+		totalCacheRead += res.CacheReadTokens
+		totalCacheCreate += res.CacheCreateTokens
+		lastOutput = res.OutputText
 
-		// Collect text and tool_use blocks from this response
-		var toolUses []anthropic.ToolUseBlock
-		var textParts []string
-		for _, b := range msg.Content {
-			switch b.Type {
-			case "text":
-				textParts = append(textParts, b.Text)
-			case "tool_use":
-				toolUses = append(toolUses, anthropic.ToolUseBlock{
-					ID:    b.ID,
-					Name:  b.Name,
-					Input: b.Input,
-					Type:  "tool_use",
-				})
-			}
+		calls := parseToolCalls(res.OutputText)
+		if len(calls) == 0 {
+			// Final answer reached.
+			return LLMResult{
+				OutputText:        res.OutputText,
+				InputTokens:       totalInput,
+				OutputTokens:      totalOutput,
+				CacheReadTokens:   totalCacheRead,
+				CacheCreateTokens: totalCacheCreate,
+				NumToolCalls:      totalToolCalls,
+			}, nil
 		}
 
-		if msg.StopReason != "tool_use" || len(toolUses) == 0 {
-			res.outputText = strings.Join(textParts, "\n")
-			return res, nil
+		// Execute every parsed call, build a tool_result blob.
+		var results strings.Builder
+		results.WriteString("\n\n--- tool results ---\n")
+		for _, c := range calls {
+			totalToolCalls++
+			out := executeGammaTool(store, c.Name, c.Args)
+			fmt.Fprintf(&results, "<tool_result name=%q>\n%s\n</tool_result>\n", c.Name, out)
 		}
 
-		// Append assistant message with the tool_use blocks
-		assistantBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(msg.Content))
-		for _, b := range msg.Content {
-			switch b.Type {
-			case "text":
-				assistantBlocks = append(assistantBlocks, anthropic.NewTextBlock(b.Text))
-			case "tool_use":
-				assistantBlocks = append(assistantBlocks, anthropic.NewToolUseBlock(b.ID, b.Input, b.Name))
-			}
-		}
-		messages = append(messages, anthropic.NewAssistantMessage(assistantBlocks...))
-
-		// Execute each tool, build a user message with tool_result blocks
-		resultBlocks := make([]anthropic.ContentBlockParamUnion, 0, len(toolUses))
-		for _, tu := range toolUses {
-			res.totalToolCalls++
-			result := executeGammaTool(store, tu.Name, tu.Input)
-			resultBlocks = append(resultBlocks, anthropic.NewToolResultBlock(tu.ID, result, false))
-		}
-		messages = append(messages, anthropic.NewUserMessage(resultBlocks...))
+		// Append the assistant's tool_call output and the tool_result
+		// blob to userMsg so the next Complete sees the full history.
+		userMsg = userMsg + "\n\n--- assistant ---\n" + res.OutputText + results.String()
 	}
 
-	res.outputText = "[gamma: max turns reached without final answer]"
-	return res, nil
+	// Loop exited without a clean final answer.
+	return LLMResult{
+		OutputText:        lastOutput + "\n[gamma: max turns reached]",
+		InputTokens:       totalInput,
+		OutputTokens:      totalOutput,
+		CacheReadTokens:   totalCacheRead,
+		CacheCreateTokens: totalCacheCreate,
+		NumToolCalls:      totalToolCalls,
+	}, nil
+}
+
+// gammaCall is one parsed tool invocation from the LLM's response.
+type gammaCall struct {
+	Name string
+	Args json.RawMessage
+}
+
+var (
+	gammaOpenRe = regexp.MustCompile(`<tool_call\s+name="([^"]+)"\s*>`)
+	gammaArgsRe = regexp.MustCompile(`(?s)\{.*?\}`)
+)
+
+// parseToolCalls extracts every <tool_call name="...">...</tool_call>
+// block from the LLM response. Bodies are searched for the first JSON
+// object; malformed blocks are skipped silently.
+func parseToolCalls(text string) []gammaCall {
+	var calls []gammaCall
+	rest := text
+	for {
+		open := gammaOpenRe.FindStringSubmatchIndex(rest)
+		if open == nil {
+			break
+		}
+		name := rest[open[2]:open[3]]
+		blockStart := open[1]
+		closeIdx := strings.Index(rest[blockStart:], "</tool_call>")
+		if closeIdx < 0 {
+			break
+		}
+		body := rest[blockStart : blockStart+closeIdx]
+		args := gammaArgsRe.FindString(body)
+		if args == "" {
+			args = "{}"
+		}
+		calls = append(calls, gammaCall{Name: name, Args: json.RawMessage(args)})
+		rest = rest[blockStart+closeIdx+len("</tool_call>"):]
+	}
+	return calls
 }
 
 // executeGammaTool dispatches one tool call against the local store.
 // Returns a string payload that becomes tool_result content. Errors
-// are returned as plain text (Anthropic supports is_error=true but the
-// V1 keeps it simple — the LLM treats any error message as a signal
-// to try a different approach).
+// are returned as plain text so the LLM can react and try again.
 func executeGammaTool(store pkgstore.Reader, name string, inputJSON json.RawMessage) string {
 	var args map[string]any
 	if err := json.Unmarshal(inputJSON, &args); err != nil {
