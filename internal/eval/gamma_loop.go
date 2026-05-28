@@ -8,42 +8,51 @@ import (
 	"strings"
 
 	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
+	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
-// γ tool-use loop — V2 (2026-05-28). Prompt-based pseudo-tool-use:
-// the LLM is instructed to emit <tool_call name="...">{json}</tool_call>
-// blocks; the runner parses these, executes each call against the
-// local pkgstore.Reader, and feeds the results back as tool_result
-// markup in the next user turn. Loops until the LLM responds without
-// any tool_call blocks (final answer) or gammaMaxTurns is hit.
+// γ tool-use loop — V3 (2026-05-28). Prompt-based pseudo-tool-use with
+// size-bounded results.
 //
-// V2 replaces V1's native Anthropic tool_use protocol so γ works with
-// any LLM backend, including the Claude CLI subprocess.
+// V2 → V3 changes:
+//   - Tool results are summarized (qname/type/file/line) instead of
+//     full JSON nodes, so multi-turn prompts don't blow up
+//   - Per-tool result caps (top-N) prevent runaway expansion
+//   - Empty results get a "no match" hint so the LLM tries a different
+//     name instead of repeating the same call
+//   - System prompt clarifies final-answer semantics
+//   - gammaResult tracks cumulative user-msg bytes for honest H1 measure
 
 const (
-	gammaMaxTurns    = 8
-	gammaSearchLimit = 20
-	gammaDepth       = 2
+	gammaMaxTurns      = 8
+	gammaResultLimit   = 20 // top-N nodes per tool result
+	gammaEdgesLimit    = 30 // max edges in get_subgraph result
+	gammaSearchLimit   = 20
+	gammaSubgraphDepth = 2
 )
 
 const gammaToolInstructions = `You have access to retrieval tools to explore a code knowledge graph. Use them to gather the information needed to answer the user's question.
 
 Available tools:
-- find_symbol(name): Find symbols by exact or partial name. Returns matching nodes with file paths.
-- find_callers(qname): Find callers of a symbol. Returns caller nodes.
-- find_callees(qname): Find callees of a symbol. Returns callee nodes.
-- get_subgraph(qname, depth): BFS expansion around a symbol. Returns nodes + edges.
+- find_symbol(name): Find symbols by exact or partial name.
+- find_callers(qname): Find callers of a symbol (use the full qualified name including package).
+- find_callees(qname): Find callees of a symbol.
+- get_subgraph(qname, depth): BFS expansion around a symbol.
 - search_text(query): Full-text search across names, qnames, signatures, docs.
 
-To call one or more tools, emit XML blocks in your response. Each block must use this exact format:
+To call tools, emit XML blocks. Each block must be exactly:
 
 <tool_call name="TOOL_NAME">
 {"arg": "value"}
 </tool_call>
 
-Multiple tool_call blocks per turn are allowed; they are all executed and the results are appended to the next user turn. Argument JSON must be on a single line or properly formatted; do not include code fences.
+You may call multiple tools per turn — all of them execute in parallel and the results appear in the next turn. Argument JSON must be a single-line object; no code fences.
 
-When you have enough information, respond with your final answer in plain text — no <tool_call> tags. Reference specific symbols and file:line locations.`
+FINAL ANSWER PROTOCOL: When you have enough information, respond with your final answer as plain text containing NO <tool_call> tags. The absence of any <tool_call> tag is the signal that you are done. Cite specific symbols and file:line locations.
+
+Tips:
+- If a tool returns an empty result, try a different name (e.g. with or without the package prefix).
+- Be efficient — each tool call costs tokens and time. Plan your queries before calling.`
 
 // runGammaPromptLoop is the entry point γ uses for both LLM backends.
 // It piggybacks on llm.Complete (single-turn text completion) and
@@ -52,16 +61,18 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 	store pkgstore.Reader) (LLMResult, error) {
 
 	fullSystem := system + "\n\n" + gammaToolInstructions
-
-	// userMsg accumulates the original task + each turn's tool results
-	// so the LLM sees the full conversation history on every Complete.
 	userMsg := user
 
 	var totalInput, totalOutput, totalCacheRead, totalCacheCreate int
 	var totalToolCalls int
+	var maxUserBytes int // peak cumulative user-msg size across turns
 	var lastOutput string
 
 	for turn := 0; turn < gammaMaxTurns; turn++ {
+		if len(userMsg) > maxUserBytes {
+			maxUserBytes = len(userMsg)
+		}
+
 		res, err := llm.Complete(ctx, fullSystem, userMsg)
 		if err != nil {
 			return LLMResult{}, fmt.Errorf("turn %d: %w", turn, err)
@@ -75,7 +86,6 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 
 		calls := parseToolCalls(res.OutputText)
 		if len(calls) == 0 {
-			// Final answer reached.
 			return LLMResult{
 				OutputText:        res.OutputText,
 				InputTokens:       totalInput,
@@ -83,10 +93,10 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 				CacheReadTokens:   totalCacheRead,
 				CacheCreateTokens: totalCacheCreate,
 				NumToolCalls:      totalToolCalls,
+				UserPromptBytes:   maxUserBytes,
 			}, nil
 		}
 
-		// Execute every parsed call, build a tool_result blob.
 		var results strings.Builder
 		results.WriteString("\n\n--- tool results ---\n")
 		for _, c := range calls {
@@ -94,13 +104,12 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 			out := executeGammaTool(store, c.Name, c.Args)
 			fmt.Fprintf(&results, "<tool_result name=%q>\n%s\n</tool_result>\n", c.Name, out)
 		}
-
-		// Append the assistant's tool_call output and the tool_result
-		// blob to userMsg so the next Complete sees the full history.
 		userMsg = userMsg + "\n\n--- assistant ---\n" + res.OutputText + results.String()
 	}
 
-	// Loop exited without a clean final answer.
+	if len(userMsg) > maxUserBytes {
+		maxUserBytes = len(userMsg)
+	}
 	return LLMResult{
 		OutputText:        lastOutput + "\n[gamma: max turns reached]",
 		InputTokens:       totalInput,
@@ -108,6 +117,7 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 		CacheReadTokens:   totalCacheRead,
 		CacheCreateTokens: totalCacheCreate,
 		NumToolCalls:      totalToolCalls,
+		UserPromptBytes:   maxUserBytes,
 	}, nil
 }
 
@@ -150,6 +160,73 @@ func parseToolCalls(text string) []gammaCall {
 	return calls
 }
 
+// nodeBrief is the compact node form used inside tool_result blocks.
+// Keeps the LLM-visible payload small so multi-turn prompts don't blow
+// up after a few hops. Sufficient for the LLM to decide whether to
+// drill further or finalize an answer.
+type nodeBrief struct {
+	Qname string `json:"qname"`
+	Type  string `json:"type"`
+	File  string `json:"file,omitempty"`
+	Line  int    `json:"line,omitempty"`
+	Sig   string `json:"sig,omitempty"`
+}
+
+func briefNodes(ns []types.Node, limit int) []nodeBrief {
+	if len(ns) > limit {
+		ns = ns[:limit]
+	}
+	out := make([]nodeBrief, 0, len(ns))
+	for _, n := range ns {
+		nb := nodeBrief{
+			Qname: n.QualifiedName,
+			Type:  string(n.Type),
+			File:  n.FilePath,
+			Line:  n.StartLine,
+		}
+		if len(n.Signature) > 120 {
+			nb.Sig = n.Signature[:120] + "…"
+		} else {
+			nb.Sig = n.Signature
+		}
+		out = append(out, nb)
+	}
+	return out
+}
+
+type edgeBrief struct {
+	Src  string `json:"src"`
+	Dst  string `json:"dst"`
+	Type string `json:"type"`
+}
+
+func briefEdges(es []types.Edge, limit int) []edgeBrief {
+	if len(es) > limit {
+		es = es[:limit]
+	}
+	out := make([]edgeBrief, 0, len(es))
+	for _, e := range es {
+		out = append(out, edgeBrief{
+			Src:  e.Src,
+			Dst:  e.Dst,
+			Type: string(e.Type),
+		})
+	}
+	return out
+}
+
+// formatToolResult wraps a result with an empty-result hint when needed.
+func formatToolResult(nodes []nodeBrief, originalCount int, query string) string {
+	if len(nodes) == 0 {
+		return fmt.Sprintf("no matches for %q. Try a different name (with/without package prefix) or use search_text for keyword search.", query)
+	}
+	payload := jsonString(nodes)
+	if originalCount > len(nodes) {
+		return fmt.Sprintf("(showing top %d of %d results)\n%s", len(nodes), originalCount, payload)
+	}
+	return payload
+}
+
 // executeGammaTool dispatches one tool call against the local store.
 // Returns a string payload that becomes tool_result content. Errors
 // are returned as plain text so the LLM can react and try again.
@@ -165,24 +242,27 @@ func executeGammaTool(store pkgstore.Reader, name string, inputJSON json.RawMess
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}
-		return jsonString(nodes)
+		return formatToolResult(briefNodes(nodes, gammaResultLimit), len(nodes), q)
+
 	case "find_callers":
 		qname, _ := args["qname"].(string)
-		nodes, _, err := store.NeighborhoodByQname(qname, gammaDepth, true)
+		nodes, _, err := store.NeighborhoodByQname(qname, gammaSubgraphDepth, true)
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}
-		return jsonString(nodes)
+		return formatToolResult(briefNodes(nodes, gammaResultLimit), len(nodes), qname)
+
 	case "find_callees":
 		qname, _ := args["qname"].(string)
-		nodes, _, err := store.NeighborhoodByQname(qname, gammaDepth, false)
+		nodes, _, err := store.NeighborhoodByQname(qname, gammaSubgraphDepth, false)
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}
-		return jsonString(nodes)
+		return formatToolResult(briefNodes(nodes, gammaResultLimit), len(nodes), qname)
+
 	case "get_subgraph":
 		qname, _ := args["qname"].(string)
-		depth := gammaDepth
+		depth := gammaSubgraphDepth
 		if d, ok := args["depth"].(float64); ok && d > 0 {
 			depth = int(d)
 		}
@@ -190,14 +270,22 @@ func executeGammaTool(store pkgstore.Reader, name string, inputJSON json.RawMess
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}
-		return "Nodes:\n" + jsonString(nodes) + "\nEdges:\n" + jsonString(edges)
+		if len(nodes) == 0 {
+			return formatToolResult(nil, 0, qname)
+		}
+		return fmt.Sprintf("Nodes (top %d of %d):\n%s\nEdges (top %d of %d):\n%s",
+			min(len(nodes), gammaResultLimit), len(nodes),
+			jsonString(briefNodes(nodes, gammaResultLimit)),
+			min(len(edges), gammaEdgesLimit), len(edges),
+			jsonString(briefEdges(edges, gammaEdgesLimit)))
+
 	case "search_text":
 		q, _ := args["query"].(string)
 		nodes, err := store.Search(q, gammaSearchLimit)
 		if err != nil {
 			return fmt.Sprintf("error: %v", err)
 		}
-		return jsonString(nodes)
+		return formatToolResult(briefNodes(nodes, gammaResultLimit), len(nodes), q)
 	}
 	return fmt.Sprintf("unknown tool: %s", name)
 }

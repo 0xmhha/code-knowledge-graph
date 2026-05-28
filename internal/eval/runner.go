@@ -197,9 +197,15 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 	if cErr != nil {
 		fmt.Fprintf(os.Stderr, "task %s/%s: citation check: %v (continuing)\n", t.ID, b, cErr)
 	}
+	// γ multi-turn accumulates a larger user message than runner's first
+	// turn — prefer the cumulative value when CompleteWithTools reported it.
+	effectiveUserBytes := userPromptBytes
+	if out.UserPromptBytes > 0 {
+		effectiveUserBytes = out.UserPromptBytes
+	}
 	return Result{
 		TaskID: t.ID, Baseline: b,
-		UserPromptBytes: userPromptBytes,
+		UserPromptBytes: effectiveUserBytes,
 		InputTokens:     out.InputTokens, OutputTokens: out.OutputTokens,
 		CachedTokens: out.CacheReadTokens + out.CacheCreateTokens,
 		Score:        score, LatencyMS: time.Since(start).Milliseconds(),

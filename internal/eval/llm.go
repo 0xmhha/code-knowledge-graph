@@ -15,6 +15,10 @@ import (
 var ErrNoAPIKey = errors.New("ANTHROPIC_API_KEY not set")
 
 // LLMResult bundles a single completion's output text and usage counters.
+// UserPromptBytes is populated only by γ (CompleteWithTools) where the
+// multi-turn loop accumulates a much larger user message than the
+// runner's pre-tool prompt. Other baselines leave it zero and the
+// runner falls back to its own len(user) measurement.
 type LLMResult struct {
 	OutputText        string
 	InputTokens       int
@@ -22,6 +26,7 @@ type LLMResult struct {
 	CacheReadTokens   int
 	CacheCreateTokens int
 	NumToolCalls      int
+	UserPromptBytes   int
 }
 
 // LLMClient is the abstraction the eval runner uses for completions. The
