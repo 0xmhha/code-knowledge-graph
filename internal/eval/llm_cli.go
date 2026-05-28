@@ -12,6 +12,8 @@ import (
 
 	"github.com/0xmhha/cli-wrapper/pkg/cliwrap"
 	"github.com/0xmhha/cli-wrapper/pkg/event"
+
+	pkgstore "github.com/0xmhha/code-knowledge-graph/pkg/store"
 )
 
 // CLIClient runs `claude -p` via cli-wrapper as the LLM backend. It is a
@@ -131,6 +133,14 @@ func NewCLIClient(opts CLIClientOptions) (*CLIClient, error) {
 // error return so the runner surfaces both: the original spawn
 // failure on stderr from runOne, and this Close error from the
 // final Run return value.
+// CompleteWithTools is not supported by the CLI backend — the
+// `claude -p` subprocess does not expose Anthropic's tool_use
+// protocol. Use --llm-backend=api for γ baseline measurements.
+func (c *CLIClient) CompleteWithTools(ctx context.Context, system, user string,
+	store pkgstore.Reader) (LLMResult, error) {
+	return LLMResult{}, ErrToolsUnsupported
+}
+
 func (c *CLIClient) Close() (err error) {
 	if c.mgr == nil {
 		return nil

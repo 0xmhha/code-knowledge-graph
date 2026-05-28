@@ -25,6 +25,7 @@ import (
 func WriteReport(path string, results []Result) error {
 	type bAgg struct {
 		scores, halluRates, inputTokens, totalTokens, userBytes, halluTotals []float64
+		citationPrecisions, latenciesMS, toolCalls                           []float64
 	}
 	byBaseline := map[Baseline]*bAgg{}
 	for _, r := range results {
@@ -35,6 +36,9 @@ func WriteReport(path string, results []Result) error {
 		}
 		a.scores = append(a.scores, r.Score)
 		a.halluRates = append(a.halluRates, r.Hallucination.Rate)
+		a.citationPrecisions = append(a.citationPrecisions, r.Citation.Precision)
+		a.latenciesMS = append(a.latenciesMS, float64(r.LatencyMS))
+		a.toolCalls = append(a.toolCalls, float64(r.NumToolCalls))
 		a.inputTokens = append(a.inputTokens, float64(r.InputTokens))
 		// 2026-05-22 (post-4-axis smoke run): the first cli-backend
 		// multi-shot run revealed that Claude Code's prompt cache eats
@@ -62,6 +66,9 @@ func WriteReport(path string, results []Result) error {
 		MeanScore, StdScore         float64
 		MeanHalluRate, StdHalluRate float64
 		MeanHalluTotal              float64
+		MeanCitePrecision           float64
+		MeanLatencyMS               float64
+		MeanToolCalls               float64
 	}
 	var rows []row
 	for b, a := range byBaseline {
@@ -71,25 +78,43 @@ func WriteReport(path string, results []Result) error {
 		ms, ss := meanStd(a.scores)
 		mr, sr := meanStd(a.halluRates)
 		mh, _ := meanStd(a.halluTotals)
+		mcp, _ := meanStd(a.citationPrecisions)
+		ml, _ := meanStd(a.latenciesMS)
+		mtc, _ := meanStd(a.toolCalls)
 		rows = append(rows, row{B: b, Runs: len(a.scores),
 			MeanUserBytes: mub, StdUserBytes: sub,
 			MeanInput: mi,
 			MeanTotal: mtot, StdTotal: stot,
 			MeanScore: ms, StdScore: ss,
 			MeanHalluRate: mr, StdHalluRate: sr,
-			MeanHalluTotal: mh})
+			MeanHalluTotal:    mh,
+			MeanCitePrecision: mcp,
+			MeanLatencyMS:     ml,
+			MeanToolCalls:     mtc,
+		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return baselineOrder(rows[i].B) < baselineOrder(rows[j].B) })
 
 	var sb strings.Builder
 	sb.WriteString("# CKG eval report\n\n")
-	sb.WriteString("| Baseline | N | User prompt bytes (mean ± std) | Avg input (uncached) | Avg total (input + cached) | Score (mean ± std) | Hallucination rate (mean ± std) | Avg mentions |\n|---|---|---|---|---|---|---|---|\n")
+	sb.WriteString("## Summary\n\n")
+	sb.WriteString("| Baseline | N | Prompt bytes | Score | Halu rate | Cite precision | Latency (ms) | Tool calls |\n|---|---|---|---|---|---|---|---|\n")
 	for _, r := range rows {
-		fmt.Fprintf(&sb, "| %s | %d | %.0f ± %.0f | %.0f | %.0f ± %.0f | %.3f ± %.3f | %.3f ± %.3f | %.1f |\n",
-			r.B, r.Runs, r.MeanUserBytes, r.StdUserBytes,
-			r.MeanInput, r.MeanTotal, r.StdTotal,
+		fmt.Fprintf(&sb, "| %s | %d | %.0f ± %.0f | %.3f ± %.3f | %.3f ± %.3f | %.3f | %.0f | %.1f |\n",
+			r.B, r.Runs,
+			r.MeanUserBytes, r.StdUserBytes,
 			r.MeanScore, r.StdScore,
 			r.MeanHalluRate, r.StdHalluRate,
+			r.MeanCitePrecision,
+			r.MeanLatencyMS,
+			r.MeanToolCalls)
+	}
+	sb.WriteString("\n## Token detail\n\n")
+	sb.WriteString("| Baseline | N | User prompt bytes (mean ± std) | Avg input (uncached) | Avg total (input + cached) | Avg mentions |\n|---|---|---|---|---|---|\n")
+	for _, r := range rows {
+		fmt.Fprintf(&sb, "| %s | %d | %.0f ± %.0f | %.0f | %.0f ± %.0f | %.1f |\n",
+			r.B, r.Runs, r.MeanUserBytes, r.StdUserBytes,
+			r.MeanInput, r.MeanTotal, r.StdTotal,
 			r.MeanHalluTotal)
 	}
 

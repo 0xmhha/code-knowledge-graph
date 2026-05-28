@@ -165,11 +165,18 @@ func runOne(ctx context.Context, llm LLMClient, store pkgstore.Reader,
 			user += "\n\n--- get_context_for_task result ---\n" + ctxJSON
 		}
 	}
-	// γ is intentionally NOT pre-called — emulating the multi-turn cost,
-	// we let the LLM ask in plain text. (Real tool-loop emulation arrives V1+.)
-
 	userPromptBytes := len(user)
-	out, err := llm.Complete(ctx, system, user)
+	var out LLMResult
+	var err error
+	if b == BaselineGamma {
+		// γ V1 (2026-05-28): LLM runs a real multi-turn tool-use loop.
+		// The 5 retrieval tools dispatch in-process against `store`.
+		// Requires the API backend (Anthropic tool_use protocol);
+		// CLI backend returns ErrToolsUnsupported.
+		out, err = llm.CompleteWithTools(ctx, system, user, store)
+	} else {
+		out, err = llm.Complete(ctx, system, user)
+	}
 	if err != nil {
 		return Result{}, err
 	}
