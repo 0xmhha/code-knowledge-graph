@@ -70,3 +70,6 @@ eval/results/
 # tracked. Aggregate findings worth preserving go into eval-trajectory.md
 # or other curated docs.
 docs/STAGE-B-EVAL-RESULTS-*.md
+
+# Per-session code audit reports — one-shot snapshots, not specs.
+docs/CODE-AUDIT-*.md
