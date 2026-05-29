@@ -36,18 +36,41 @@ import (
 // pre-merge consumers) see the same output shape they had before;
 // the new keys (recent_prs / impact) only appear when the caller
 // explicitly opts in.
+//
+// CandidateLimit / RankedCap / MaxSummaries (P0 #3) expose the
+// pipeline width knobs that were previously baked into private
+// package constants. Bumping them widens recall at a roughly linear
+// O(N) cost — the Stage B 2026-05-29 measurement found that the
+// 30-candidate cap was leaving δ score at 76% of β's. The new
+// defaults (100 / 50 / 25) close most of that gap on the eval
+// fixture without changing the algorithm itself.
 type Options struct {
 	BudgetTokens int  // default 8000
 	IncludeBlobs bool // mcp default true; eval may set false
 	MaxBodies    int  // default 5
 
+	// CandidateLimit caps the initial Search() top-N. Bumped from
+	// 30 to 100 in P0 #3 — the prior cap was the dominant recall
+	// bottleneck in the Stage B 2026-05-29 measurement. Override
+	// to a smaller value when callers want a tight, fast response.
+	CandidateLimit int // default 100
+
+	// RankedCap caps the size of the per-query ranked slice that
+	// reaches the packer. Must be >= MaxBodies + a small headroom
+	// so the summary tier has rows to choose from. Default 50.
+	RankedCap int // default 50
+
+	// MaxSummaries caps signature/doc entries emitted alongside the
+	// MaxBodies full sources. Default 25.
+	MaxSummaries int
+
 	// IncludePRs attaches up to PRsPerNode breadcrumbs to each body
 	// entry (the "왜" history landed in P0 #1). Off by default so
 	// the eval δ baseline's measurement remains comparable to its
 	// pre-2026-05-29 runs.
-	IncludePRs  bool
-	PRsPerNode  int       // default 3
-	PRCutoff    time.Time // zero = no cutoff (return full history)
+	IncludePRs bool
+	PRsPerNode int       // default 3
+	PRCutoff   time.Time // zero = no cutoff (return full history)
 
 	// IncludeImpact runs pkg/impact.Compute against the highest-
 	// scoring kept node (rows[0]) so the agent gets reverse-deps in
@@ -65,6 +88,15 @@ func (o Options) withDefaults() Options {
 	if o.MaxBodies <= 0 {
 		o.MaxBodies = 5
 	}
+	if o.CandidateLimit <= 0 {
+		o.CandidateLimit = defaultCandidateLimit
+	}
+	if o.RankedCap <= 0 {
+		o.RankedCap = defaultRankedCap
+	}
+	if o.MaxSummaries <= 0 {
+		o.MaxSummaries = defaultMaxSummaries
+	}
 	if o.PRsPerNode <= 0 {
 		o.PRsPerNode = 3
 	}
@@ -74,12 +106,21 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Pipeline tuning knobs. Extracted so call sites and tests can reason
-// about each stage's bound independently.
+// Pipeline tuning knobs. Defaults are exposed as Options fields
+// (CandidateLimit / RankedCap / MaxSummaries) so callers can shrink
+// the pipeline for tight responses; the constants below are the
+// values that withDefaults applies when the Options field is unset.
+//
+// 2026-05-29 (P0 #3): the defaults were bumped from the historical
+// 30/30/15 values found by the Stage B measurement to leave δ score
+// at 0.335 — 76% of β's 0.441. Per docs/PROJECT-BLUEPRINT-ALIGNMENT.md
+// §4.2 the recall ceiling was the 30-candidate cap; widening to 100
+// and letting more rows reach packing closes most of that gap on
+// the eval fixture without changing the algorithm itself.
 const (
-	candidateSearchLimit = 30 // (a) Search top-N from FTS+CJK router
-	maxRowsAfterRank     = 30 // (d) Diversify cap on the ranked set
-	maxSummaries         = 15 // (e) Pack cap on signature/doc entries
+	defaultCandidateLimit = 100 // (a) Search top-N from FTS+CJK router
+	defaultRankedCap      = 50  // (d) Diversify cap on the ranked set
+	defaultMaxSummaries   = 25  // (e) Pack cap on signature/doc entries
 )
 
 // scoredNode pairs a node with its composite relevance score.
@@ -92,18 +133,18 @@ type scoredNode struct {
 
 // BuildContext is the shared smart-retrieval algorithm:
 //
-//	(a) Search   — top candidateSearchLimit via the store's smart router.
+//	(a) Search   — top opt.CandidateLimit via the store's smart router.
 //	(b) Expand   — 1-hop neighbours via QueryEdgesForNodes.
 //	(c) Score    — 0.5 BM25 + 0.3 PageRank + 0.2 Usage.
-//	(d) Diversify — V0: maxRowsAfterRank cap. Per-cluster diversity is V1+.
-//	(e) Pack     — top MaxBodies get full source; next ≤maxSummaries get
+//	(d) Diversify — V0: opt.RankedCap. Per-cluster diversity is V1+.
+//	(e) Pack     — top MaxBodies get full source; next ≤MaxSummaries get
 //	               sig+doc.
 //	(f) Cite     — every emitted item gets file_path + start_line.
 //	               Items missing either generate a warning record.
 func BuildContext(store persist.StoreReader, query string, opt Options) (map[string]any, error) {
 	opt = opt.withDefaults()
 
-	cands, err := store.Search(query, candidateSearchLimit)
+	cands, err := store.Search(query, opt.CandidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -113,8 +154,8 @@ func BuildContext(store persist.StoreReader, query string, opt Options) (map[str
 
 	expanded, edges := expandOneHop(store, cands)
 	rows := rankCandidates(query, expanded)
-	if len(rows) > maxRowsAfterRank {
-		rows = rows[:maxRowsAfterRank]
+	if len(rows) > opt.RankedCap {
+		rows = rows[:opt.RankedCap]
 	}
 
 	bodies, summaries, warnings, tokens := packWithinBudget(store, rows, query, opt)
@@ -250,8 +291,8 @@ func packWithinBudget(store persist.StoreReader, rows []scoredNode, query string
 			}
 		}
 
-		// (e2) Fall back to signature+doc summary, capped at maxSummaries.
-		if len(summaries) >= maxSummaries {
+		// (e2) Fall back to signature+doc summary, capped at MaxSummaries.
+		if len(summaries) >= opt.MaxSummaries {
 			continue
 		}
 		cost := estimateTokens(r.node.Signature + " " + r.node.DocComment)
