@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -527,9 +528,7 @@ func persistColdArtifacts(store persist.Store, srcRoot string,
 		return err
 	}
 	blobs := extractBlobs(srcRoot, g.Nodes)
-	for id, b := range hunkBlobs {
-		blobs[id] = b
-	}
+	maps.Copy(blobs, hunkBlobs)
 	if err := store.InsertBlobs(blobs); err != nil {
 		return err
 	}

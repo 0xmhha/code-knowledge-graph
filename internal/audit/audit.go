@@ -108,11 +108,8 @@ func (r Report) WriteText(w io.Writer) error {
 			continue
 		}
 		fmt.Fprintf(w, "\n%s (%d):\n", sec.head, len(sec.items))
-		n := len(sec.items)
-		if n > previewN {
-			n = previewN
-		}
-		for i := 0; i < n; i++ {
+		n := min(len(sec.items), previewN)
+		for i := range n {
 			fmt.Fprintf(w, "  %s\n", sec.items[i])
 		}
 		if len(sec.items) > previewN {

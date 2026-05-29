@@ -205,10 +205,7 @@ func advanceForArrayField(state slotState, totalBytes int) (int, slotState) {
 		state.used = 0
 	}
 	startSlot := state.slot
-	slotsNeeded := (totalBytes + 31) / 32
-	if slotsNeeded < 1 {
-		slotsNeeded = 1
-	}
+	slotsNeeded := max((totalBytes+31)/32, 1)
 	state.slot += slotsNeeded
 	state.used = 0
 	return startSlot, state

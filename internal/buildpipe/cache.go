@@ -84,7 +84,6 @@ import (
 // ones touched by dirty files. See internal/persist/node_attrs.go
 // for the JSON encoding.
 //
-//
 // Bumped from "1.13" to "1.14" by P1 #4 (policy metadata): introduces
 // NodePolicy + EdgeGovernedBy slots and the buildpipe Options.PolicyFile
 // path that loads them from a YAML and resolves governs[] qnames

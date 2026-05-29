@@ -27,6 +27,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -168,9 +169,7 @@ func emitUnreachableHunkGraph(g *graph.Graph, srcRel, repoRoot string,
 	}
 	commitNodes := make([]types.Node, 0, len(commits))
 	commitIDByteSHA := make(map[string]string, len(commits))
-	for k, v := range existingCommitIDs {
-		commitIDByteSHA[k] = v
-	}
+	maps.Copy(commitIDByteSHA, existingCommitIDs)
 	for _, ci := range commits {
 		if _, present := commitIDByteSHA[ci.SHA]; present {
 			continue

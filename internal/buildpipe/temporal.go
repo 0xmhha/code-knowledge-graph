@@ -18,6 +18,7 @@ package buildpipe
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -106,9 +107,7 @@ func emitTemporalEdges(g *graph.Graph, srcRoot string, log *slog.Logger, maxPerF
 	if err != nil {
 		return nil, fmt.Errorf("temporal unreachable hunk graph: %w", err)
 	}
-	for id, b := range unreachableBlobs {
-		hunkBlobs[id] = b
-	}
+	maps.Copy(hunkBlobs, unreachableBlobs)
 
 	// Hunk-graph H2: every Hunk gets `modifies` edges to whitelisted
 	// CodeNodes in the same file whose line range overlaps the hunk's.

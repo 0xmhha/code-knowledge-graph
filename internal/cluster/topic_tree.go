@@ -153,10 +153,7 @@ func BuildTopicTree(g *graph.Graph, gammas []float64, seed int64) *TopicTree {
 // invocation.
 func splitProblemCommunities(groups map[int][]int, edges [][2]int,
 	totalNodes int, gamma float64, seed int64) map[int][]int {
-	maxAllowedSize := int(float64(totalNodes) * oversizedFraction)
-	if maxAllowedSize < oversizedMinSize {
-		maxAllowedSize = oversizedMinSize
-	}
+	maxAllowedSize := max(int(float64(totalNodes)*oversizedFraction), oversizedMinSize)
 	nextID := maxCommunityID(groups) + 1
 
 	out := make(map[int][]int, len(groups))

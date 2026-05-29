@@ -2,6 +2,7 @@ package server
 
 import (
 	"log/slog"
+	"maps"
 	"sync"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
@@ -90,8 +91,6 @@ func (c *cachedManifestStore) EdgeCountsByType() (map[string]int, error) {
 // avoids.
 func cloneCountsMap(m map[string]int) map[string]int {
 	out := make(map[string]int, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }

@@ -1,6 +1,7 @@
 package solidity
 
 import (
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -285,9 +286,7 @@ func (p *Parser) Resolve(results []*parse.ParseResult) (*parse.ResolvedGraph, er
 	// applies first.
 	p.structMu.Lock()
 	globalStructSizes := make(map[string]int, len(p.structSizes))
-	for k, v := range p.structSizes {
-		globalStructSizes[k] = v
-	}
+	maps.Copy(globalStructSizes, p.structSizes)
 	p.structMu.Unlock()
 	applyCrossFileStructSizes(out.Nodes, globalStructSizes)
 

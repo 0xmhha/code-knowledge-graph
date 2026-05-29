@@ -15,6 +15,7 @@ package buildpipe
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -456,9 +457,7 @@ func persistIncrementalArtifacts(store persist.Store, srcRoot string,
 		return err
 	}
 	blobs := extractBlobsForFiles(srcRoot, g.Nodes, dirtyPaths)
-	for id, b := range hunkBlobs {
-		blobs[id] = b
-	}
+	maps.Copy(blobs, hunkBlobs)
 	if err := store.InsertBlobs(blobs); err != nil {
 		return err
 	}

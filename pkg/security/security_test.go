@@ -145,8 +145,8 @@ func TestResolve_MatchAndWarn(t *testing.T) {
 			ID: "reentrancy.eg", Name: "Reentrancy example",
 			Category: "reentrancy", Severity: SeverityHigh,
 			Matches: []string{
-				"Vault.withdraw",         // matches
-				"not.a.real.symbol",      // warning
+				"Vault.withdraw",    // matches
+				"not.a.real.symbol", // warning
 			},
 		},
 	}}

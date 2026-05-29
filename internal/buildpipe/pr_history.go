@@ -243,7 +243,7 @@ func bodyExcerpt(body string) string {
 		return ""
 	}
 	keep := make([]string, 0, 16)
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		trimmed := strings.TrimRight(line, " \t\r")
 		if isTrailerLine(trimmed) {
 			continue
@@ -289,10 +289,7 @@ func isTrailerLine(line string) bool {
 		strings.HasPrefix(line, "Cc:"):
 		return true
 	}
-	if strings.HasPrefix(line, "Generated with ") {
-		return true
-	}
-	return false
+	return strings.HasPrefix(line, "Generated with ")
 }
 
 // hunkRange is one [Start, End] new-file line range from a unified
@@ -318,7 +315,7 @@ func patchLineRanges(srcRoot, sha string) (map[string][]hunkRange, error) {
 		return nil, fmt.Errorf("git show %s: %w", sha, err)
 	}
 	var currentFile string
-	for _, line := range strings.Split(string(stdout), "\n") {
+	for line := range strings.SplitSeq(string(stdout), "\n") {
 		switch {
 		case strings.HasPrefix(line, "+++ b/"):
 			currentFile = strings.TrimPrefix(line, "+++ b/")
@@ -366,8 +363,7 @@ func scanGitRemoteRepo(srcRoot string) string {
 	}
 	url := strings.TrimSpace(string(stdout))
 	url = strings.TrimSuffix(url, ".git")
-	if i := strings.Index(url, "github.com"); i >= 0 {
-		tail := url[i+len("github.com"):]
+	if _, tail, ok := strings.Cut(url, "github.com"); ok {
 		tail = strings.TrimPrefix(tail, "/")
 		tail = strings.TrimPrefix(tail, ":")
 		return tail

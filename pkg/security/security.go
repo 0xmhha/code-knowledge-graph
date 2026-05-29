@@ -42,6 +42,7 @@ package security
 import (
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -69,12 +70,7 @@ var validSeverities = []string{
 }
 
 func isValidSeverity(s string) bool {
-	for _, v := range validSeverities {
-		if s == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(validSeverities, s)
 }
 
 // Entry is one security pattern row from the YAML file.
@@ -154,9 +150,9 @@ type ResolveWarning struct {
 // Resolve builds NodeSecurityPattern nodes + EdgeHasSecurityPattern
 // edges to fold into the main graph.
 //
-//   - One NodeSecurityPattern per entry. QualifiedName = ID,
-//     Name = Name, SubKind = Category, DocComment combines Description
-//     + Remediation (separated by a blank line when both are present).
+//   - One NodeSecurityPattern per entry. QualifiedName = ID, Name =
+//     Name, SubKind = Category. DocComment merges Description and
+//     Remediation (blank line between them when both are present).
 //   - One EdgeHasSecurityPattern per (matched qname, pattern) pair.
 //     Direction = at-risk code symbol → pattern node so the natural
 //     query "what risks does X exhibit?" is a single FK lookup.
