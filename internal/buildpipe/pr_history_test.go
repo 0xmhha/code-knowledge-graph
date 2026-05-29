@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,9 +141,13 @@ func TestScanPRHistory_BasicOverlap(t *testing.T) {
 	if got["n2"][0].Title != "Fix Foo edge case" {
 		t.Errorf("title strip: got %q, want \"Fix Foo edge case\"", got["n2"][0].Title)
 	}
-	// Body's first non-blank line surfaces as Summary.
-	if got["n2"][0].Summary != "This is the body summary line." {
-		t.Errorf("summary first-line: got %q", got["n2"][0].Summary)
+	// Body excerpt: P0 "왜" history captures the full cleaned body,
+	// not just the first line. The fixture body is two lines; both
+	// must survive trailer stripping.
+	wantSummary := "This is the body summary line.\nFurther detail."
+	if got["n2"][0].Summary != wantSummary {
+		t.Errorf("summary body excerpt:\n  got  %q\n  want %q",
+			got["n2"][0].Summary, wantSummary)
 	}
 	// Repo derivation from origin URL.
 	if got["n2"][0].Repo != "test-owner/test-repo" {
@@ -215,3 +220,100 @@ func TestRangesOverlap(t *testing.T) {
 // (#NNN) regex test below can lean on time.RFC3339 parsing without an
 // unused-import warning.
 var _ = time.RFC3339
+
+// TestBodyExcerpt locks down the P0 "왜" history transformation —
+// the cleaned body that drives CKV's semantic search. The function
+// must (a) keep the rationale prose intact, (b) drop the canonical
+// set of git trailers, (c) cap runaway bodies on a line boundary
+// with an ellipsis marker. See docs/PROJECT-BLUEPRINT-ALIGNMENT.md
+// §4.2 P0 #1.
+func TestBodyExcerpt(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "empty",
+			body: "",
+			want: "",
+		},
+		{
+			name: "single line",
+			body: "Just one explanation.",
+			want: "Just one explanation.",
+		},
+		{
+			name: "multi-paragraph body",
+			body: "First paragraph explains why.\n" +
+				"Continued reasoning.\n\n" +
+				"Second paragraph: trade-off considered.",
+			want: "First paragraph explains why.\n" +
+				"Continued reasoning.\n\n" +
+				"Second paragraph: trade-off considered.",
+		},
+		{
+			name: "trailers dropped",
+			body: "Fix race in commit pipeline.\n\n" +
+				"Signed-off-by: Alice <alice@example.com>\n" +
+				"Co-authored-by: Bob <bob@example.com>\n" +
+				"Reviewed-by: Carol <carol@example.com>",
+			want: "Fix race in commit pipeline.",
+		},
+		{
+			name: "Generated with attribution dropped",
+			body: "Real reason for the change.\n\n" +
+				"Generated with [Claude Code](https://example.com)",
+			want: "Real reason for the change.",
+		},
+		{
+			name: "body that is entirely trailers",
+			body: "Signed-off-by: Alice <alice@example.com>\n" +
+				"Co-authored-by: Bob <bob@example.com>",
+			want: "",
+		},
+		{
+			name: "prose 'Reviewed: foo' kept (not a canonical trailer)",
+			body: "Reviewed the failure modes and picked option B.",
+			want: "Reviewed the failure modes and picked option B.",
+		},
+		{
+			name: "trailing whitespace and CR stripped per-line",
+			body: "Line one.   \r\nLine two.\t\r\n",
+			want: "Line one.\nLine two.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := bodyExcerpt(tc.body); got != tc.want {
+				t.Errorf("bodyExcerpt mismatch:\n  got  %q\n  want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBodyExcerpt_LineBoundaryCap ensures a body that exceeds
+// bodyExcerptMaxBytes is truncated at the previous newline and gets
+// the "…" clipping marker so consumers know the excerpt is partial.
+func TestBodyExcerpt_LineBoundaryCap(t *testing.T) {
+	// Build a body well over the cap. Each line is ~80 bytes; 64 of
+	// them is ~5 KB, comfortably above the 2 KB cap.
+	const lineCount = 64
+	lines := make([]string, lineCount)
+	for i := range lines {
+		lines[i] = "Paragraph line that explains a specific aspect of the change."
+	}
+	body := strings.Join(lines, "\n")
+	got := bodyExcerpt(body)
+	if len(got) > bodyExcerptMaxBytes+8 {
+		t.Errorf("excerpt exceeded cap: len=%d (cap %d + ellipsis slack)", len(got), bodyExcerptMaxBytes)
+	}
+	if !strings.HasSuffix(got, "\n…") {
+		t.Errorf("excerpt missing trailing ellipsis marker; last 20 chars = %q",
+			got[max(0, len(got)-20):])
+	}
+	if strings.HasSuffix(strings.TrimSuffix(got, "\n…"), " ") {
+		t.Errorf("truncation didn't land on a line boundary; tail = %q",
+			got[max(0, len(got)-40):])
+	}
+}

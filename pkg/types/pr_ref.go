@@ -4,14 +4,15 @@ import "time"
 
 // PRRef is a build-time-derived reference from a graph node to a PR
 // whose merge commit touched lines overlapping that node's source
-// range. Surfaces "the recent changes around this symbol" without
-// dragging the agent through `git log` itself.
+// range. Surfaces "the recent changes around this symbol" — and,
+// crucially, the *reason* for those changes — without dragging the
+// agent through `git log` itself.
 //
 // Built by internal/buildpipe.ScanPRHistory from `git log --merges`
 // output: the merge commit's title is parsed for the canonical
 // (#NNN) suffix; merge-commit timestamp + parent SHAs supply the
-// remaining fields. PR title + the first line of the commit body
-// (Background-style summary) come from the commit message itself —
+// remaining fields. PR title + the cleaned commit body (description
+// with git trailers stripped) come from the commit message itself —
 // no gh API call is required for the 80% case (squash-merge
 // workflows). Future iterations may opt in to gh enrichment for
 // fuller summaries.
@@ -35,9 +36,13 @@ import "time"
 //     message after the conventional "Merge pull request #NNN
 //     from …" prefix is stripped, or the raw subject when the
 //     prefix isn't present.
-//   - Summary: optional short body excerpt. Empty when the merge
-//     commit has no body or the parser couldn't isolate a sensible
-//     first-line summary.
+//   - Summary: cleaned commit body — the "왜 이렇게 짰지?" history
+//     that CKV's semantic search ingests (docs/PROJECT-BLUEPRINT-
+//     ALIGNMENT.md §4.2 P0). Git trailers (Signed-off-by:,
+//     Co-authored-by:, Generated with…) are stripped; the result is
+//     capped at 2 KB on a line boundary so a runaway PR template
+//     can't bloat node_prs rows. Empty when the merge commit has no
+//     body or the body was entirely trailers.
 //   - BaseSHA / HeadSHA: parents of the merge commit (BaseSHA is
 //     the first parent — the branch being merged into; HeadSHA is
 //     the second parent — the feature branch's tip). Both empty

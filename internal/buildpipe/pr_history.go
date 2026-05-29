@@ -40,8 +40,11 @@ import (
 //     the matching key.
 //  5. Title comes from the subject after a heuristic strip of the
 //     "Merge pull request #NNN from …" or trailing "(#NNN)" patterns.
-//     Summary is the first non-empty body line (often the squash-
-//     merge PR description's first sentence). Both fall back to "".
+//     Summary is the cleaned commit body — trailers (Signed-off-by:,
+//     Co-authored-by:, Generated with…) are dropped and the result is
+//     capped at bodyExcerptMaxBytes on a line boundary. This carries
+//     the "왜" history that CKV's semantic search ingests; see
+//     docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2. Both fall back to "".
 //
 // Cost is dominated by step 4 — one `git show` per PR-tagged commit.
 // On ckg's own repo (4 PRs) this is millisecond-scale; on stable-net
@@ -184,7 +187,7 @@ func listPRCommits(srcRoot string) ([]prCommit, error) {
 			HeadSHA:  head,
 			Number:   num,
 			Title:    cleanPRTitle(subj),
-			Summary:  firstNonEmptyLine(fields[4]),
+			Summary:  bodyExcerpt(fields[4]),
 			MergedAt: ts.UTC(),
 		})
 	}
@@ -207,16 +210,89 @@ func cleanPRTitle(subj string) string {
 	return strings.TrimSpace(prNumberRE.ReplaceAllString(subj, ""))
 }
 
-// firstNonEmptyLine returns the first non-blank line of a multi-line
-// commit body. Empty string when the body is blank.
-func firstNonEmptyLine(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			return trimmed
-		}
+// bodyExcerptMaxBytes caps the persisted Summary so a runaway PR
+// template (CI logs pasted into the description, multi-MB changelogs)
+// can't bloat node_prs row size beyond what CKV's semantic search
+// usefully consumes. 2 KB comfortably holds the typical "왜 이 변경"
+// paragraph plus an acceptance-criteria list; beyond that the excerpt
+// is truncated at the nearest line boundary with an ellipsis marker.
+const bodyExcerptMaxBytes = 2048
+
+// bodyExcerpt returns the "why" portion of a commit body — the
+// multi-line description sandwiched between the subject (already
+// captured in Title) and any trailing git trailers (Signed-off-by:,
+// Co-authored-by:, etc.). This is the P0 enrichment from
+// docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2 — previously this field
+// captured only the first non-empty body line, which dropped the bulk
+// of the rationale that CKV's semantic search depends on.
+//
+// Transformations, in order:
+//  1. Right-trim trailing whitespace on every line.
+//  2. Drop lines matching the well-known git trailer set so attribution
+//     and review metadata don't leak into the "왜" text.
+//  3. Trim leading and trailing blank lines.
+//  4. Cap at bodyExcerptMaxBytes; truncation walks back to the
+//     previous newline so the excerpt always ends on a clean line
+//     and appends "…" as a clipping marker.
+//
+// Empty body → "". A body that is *entirely* trailers (no real
+// description — rare but possible on squash merges with no PR
+// description) also returns "" so consumers can fall back to Title.
+func bodyExcerpt(body string) string {
+	if body == "" {
+		return ""
 	}
-	return ""
+	keep := make([]string, 0, 16)
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimRight(line, " \t\r")
+		if isTrailerLine(trimmed) {
+			continue
+		}
+		keep = append(keep, trimmed)
+	}
+	for len(keep) > 0 && strings.TrimSpace(keep[0]) == "" {
+		keep = keep[1:]
+	}
+	for len(keep) > 0 && strings.TrimSpace(keep[len(keep)-1]) == "" {
+		keep = keep[:len(keep)-1]
+	}
+	if len(keep) == 0 {
+		return ""
+	}
+	out := strings.Join(keep, "\n")
+	if len(out) <= bodyExcerptMaxBytes {
+		return out
+	}
+	cut := strings.LastIndexByte(out[:bodyExcerptMaxBytes], '\n')
+	if cut <= 0 {
+		cut = bodyExcerptMaxBytes
+	}
+	return out[:cut] + "\n…"
+}
+
+// isTrailerLine reports whether line is a recognised git trailer that
+// should be excluded from the "왜" excerpt. The set is intentionally
+// conservative — only the exact, canonical prefixes from common
+// workflow tooling (git-interpret-trailers, GitHub web UI, common
+// Claude/Anthropic attribution lines) qualify. A prose line that
+// happens to contain "Reviewed: foo" without the canonical capitalised
+// form and trailing colon is kept.
+func isTrailerLine(line string) bool {
+	switch {
+	case strings.HasPrefix(line, "Signed-off-by:"),
+		strings.HasPrefix(line, "Co-authored-by:"),
+		strings.HasPrefix(line, "Acked-by:"),
+		strings.HasPrefix(line, "Reviewed-by:"),
+		strings.HasPrefix(line, "Tested-by:"),
+		strings.HasPrefix(line, "Reported-by:"),
+		strings.HasPrefix(line, "Suggested-by:"),
+		strings.HasPrefix(line, "Cc:"):
+		return true
+	}
+	if strings.HasPrefix(line, "Generated with ") {
+		return true
+	}
+	return false
 }
 
 // hunkRange is one [Start, End] new-file line range from a unified
