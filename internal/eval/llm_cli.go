@@ -54,8 +54,8 @@ var ErrClaudeNotFound = errors.New("claude CLI binary not found in PATH; provide
 // resolved. Set the CLIWRAP_AGENT environment variable or provide
 // CLIClientOptions.AgentPath. See https://github.com/0xmhha/cli-wrapper.
 var ErrCliwrapAgentNotFound = errors.New(
-	"cliwrap-agent path not provided; set CLIWRAP_AGENT env var or " +
-		"pass CLIClientOptions.AgentPath. See https://github.com/0xmhha/cli-wrapper for installation.",
+	"cliwrap-agent path not provided: set CLIWRAP_AGENT env var or " +
+		"pass CLIClientOptions.AgentPath (see https://github.com/0xmhha/cli-wrapper for installation)",
 )
 
 // NewCLIClient constructs a CLIClient. It resolves the claude binary path

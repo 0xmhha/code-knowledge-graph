@@ -196,10 +196,6 @@ func findNodeIDBySuffix(nodes []types.Node, suffix string) string {
 	return ""
 }
 
-func hasEdge(edges []types.Edge, src, dst string, t types.EdgeType) bool {
-	return findEdge(edges, src, dst, t) != nil
-}
-
 func findEdge(edges []types.Edge, src, dst string, t types.EdgeType) *types.Edge {
 	for i, e := range edges {
 		if e.Src == src && e.Dst == dst && e.Type == t {

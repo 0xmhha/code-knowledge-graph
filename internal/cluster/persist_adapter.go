@@ -14,7 +14,7 @@ type PersistClusterEdge struct {
 func (t *PkgTree) PersistEdges() []PersistClusterEdge {
 	out := make([]PersistClusterEdge, len(t.Edges))
 	for i, e := range t.Edges {
-		out[i] = PersistClusterEdge{ParentID: e.ParentID, ChildID: e.ChildID, Level: e.Level}
+		out[i] = PersistClusterEdge(e)
 	}
 	return out
 }

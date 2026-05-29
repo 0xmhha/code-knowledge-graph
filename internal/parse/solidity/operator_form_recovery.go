@@ -44,8 +44,6 @@ import (
 //
 // V2.7 / V2.14 IOp / V2.17 locks flip from 0 → 1 in the same V-cycle.
 
-const dispatchKindUsingForOperator = "using_for_operator"
-
 // matchOperatorFormStateVar inspects a state_variable_declaration
 // node for the operator-form misparse signature. Returns
 // (libName, boundType, true) when the shape matches; the bound type

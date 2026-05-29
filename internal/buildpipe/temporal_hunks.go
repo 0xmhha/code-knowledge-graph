@@ -56,13 +56,6 @@ var hunkLanguageWhitelist = map[string]string{
 	".sol": "sol",
 }
 
-// modifiesNodeWhitelist re-exports pkg/hunkmodifies.NodeWhitelist
-// so historical references inside buildpipe (test code, future
-// helpers) keep working without rewriting every site. The single
-// source of truth lives in pkg/hunkmodifies so external consumers
-// can compose the H2 join without crossing the internal boundary.
-var modifiesNodeWhitelist = hunkmodifies.NodeWhitelist
-
 // isMetaNodeType reports whether t is a "meta" node — one that lives
 // outside the file-level cache (Commit, Hunk). Meta nodes:
 //

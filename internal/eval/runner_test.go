@@ -224,7 +224,7 @@ func TestExtractSymbols(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := eval.ExtractSymbols(tc.in)
-			if len(got) == 0 && (tc.want == nil || len(tc.want) == 0) {
+			if len(got) == 0 && len(tc.want) == 0 {
 				return // both empty / nil — pass
 			}
 			if len(got) != len(tc.want) {

@@ -32,10 +32,6 @@ func TestContractCast_Dispatch(t *testing.T) {
 		byID[n.ID] = n
 	}
 
-	type call struct {
-		src, dst, kind string
-	}
-	var got []call
 	for _, e := range edges {
 		if e.Type != types.EdgeInvokes {
 			continue
@@ -43,11 +39,6 @@ func TestContractCast_Dispatch(t *testing.T) {
 		if e.DispatchKind != "contract_cast" {
 			continue
 		}
-		got = append(got, call{
-			src:  byID[e.Src].QualifiedName,
-			dst:  byID[e.Dst].QualifiedName + "." + "method",
-			kind: e.DispatchKind,
-		})
 		if e.Confidence != types.ConfAmbiguous {
 			t.Errorf("W8 expected ConfAmbiguous, got %q for %s",
 				e.Confidence, byID[e.Src].QualifiedName)

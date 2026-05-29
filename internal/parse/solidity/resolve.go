@@ -1606,19 +1606,6 @@ func resolveUsingForCallRef(
 // DispatchKind preserved on the emitted edge so downstream consumers
 // (viewer, llmSafeStoreReader filter) can distinguish low-level calls
 // from regular interface dispatch.
-func resolveLowLevelCallRef(
-	pr parse.PendingRef,
-	byName map[types.NodeType]map[string][]string,
-	stateVarTypes stateVarTypeMap,
-	paramTypes paramTypeMap,
-	localVarTypes localVarTypeMap,
-	containerIDByFuncID map[string]string,
-	nodeFile map[string]string,
-) (types.Edge, bool) {
-	edge, _, ok := resolveLowLevelCallRefExt(pr, byName, stateVarTypes, paramTypes, localVarTypes, containerIDByFuncID, nodeFile)
-	return edge, ok
-}
-
 // resolveLowLevelCallRefExt is the W-C W10 V4 (2026-05-19) extension
 // of resolveLowLevelCallRef that additionally reports whether the
 // receiver resolved to an address-typed Sol scope variable. The flag

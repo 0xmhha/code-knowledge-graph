@@ -394,39 +394,6 @@ func confidenceCounts(edges []types.Edge) map[types.Confidence]int {
 	return out
 }
 
-// suggestedQuestions emits heuristic-driven questions a reader can ask
-// the graph. Hand-picked templates that pull the top god node + top
-// hub file + dominant axis so the questions are concrete to this repo
-// rather than generic boilerplate.
-func suggestedQuestions(gods []types.Node, hubs []fileHub, axes map[string]int) []string {
-	var out []string
-	if len(gods) > 0 {
-		out = append(out, fmt.Sprintf("What calls `%s`? (the top god node — its callers define a refactoring blast radius)",
-			gods[0].QualifiedName))
-	}
-	if len(gods) >= 3 {
-		out = append(out, fmt.Sprintf("How are `%s`, `%s`, and `%s` connected? (the three biggest hubs — paths between them are the load-bearing call chains)",
-			gods[0].Name, gods[1].Name, gods[2].Name))
-	}
-	if len(hubs) > 0 {
-		out = append(out, fmt.Sprintf("What lives in `%s` and what depends on it? (the file with the most concentrated PageRank)",
-			hubs[0].path))
-	}
-	if axes["G4"] > 0 {
-		out = append(out, "Which symbols are accessed under a lock without holding it? (run audit on `accessed_under_lock` edges)")
-	}
-	if axes["G5"] > 0 {
-		out = append(out, "Which HTTP/RPC handlers exist and what message types do they dispatch on?")
-	}
-	if axes["G6"] > 0 {
-		out = append(out, "Which files churn the most and what do they share? (high `changed_in` / `blame` density)")
-	}
-	if len(out) == 0 {
-		out = append(out, "(No suggestions — graph appears to be empty or PageRank wasn't computed.)")
-	}
-	return out
-}
-
 // godNodeFilter reports whether a node should be EXCLUDED from the
 // "god nodes" ranking and the topPageRank-derived suggested questions.
 // Filters two tiers:

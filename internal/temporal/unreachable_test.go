@@ -1,9 +1,7 @@
 package temporal
 
 import (
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -140,28 +138,4 @@ func headSHA(t *testing.T, repo string) string {
 		t.Fatalf("rev-parse HEAD: %v", err)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// commitFile is package-local (unexported) — duplicated from hunks_test
-// rather than shared because the test packages are siblings and Go's
-// internal-test sharing rules would require an extra test-helper file.
-// Identical body modulo signature.
-func commitFile_unreach(t *testing.T, repo, rel, content, msg string) {
-	t.Helper()
-	full := filepath.Join(repo, rel)
-	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	for _, args := range [][]string{
-		{"add", "--", rel},
-		{"commit", "-q", "-m", msg},
-	} {
-		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
 }
