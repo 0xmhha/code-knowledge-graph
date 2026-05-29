@@ -18,19 +18,44 @@ package smartctx
 
 import (
 	"sort"
+	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/internal/persist"
 	"github.com/0xmhha/code-knowledge-graph/pkg/bm25"
+	"github.com/0xmhha/code-knowledge-graph/pkg/impact"
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
 // Options bundles the tunable knobs of BuildContext. Zero values are
 // resolved to documented defaults inside BuildContext so callers can
 // pass an empty struct for the typical case.
+//
+// The IncludePRs / IncludeImpact flags drive P0 #2 — the 1-shot
+// retrieval surface from docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2.
+// Both default to false so existing callers (eval δ baseline, MCP
+// pre-merge consumers) see the same output shape they had before;
+// the new keys (recent_prs / impact) only appear when the caller
+// explicitly opts in.
 type Options struct {
 	BudgetTokens int  // default 8000
 	IncludeBlobs bool // mcp default true; eval may set false
 	MaxBodies    int  // default 5
+
+	// IncludePRs attaches up to PRsPerNode breadcrumbs to each body
+	// entry (the "왜" history landed in P0 #1). Off by default so
+	// the eval δ baseline's measurement remains comparable to its
+	// pre-2026-05-29 runs.
+	IncludePRs  bool
+	PRsPerNode  int       // default 3
+	PRCutoff    time.Time // zero = no cutoff (return full history)
+
+	// IncludeImpact runs pkg/impact.Compute against the highest-
+	// scoring kept node (rows[0]) so the agent gets reverse-deps in
+	// the same response. Off by default — adds an O(impact.groups
+	// × depth) traversal that's only worth paying for when the
+	// caller actually wants impact info.
+	IncludeImpact bool
+	ImpactDepth   int // default 1; clamped by pkg/impact internally
 }
 
 func (o Options) withDefaults() Options {
@@ -39,6 +64,12 @@ func (o Options) withDefaults() Options {
 	}
 	if o.MaxBodies <= 0 {
 		o.MaxBodies = 5
+	}
+	if o.PRsPerNode <= 0 {
+		o.PRsPerNode = 3
+	}
+	if o.ImpactDepth <= 0 {
+		o.ImpactDepth = 1
 	}
 	return o
 }
@@ -89,7 +120,7 @@ func BuildContext(store persist.StoreReader, query string, opt Options) (map[str
 	bodies, summaries, warnings, tokens := packWithinBudget(store, rows, query, opt)
 	subgraph := buildSubgraphView(rows, edges)
 
-	return map[string]any{
+	out := map[string]any{
 		"task_description": query,
 		"subgraph":         subgraph,
 		"bodies":           bodies,
@@ -99,7 +130,15 @@ func BuildContext(store persist.StoreReader, query string, opt Options) (map[str
 		"metadata": map[string]any{
 			"warnings": warnings,
 		},
-	}, nil
+	}
+
+	if opt.IncludePRs {
+		out["recent_prs"] = attachRecentPRs(store, bodies, opt)
+	}
+	if opt.IncludeImpact && len(rows) > 0 {
+		out["impact"] = computeImpactForPrimary(store, rows[0].node, opt)
+	}
+	return out, nil
 }
 
 // emptyResult is the canonical "search returned no candidates" payload.
@@ -254,6 +293,70 @@ func summaryEntry(n types.Node, cite string, hasCite bool) map[string]any {
 		summary["start_line"] = n.StartLine
 	}
 	return summary
+}
+
+// attachRecentPRs is the P0 #2 "왜" history side-channel: for each
+// packed body entry, fetch up to opt.PRsPerNode PR breadcrumbs and
+// return them keyed by node id. Results are intentionally NOT counted
+// against opt.BudgetTokens — the PR summary text is capped at 2 KB
+// per row (see internal/buildpipe.bodyExcerptMaxBytes) and the per-
+// node cap of PRsPerNode bounds the worst case at 3 × 2 KB = 6 KB
+// per body, well under the practical request size.
+//
+// Why bodies only (no summaries): summaries are the fallback when the
+// budget can't afford a full source body — attaching PR breadcrumbs
+// to them would inflate the lower-tier rows past their original cost.
+// The most valuable "왜" signal is paired with the source the LLM is
+// reading anyway.
+//
+// On store errors (transient SQLite, missing node_prs table on pre-
+// 1.12 DBs) we skip the offending row silently — PR breadcrumbs are
+// strictly additive metadata; an outage here must not break the main
+// retrieval response.
+func attachRecentPRs(store persist.StoreReader, bodies []map[string]any, opt Options) map[string][]types.PRRef {
+	out := map[string][]types.PRRef{}
+	for _, b := range bodies {
+		id, _ := b["id"].(string)
+		if id == "" {
+			continue
+		}
+		refs, err := store.GetNodePRs(id, opt.PRCutoff)
+		if err != nil || len(refs) == 0 {
+			continue
+		}
+		if len(refs) > opt.PRsPerNode {
+			refs = refs[:opt.PRsPerNode]
+		}
+		out[id] = refs
+	}
+	return out
+}
+
+// computeImpactForPrimary runs the impact algorithm against the
+// top-ranked node — the closest match to the user's query and the
+// most actionable seed for "what does changing this break?" without
+// the agent having to make a second tool call. Depth defaults to 1
+// (shallower than the standalone impact_of_change tool's depth-2
+// default) because the 1-shot envelope already includes the local
+// subgraph + source bodies; the impact field exists to surface the
+// next ring out, not to repeat what the caller can already see.
+//
+// Returns the raw impact.Compute output map so callers get the full
+// shape (by_group counts, edge triples, totals, metadata). On error
+// we return a placeholder map with an error key — same fail-soft
+// stance as attachRecentPRs.
+func computeImpactForPrimary(store persist.StoreReader, primary types.Node, opt Options) map[string]any {
+	if primary.QualifiedName == "" {
+		return map[string]any{"skipped": "primary node has no qualified_name"}
+	}
+	res, err := impact.Compute(store, primary.QualifiedName, "", impact.Options{
+		Depth:        opt.ImpactDepth,
+		IncludeBlobs: false,
+	})
+	if err != nil {
+		return map[string]any{"error": err.Error(), "seed_qname": primary.QualifiedName}
+	}
+	return res
 }
 
 // buildSubgraphView assembles the JSON subgraph (nodes + edges) for the
