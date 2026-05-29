@@ -26,7 +26,14 @@ type LLMResult struct {
 	CacheReadTokens   int
 	CacheCreateTokens int
 	NumToolCalls      int
-	UserPromptBytes   int
+	// NumCachedCalls is populated only by γ (runGammaPromptLoop): it
+	// counts (name, args) tuples the LLM re-issued that were served
+	// from the in-loop cache instead of re-traversing the store. The
+	// sum NumToolCalls + NumCachedCalls reports the total fan-out the
+	// model attempted; NumToolCalls alone reports the work the store
+	// actually did. Other baselines leave this zero. P2 #6.
+	NumCachedCalls  int
+	UserPromptBytes int
 }
 
 // LLMClient is the abstraction the eval runner uses for completions. The

@@ -143,10 +143,80 @@ func TestGammaPromptLoop_MaxTurnsHit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.NumToolCalls != gammaMaxTurns {
-		t.Errorf("expected %d tool calls, got %d", gammaMaxTurns, res.NumToolCalls)
+	// P2 #6: every turn re-issues the same (search_text, "Greet")
+	// call, so the in-loop cache serves all but the first. Total
+	// fan-out is still gammaMaxTurns; the store does one round.
+	if res.NumToolCalls != 1 {
+		t.Errorf("expected 1 executed tool call (rest cached), got %d", res.NumToolCalls)
+	}
+	if res.NumCachedCalls != gammaMaxTurns-1 {
+		t.Errorf("expected %d cached tool calls, got %d", gammaMaxTurns-1, res.NumCachedCalls)
 	}
 	if !strings.Contains(res.OutputText, "max turns") {
 		t.Errorf("expected max-turns marker in output")
+	}
+}
+
+// TestGammaPromptLoop_CacheHitsAcrossTurns documents the P2 #6
+// contract: the SAME (name, args) tool call from a later turn is
+// served from the in-loop cache. Distinct args ARE re-executed so
+// the LLM's exploration stays unblocked when it's actually trying a
+// different angle.
+func TestGammaPromptLoop_CacheHitsAcrossTurns(t *testing.T) {
+	store, _ := newEvalFixtureStore(t)
+	llm := &mockLLM{responses: []string{
+		`<tool_call name="find_symbol">
+{"name": "Greet"}
+</tool_call>`,
+		`<tool_call name="find_symbol">
+{"name": "Greet"}
+</tool_call>
+<tool_call name="find_symbol">
+{"name": "Other"}
+</tool_call>`,
+		`Done.`,
+	}}
+
+	res, err := llm.CompleteWithTools(context.Background(), "system", "find Greet", store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Distinct (name, args) pairs: {Greet} executed turn 1, {Other}
+	// executed turn 2 → NumToolCalls=2. The duplicate {Greet} in
+	// turn 2 must be a cache hit → NumCachedCalls=1.
+	if res.NumToolCalls != 2 {
+		t.Errorf("expected 2 executed tool calls, got %d", res.NumToolCalls)
+	}
+	if res.NumCachedCalls != 1 {
+		t.Errorf("expected 1 cached tool call, got %d", res.NumCachedCalls)
+	}
+}
+
+// TestCanonicalCallArgs locks the cache-key normalisation: whitespace
+// and key-order differences in the args JSON must NOT defeat the
+// cache, otherwise the LLM's habit of cosmetically reformatting JSON
+// would silently miss every repeat.
+func TestCanonicalCallArgs(t *testing.T) {
+	cases := []struct {
+		name     string
+		a, b     string
+		wantSame bool
+	}{
+		{"identical", `{"q":"x"}`, `{"q":"x"}`, true},
+		{"whitespace", `{"q":"x"}`, `{ "q": "x" }`, true},
+		{"key order", `{"a":1,"b":2}`, `{"b":2,"a":1}`, true},
+		{"different value", `{"q":"x"}`, `{"q":"y"}`, false},
+		{"malformed fallback", `{not json`, `{not json`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ca := canonicalCallArgs([]byte(tc.a))
+			cb := canonicalCallArgs([]byte(tc.b))
+			same := ca == cb
+			if same != tc.wantSame {
+				t.Errorf("canonical(%q)=%q vs canonical(%q)=%q: same=%v want %v",
+					tc.a, ca, tc.b, cb, same, tc.wantSame)
+			}
+		})
 	}
 }

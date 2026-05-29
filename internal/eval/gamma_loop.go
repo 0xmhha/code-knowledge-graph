@@ -52,11 +52,20 @@ FINAL ANSWER PROTOCOL: When you have enough information, respond with your final
 
 Tips:
 - If a tool returns an empty result, try a different name (e.g. with or without the package prefix).
-- Be efficient — each tool call costs tokens and time. Plan your queries before calling.`
+- Be efficient — each tool call costs tokens and time. Plan your queries before calling.
+- Tool results with cached="true" mean you already called that tool with the same arguments in an earlier turn; do not repeat — re-read the prior result instead of re-calling.`
 
 // runGammaPromptLoop is the entry point γ uses for both LLM backends.
 // It piggybacks on llm.Complete (single-turn text completion) and
 // implements the multi-turn loop on top via prompt-based tool calls.
+//
+// P2 #6 (γ improvements): repeated (name, args) tool invocations are
+// served from an in-loop cache so the same query in turn 5 doesn't
+// re-traverse the graph it already touched in turn 2. Saves both
+// wall-clock time (no second SQLite round trip) and downstream tokens
+// (the cached marker tells the LLM not to repeat the call again).
+// NumToolCalls counts cache hits separately so eval reports show the
+// fan-out the LLM tried vs the work the store actually did.
 func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 	store pkgstore.Reader) (LLMResult, error) {
 
@@ -64,11 +73,17 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 	userMsg := user
 
 	var totalInput, totalOutput, totalCacheRead, totalCacheCreate int
-	var totalToolCalls int
+	var totalToolCalls, totalCachedCalls int
 	var maxUserBytes int // peak cumulative user-msg size across turns
 	var lastOutput string
 
-	for turn := 0; turn < gammaMaxTurns; turn++ {
+	// Tool result cache keyed by (name, canonical-args). Lives for the
+	// duration of a single task — across-task cache would risk stale
+	// reads if the store changes between calls.
+	type callKey struct{ name, args string }
+	toolCache := make(map[callKey]string)
+
+	for turn := range gammaMaxTurns {
 		if len(userMsg) > maxUserBytes {
 			maxUserBytes = len(userMsg)
 		}
@@ -93,6 +108,7 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 				CacheReadTokens:   totalCacheRead,
 				CacheCreateTokens: totalCacheCreate,
 				NumToolCalls:      totalToolCalls,
+				NumCachedCalls:    totalCachedCalls,
 				UserPromptBytes:   maxUserBytes,
 			}, nil
 		}
@@ -100,8 +116,16 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 		var results strings.Builder
 		results.WriteString("\n\n--- tool results ---\n")
 		for _, c := range calls {
+			key := callKey{name: c.Name, args: canonicalCallArgs(c.Args)}
+			if cached, hit := toolCache[key]; hit {
+				totalCachedCalls++
+				fmt.Fprintf(&results, "<tool_result name=%q cached=\"true\">\n%s\n</tool_result>\n",
+					c.Name, cached)
+				continue
+			}
 			totalToolCalls++
 			out := executeGammaTool(store, c.Name, c.Args)
+			toolCache[key] = out
 			fmt.Fprintf(&results, "<tool_result name=%q>\n%s\n</tool_result>\n", c.Name, out)
 		}
 		userMsg = userMsg + "\n\n--- assistant ---\n" + res.OutputText + results.String()
@@ -117,8 +141,28 @@ func runGammaPromptLoop(ctx context.Context, llm LLMClient, system, user string,
 		CacheReadTokens:   totalCacheRead,
 		CacheCreateTokens: totalCacheCreate,
 		NumToolCalls:      totalToolCalls,
+		NumCachedCalls:    totalCachedCalls,
 		UserPromptBytes:   maxUserBytes,
 	}, nil
+}
+
+// canonicalCallArgs normalises the args JSON so equivalent argument
+// objects share a cache key. Whitespace differences and key ordering
+// would otherwise miss the cache — the LLM frequently regenerates the
+// same call with cosmetic JSON differences. A best-effort
+// json.Unmarshal+Marshal round-trip handles both; on parse failure we
+// fall back to the raw bytes so well-formed-but-unusual JSON still
+// keys correctly.
+func canonicalCallArgs(args json.RawMessage) string {
+	var v any
+	if err := json.Unmarshal(args, &v); err != nil {
+		return string(args)
+	}
+	out, err := json.Marshal(v)
+	if err != nil {
+		return string(args)
+	}
+	return string(out)
 }
 
 // gammaCall is one parsed tool invocation from the LLM's response.
