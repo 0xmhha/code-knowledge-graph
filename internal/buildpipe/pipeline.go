@@ -145,6 +145,19 @@ type Options struct {
 	// run with --no-cache when the flag is on to measure full effect.
 	// Spec: docs/design/go-cross-function-lock-propagation.md.
 	LockPropagation bool
+
+	// PolicyFile is the optional path to a governance/protocol policy
+	// YAML (pkg/policy). When set, the cold build loads + resolves the
+	// policy entries against the parsed graph and emits NodePolicy +
+	// EdgeGovernedBy rows so an LLM can answer "what policy governs
+	// this code?" without leaving the graph. Empty means "no policy
+	// enrichment" — existing builds stay byte-identical. P1 #4 (see
+	// docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2). Incremental cache
+	// path skips policy resolution for the same reason it skips lock
+	// propagation — the policy file's content is decoupled from the
+	// per-file parse output, so re-resolving is a cold-only step
+	// today; run with --no-cache when the policy file changes.
+	PolicyFile string
 }
 
 // validateAndSanitize runs the lenient/strict validation gate against g and
@@ -386,6 +399,28 @@ func runCold(opt Options, log *slog.Logger,
 			return persist.Manifest{}, fmt.Errorf("persist node_prs: %w", err)
 		}
 		log.Info("pr_history emitted", "nodes_with_prs", len(prByNode))
+	}
+	// P1 #4 policy metadata (schema 1.14): load the operator-supplied
+	// YAML, resolve governs[] qnames against the parsed graph, persist
+	// NodePolicy rows + EdgeGovernedBy edges. Runs after the main node
+	// insert so the FK on EdgeGovernedBy.src targets resolved code IDs.
+	// Failure here is logged but non-fatal — policy enrichment is
+	// strictly additive; a malformed YAML must not break the cold
+	// build. Empty PolicyFile → skipped silently.
+	if policyNodes, policyEdges, perr := loadPolicy(opt.PolicyFile, g.Nodes, log); perr != nil {
+		log.Warn("policy enrichment failed; policy nodes/edges left empty",
+			"file", opt.PolicyFile, "err", perr)
+	} else if len(policyNodes) > 0 {
+		if err := store.InsertNodes(policyNodes); err != nil {
+			return persist.Manifest{}, fmt.Errorf("persist policy nodes: %w", err)
+		}
+		if len(policyEdges) > 0 {
+			if err := store.InsertEdges(policyEdges); err != nil {
+				return persist.Manifest{}, fmt.Errorf("persist policy edges: %w", err)
+			}
+		}
+		log.Info("policy enrichment emitted",
+			"policy_nodes", len(policyNodes), "governed_by_edges", len(policyEdges))
 	}
 	log.Debug("persist.end")
 

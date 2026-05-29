@@ -13,7 +13,7 @@ import (
 )
 
 func newBuildCmd() *cobra.Command {
-	var src, out, outTag, atCommit, dbDsn, filesFrom string
+	var src, out, outTag, atCommit, dbDsn, filesFrom, policyFile string
 	var langs []string
 	var noCache, force, rebuildMetrics, strictValidate, lockPropagation bool
 	cmd := &cobra.Command{
@@ -60,6 +60,7 @@ func newBuildCmd() *cobra.Command {
 				StrictValidate:  strictValidate,
 				FilesFromPath:   filesFrom,
 				LockPropagation: lockPropagation,
+				PolicyFile:      policyFile,
 			})
 			if err != nil {
 				return err
@@ -90,6 +91,8 @@ func newBuildCmd() *cobra.Command {
 		"path to JSON file with {include, exclude} glob patterns; restricts which files reach the parsers")
 	cmd.Flags().BoolVar(&lockPropagation, "lock-propagation", false,
 		"enable Go cross-function lock propagation (W-A, D1 Stage B DFS depth=5); requires --no-cache to take full effect")
+	cmd.Flags().StringVar(&policyFile, "policy-file", "",
+		"path to governance/protocol policy YAML (pkg/policy); enriches the graph with NodePolicy + EdgeGovernedBy rows")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

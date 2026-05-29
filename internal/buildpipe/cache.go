@@ -84,9 +84,21 @@ import (
 // ones touched by dirty files. See internal/persist/node_attrs.go
 // for the JSON encoding.
 //
+//
+// Bumped from "1.13" to "1.14" by P1 #4 (policy metadata): introduces
+// NodePolicy + EdgeGovernedBy slots and the buildpipe Options.PolicyFile
+// path that loads them from a YAML and resolves governs[] qnames
+// against the parsed graph. No DDL change — the new enum literals fit
+// the existing nodes.type / edges.type TEXT columns. The bump forces
+// a cold rebuild on first 1.14 run so existing DBs that pre-date the
+// PolicyFile flag don't carry forward a stale "no policy nodes" view
+// when the operator subsequently turns the flag on. Empty PolicyFile
+// is the no-op default; only operators who opt in see new rows. See
+// pkg/policy + docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2 P1 #4.
+//
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.13"
+const SchemaVersion = "1.14"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

@@ -8,13 +8,13 @@ import (
 )
 
 func TestAllNodeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllNodeTypes()), 35; got != want {
+	if got, want := len(types.AllNodeTypes()), 36; got != want {
 		t.Fatalf("AllNodeTypes count = %d, want %d", got, want)
 	}
 }
 
 func TestAllEdgeTypes_Count(t *testing.T) {
-	if got, want := len(types.AllEdgeTypes()), 41; got != want {
+	if got, want := len(types.AllEdgeTypes()), 42; got != want {
 		t.Fatalf("AllEdgeTypes count = %d, want %d", got, want)
 	}
 }
@@ -24,6 +24,7 @@ func TestAllNodeTypes_Contains(t *testing.T) {
 		types.NodeMutex, types.NodeEndpoint, types.NodeMessageType,
 		types.NodeCommit, types.NodeHunk,
 		types.NodeAwaitPoint,
+		types.NodePolicy,
 	}
 	have := make(map[types.NodeType]struct{}, len(types.AllNodeTypes()))
 	for _, n := range types.AllNodeTypes() {
@@ -47,6 +48,7 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 		types.EdgeAwaits, types.EdgeOverrides,
 		types.EdgeUsesFor,
+		types.EdgeGovernedBy,
 	}
 	have := make(map[types.EdgeType]struct{}, len(types.AllEdgeTypes()))
 	for _, e := range types.AllEdgeTypes() {
@@ -71,6 +73,8 @@ func TestAllEdgeTypes_Contains(t *testing.T) {
 // H1 appended NodeHunk at index 33 (CKS G6 Temporal extension — schema 1.8).
 // W-B appended NodeAwaitPoint at index 34 (within-language semantics
 // Phase 4 — schema 1.10 slot; detector lands in Phase 5).
+// P1 #4 appended NodePolicy at index 35 (schema 1.14 — external YAML
+// governance/protocol policy metadata).
 func TestAllNodeTypes_Stable(t *testing.T) {
 	want := []types.NodeType{
 		types.NodePackage, types.NodeFile, types.NodeStruct, types.NodeInterface, types.NodeClass,
@@ -84,6 +88,7 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 		types.NodeCommit,
 		types.NodeHunk,
 		types.NodeAwaitPoint,
+		types.NodePolicy,
 	}
 	if !reflect.DeepEqual(types.AllNodeTypes(), want) {
 		t.Fatalf("AllNodeTypes order changed:\n got=%v\nwant=%v", types.AllNodeTypes(), want)
@@ -94,8 +99,9 @@ func TestAllNodeTypes_Stable(t *testing.T) {
 // Lock edges, distributed edges, temporal edges, context-path edges,
 // hunk-graph edges, the W2 http_calls edge, the W3b grpc_listens_on /
 // grpc_calls edges, the schema 1.10 W-B `awaits` + W-C `overrides`
-// slots, and the schema 1.10 W-C W6 `using_for` slot are appended at the
-// end — never interleaved.
+// slots, the schema 1.10 W-C W6 `using_for` slot, and the schema
+// 1.14 P1 #4 `governed_by` slot are appended at the end —
+// never interleaved.
 func TestAllEdgeTypes_Stable(t *testing.T) {
 	want := []types.EdgeType{
 		types.EdgeContains, types.EdgeDefines, types.EdgeCalls, types.EdgeInvokes, types.EdgeUsesType,
@@ -112,6 +118,7 @@ func TestAllEdgeTypes_Stable(t *testing.T) {
 		types.EdgeGRPCListensOn, types.EdgeGRPCCalls,
 		types.EdgeAwaits, types.EdgeOverrides,
 		types.EdgeUsesFor,
+		types.EdgeGovernedBy,
 	}
 	if !reflect.DeepEqual(types.AllEdgeTypes(), want) {
 		t.Fatalf("AllEdgeTypes order changed:\n got=%v\nwant=%v", types.AllEdgeTypes(), want)

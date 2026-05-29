@@ -94,6 +94,18 @@ const (
 	// end so existing positional indices stay stable
 	// (TestAllNodeTypes_Stable).
 	NodeAwaitPoint NodeType = "AwaitPoint"
+
+	// NodePolicy (schema 1.14, P1 #4) — governance/protocol policy
+	// metadata loaded from an external YAML rather than the parsed
+	// source tree. Surfaces "why does this code exist?" — fork blocks,
+	// gas schedules, consensus parameters, security policies — so an
+	// LLM can answer policy-driven questions ("which fork activated
+	// this?", "what gas schedule governs this?") without first
+	// searching the code itself. See docs/PROJECT-BLUEPRINT-ALIGNMENT.md
+	// §4.2 P1 #4 and pkg/policy for the YAML loader. FilePath /
+	// StartLine cite the YAML entry's source location so citations
+	// stay grounded.
+	NodePolicy NodeType = "Policy"
 )
 
 // AllNodeTypes returns all 35 node types in a stable order.
@@ -113,6 +125,8 @@ const (
 // finer-grained (one block of changed lines, not a whole commit).
 // NodeAwaitPoint (schema 1.10, W-B) is appended at index 34 — TS async
 // suspension family, slot reserved before the Phase 5 detector lands.
+// NodePolicy (schema 1.14, P1 #4) is appended at index 35 — domain
+// governance/protocol policy metadata loaded from an external YAML.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -126,6 +140,7 @@ func AllNodeTypes() []NodeType {
 		NodeCommit,
 		NodeHunk,
 		NodeAwaitPoint,
+		NodePolicy,
 	}
 }
 
@@ -387,14 +402,25 @@ const (
 	EdgeAwaits    EdgeType = "awaits"
 	EdgeOverrides EdgeType = "overrides"
 	EdgeUsesFor   EdgeType = "using_for"
+	// Schema 1.14 (P1 #4 — policy metadata): code symbol → Policy node.
+	// Emitted from pkg/policy.Resolve when a YAML policy entry's
+	// governs[].qname matches an existing Function/Method/Field/Struct/
+	// Constant/Variable in the parsed graph. Direction = governed node
+	// → policy that constrains it, matching the natural query "what
+	// rules apply to this symbol?". Multiple policies can govern the
+	// same symbol; the Policy node side fans in.
+	EdgeGovernedBy EdgeType = "governed_by"
 )
 
-// AllEdgeTypes returns all 41 edge types in stable order.
+// AllEdgeTypes returns all 42 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 // EdgeAwaits (W-B) + EdgeOverrides (W-C) are appended at indices 38-39
 // for schema 1.10 (slot-only; detectors land in Phase 5).
 // EdgeUsesFor (W-C W6) is appended at index 40 (schema 1.10 W6 — using
 // For library extension; first-class binding edge per Q9-1 (b) 2026-05-12).
+// EdgeGovernedBy (P1 #4) is appended at index 41 (schema 1.14 — code
+// symbol → external Policy node loaded from YAML; first-class so
+// policy queries can run as a single edge-type filter).
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
 		EdgeContains, EdgeDefines, EdgeCalls, EdgeInvokes, EdgeUsesType,
@@ -411,6 +437,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeGRPCListensOn, EdgeGRPCCalls,
 		EdgeAwaits, EdgeOverrides,
 		EdgeUsesFor,
+		EdgeGovernedBy,
 	}
 }
 
