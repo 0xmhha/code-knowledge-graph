@@ -158,6 +158,14 @@ type Options struct {
 	// per-file parse output, so re-resolving is a cold-only step
 	// today; run with --no-cache when the policy file changes.
 	PolicyFile string
+
+	// SecurityPatternFile is the optional path to a security risk
+	// pattern YAML (pkg/security). Sibling to PolicyFile but for the
+	// P1 #5 risk-surface axis: reentrancy, access-control, Byzantine,
+	// overflow patterns flagged against specific code symbols. Empty
+	// means "no security enrichment". Same cold-only constraint as
+	// PolicyFile — re-run with --no-cache when the YAML changes.
+	SecurityPatternFile string
 }
 
 // validateAndSanitize runs the lenient/strict validation gate against g and
@@ -421,6 +429,28 @@ func runCold(opt Options, log *slog.Logger,
 		}
 		log.Info("policy enrichment emitted",
 			"policy_nodes", len(policyNodes), "governed_by_edges", len(policyEdges))
+	}
+	// P1 #5 security pattern annotations (schema 1.15): same load-
+	// resolve-persist shape as policy enrichment above. Runs after
+	// policy so its own matches[] index reuses the (now larger)
+	// g.Nodes set if a future YAML wanted to label a Policy node
+	// itself as a security-sensitive area — overlap is permitted but
+	// not relied on. Failure is logged-only for the same additive-
+	// metadata reason.
+	if secNodes, secEdges, serr := loadSecurityPatterns(opt.SecurityPatternFile, g.Nodes, log); serr != nil {
+		log.Warn("security enrichment failed; security nodes/edges left empty",
+			"file", opt.SecurityPatternFile, "err", serr)
+	} else if len(secNodes) > 0 {
+		if err := store.InsertNodes(secNodes); err != nil {
+			return persist.Manifest{}, fmt.Errorf("persist security nodes: %w", err)
+		}
+		if len(secEdges) > 0 {
+			if err := store.InsertEdges(secEdges); err != nil {
+				return persist.Manifest{}, fmt.Errorf("persist security edges: %w", err)
+			}
+		}
+		log.Info("security enrichment emitted",
+			"security_nodes", len(secNodes), "has_security_pattern_edges", len(secEdges))
 	}
 	log.Debug("persist.end")
 

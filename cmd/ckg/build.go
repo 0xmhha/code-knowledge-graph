@@ -13,7 +13,7 @@ import (
 )
 
 func newBuildCmd() *cobra.Command {
-	var src, out, outTag, atCommit, dbDsn, filesFrom, policyFile string
+	var src, out, outTag, atCommit, dbDsn, filesFrom, policyFile, securityPatternFile string
 	var langs []string
 	var noCache, force, rebuildMetrics, strictValidate, lockPropagation bool
 	cmd := &cobra.Command{
@@ -58,9 +58,10 @@ func newBuildCmd() *cobra.Command {
 				RebuildMetrics:  rebuildMetrics,
 				DBDSN:           dbDsn,
 				StrictValidate:  strictValidate,
-				FilesFromPath:   filesFrom,
-				LockPropagation: lockPropagation,
-				PolicyFile:      policyFile,
+				FilesFromPath:       filesFrom,
+				LockPropagation:     lockPropagation,
+				PolicyFile:          policyFile,
+				SecurityPatternFile: securityPatternFile,
 			})
 			if err != nil {
 				return err
@@ -93,6 +94,8 @@ func newBuildCmd() *cobra.Command {
 		"enable Go cross-function lock propagation (W-A, D1 Stage B DFS depth=5); requires --no-cache to take full effect")
 	cmd.Flags().StringVar(&policyFile, "policy-file", "",
 		"path to governance/protocol policy YAML (pkg/policy); enriches the graph with NodePolicy + EdgeGovernedBy rows")
+	cmd.Flags().StringVar(&securityPatternFile, "security-pattern-file", "",
+		"path to security risk pattern YAML (pkg/security); enriches the graph with NodeSecurityPattern + EdgeHasSecurityPattern rows")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

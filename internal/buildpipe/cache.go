@@ -96,9 +96,17 @@ import (
 // is the no-op default; only operators who opt in see new rows. See
 // pkg/policy + docs/PROJECT-BLUEPRINT-ALIGNMENT.md §4.2 P1 #4.
 //
+// Bumped from "1.14" to "1.15" by P1 #5 (security pattern metadata):
+// introduces NodeSecurityPattern + EdgeHasSecurityPattern slots and
+// the buildpipe Options.SecurityPatternFile path that loads them
+// from a YAML and resolves matches[] qnames against the parsed
+// graph. Same shape as P1 #4 — no DDL change, additive, cold-only
+// re-ingest. See pkg/security + docs/PROJECT-BLUEPRINT-ALIGNMENT.md
+// §4.2 P1 #5.
+//
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.14"
+const SchemaVersion = "1.15"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

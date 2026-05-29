@@ -106,6 +106,18 @@ const (
 	// StartLine cite the YAML entry's source location so citations
 	// stay grounded.
 	NodePolicy NodeType = "Policy"
+
+	// NodeSecurityPattern (schema 1.15, P1 #5) — security risk
+	// pattern annotations loaded from an external YAML. Captures
+	// "this symbol is reachable in a reentrancy / access-control /
+	// Byzantine / overflow scenario" so an LLM modifying the code
+	// can see the risk surface at retrieval time instead of having
+	// to run a separate static analyser. SubKind carries the
+	// category (reentrancy / access-control / …), the attrs JSON
+	// blob carries severity (info / low / medium / high / critical)
+	// and an optional remediation hint. See pkg/security for the
+	// YAML loader and PROJECT-BLUEPRINT-ALIGNMENT.md §4.2 P1 #5.
+	NodeSecurityPattern NodeType = "SecurityPattern"
 )
 
 // AllNodeTypes returns all 35 node types in a stable order.
@@ -127,6 +139,8 @@ const (
 // suspension family, slot reserved before the Phase 5 detector lands.
 // NodePolicy (schema 1.14, P1 #4) is appended at index 35 — domain
 // governance/protocol policy metadata loaded from an external YAML.
+// NodeSecurityPattern (schema 1.15, P1 #5) is appended at index 36 —
+// security risk pattern annotations loaded from an external YAML.
 func AllNodeTypes() []NodeType {
 	return []NodeType{
 		NodePackage, NodeFile, NodeStruct, NodeInterface, NodeClass,
@@ -141,6 +155,7 @@ func AllNodeTypes() []NodeType {
 		NodeHunk,
 		NodeAwaitPoint,
 		NodePolicy,
+		NodeSecurityPattern,
 	}
 }
 
@@ -410,9 +425,17 @@ const (
 	// rules apply to this symbol?". Multiple policies can govern the
 	// same symbol; the Policy node side fans in.
 	EdgeGovernedBy EdgeType = "governed_by"
+	// Schema 1.15 (P1 #5 — security pattern annotations): code symbol
+	// → SecurityPattern node. Emitted from pkg/security.Resolve when
+	// a YAML security pattern's matches[].qname hits an existing
+	// Function/Method/Field/Struct/Modifier in the parsed graph.
+	// Direction = at-risk code symbol → pattern label so an LLM
+	// modifying X can read "what security patterns does X exhibit?"
+	// as a single edge-type lookup on src.
+	EdgeHasSecurityPattern EdgeType = "has_security_pattern"
 )
 
-// AllEdgeTypes returns all 42 edge types in stable order.
+// AllEdgeTypes returns all 43 edge types in stable order.
 // Append-only: existing positions are load-bearing for hash-derived IDs.
 // EdgeAwaits (W-B) + EdgeOverrides (W-C) are appended at indices 38-39
 // for schema 1.10 (slot-only; detectors land in Phase 5).
@@ -421,6 +444,8 @@ const (
 // EdgeGovernedBy (P1 #4) is appended at index 41 (schema 1.14 — code
 // symbol → external Policy node loaded from YAML; first-class so
 // policy queries can run as a single edge-type filter).
+// EdgeHasSecurityPattern (P1 #5) is appended at index 42 (schema 1.15 —
+// code symbol → SecurityPattern node loaded from YAML).
 func AllEdgeTypes() []EdgeType {
 	return []EdgeType{
 		EdgeContains, EdgeDefines, EdgeCalls, EdgeInvokes, EdgeUsesType,
@@ -438,6 +463,7 @@ func AllEdgeTypes() []EdgeType {
 		EdgeAwaits, EdgeOverrides,
 		EdgeUsesFor,
 		EdgeGovernedBy,
+		EdgeHasSecurityPattern,
 	}
 }
 
