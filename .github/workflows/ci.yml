@@ -108,3 +108,26 @@ jobs:
           ./bin/ckg serve --graph=/tmp/ckg-smoke --port=8080 &
           sleep 3
           cd web/viewer-next && npx playwright test
+
+  eval:
+    # P3 #9 eval regression gate. Runs the LLM-free half of the eval
+    # surface — `make eval` produces retrieval / validate / benchmark
+    # / bench-mcp JSON under eval/results/latest/, then cmd/eval-gate
+    # compares against the committed snapshot in eval/baseline/.
+    # Aggregate recall/precision/f1 must stay within 0.02 of baseline;
+    # validate issue count must not increase.
+    #
+    # Why no LLM here: the Stage B eval (γ/δ multi-turn baselines)
+    # costs API quota and runs in minutes per task. That belongs in a
+    # nightly job or a manually-triggered workflow, not a PR gate. The
+    # offline retrieval / validate / benchmark / bench-mcp probes run
+    # end-to-end in ~2 minutes with no external dependencies and
+    # catch the regressions blueprint §4.2 P3 #9 actually cares about.
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.25' }
+      - run: make eval
+      - run: go run ./cmd/eval-gate
