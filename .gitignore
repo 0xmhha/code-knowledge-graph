@@ -63,3 +63,10 @@ __pycache__/
 eval/.ckg-data/
 eval/.synthetic-data/
 eval/results/
+
+# Per-session eval result reports. These are point-in-time measurements
+# tied to a specific machine + LLM backend + corpus snapshot, not source
+# code. They live in docs/ for convenient browsing but should not be
+# tracked. Aggregate findings worth preserving go into eval-trajectory.md
+# or other curated docs.
+docs/STAGE-B-EVAL-RESULTS-*.md
