@@ -232,157 +232,35 @@ func scoreTask(t Task, output string) (float64, int) {
 	return 0, 0
 }
 
-// extractSymbols pulls "pkg.Func" or backtick-quoted identifiers out of
-// free text. Crude but adequate for V0 symbol_set tasks.
+// extractSymbols pulls dotted identifier tokens (`pkg.Func`,
+// `Vault.deposit`, `eth.Ethereum.New`) out of free LLM response text.
+// The output feeds scoreTask (symbol_set scoring) and the hallucination
+// + citation validators.
 //
-// VERIFICATION_REPORT 2026-05-11 §5 L2: the previous Trim set kept
-// pointer-receiver sigils (`*`, `&`) attached, so LLM responses written
-// in idiomatic Go syntax (`*eth.Ethereum.New`) failed to match expected
-// values written in spec notation (`eth.Ethereum.New`). `*` and `&` are
-// added to the Trim set so receiver-prefixed identifiers normalise.
-// Trailing markdown punctuation (`,`, `;`, `)`, `]`) was already
-// covered; we also add `]` `[` for inline code spans like `[pkg.Func]`.
+// Pipeline (each step's history is in docs/eval-trajectory.md):
 //
-// VERIFICATION_REPORT 2026-05-11 §8.3 (L2-2-1): the simulated re-scoring
-// of T01 showed that LLMs writing verbose answers ("see core.NewBlockChain
-// in core/blockchain.go") dragged the file path into the dot-tokenised
-// symbol set, dropping precision below the 0.7 threshold even when the
-// real qualified-name answers were correct. We now drop two extra
-// classes of dot-bearing tokens after the Trim:
-//
-//   - path-like tokens (`pkg/foo.go`, `path/to/file.ts`) — anything with
-//     a `/` separator is treated as a file path rather than a symbol.
-//   - tokens whose trailing dot-segment matches a source file extension
-//     (`.go`, `.ts`, `.tsx`, `.js`, `.jsx`, `.sol`, `.proto`, `.py`,
-//     `.rs`, `.java`, `.md`, `.yaml`, `.yml`, `.toml`, `.json`). Covers
-//     file citations without a directory prefix (`blockchain.go`).
-//
-// The blacklist is conservative — it intentionally does not strip every
-// dotted token, only those that look like file paths or stand-alone file
-// names. Genuine `pkg.Func` identifiers stay in the output.
-//
-// 2026-05-21 (T-04 V1 first smoke-run, T-02 P0): the splitter previously
-// only treated parens as a *trim* set, which Trim() only applies to
-// prefix/suffix. A real LLM response of "Call h.vault.Deposit(req)
-// directly" produced the token `h.vault.Deposit(req` — paren *inside*
-// the token never split. extractSymbols then classified it as a
-// hallucination (no node named `Deposit(req`). Promoting `(` and `)`
-// to FieldsFunc separators splits the call site from the symbol so
-// "h.vault.Deposit" stays in the output cleanly and "(req" / "req"
-// gets discarded by the "must contain a dot" filter.
-//
-// Prose-abbreviation blacklist (e.g., i.e., et.al, ...) is applied
-// next. LLMs use these in explanatory text and they all match the
-// dot-bearing shape extractSymbols looks for. isProseAbbreviation
-// drops them by case-folded lookup.
+//  1. Split on separators (isSymbolSeparator) — whitespace, prose
+//     punctuation, brackets/braces, Hangul syllables, ckg node-ID
+//     sigils (# @), Unicode arrows
+//  2. Trim wrapping sigils — pointer (* &), brackets, dot/colon/semi
+//  3. Require an interior dot (`x.y`, never `.x` or `x.`)
+//  4. Drop file paths (any '/')
+//  5. Drop bare file names (`.go`, `.ts`, `.sol`, …)
+//  6. Drop file:line citations (`handler.go:23`)
+//  7. Drop prose abbreviations (`e.g`, `i.e`, …)
+//  8. Drop pure numeric literals (`0.7`, `1.0`)
 func extractSymbols(s string) []string {
-	out := []string{}
-	for _, tok := range strings.FieldsFunc(s, func(r rune) bool {
-		// 2026-05-21 (T-04 V1 third smoke run): braces added to the
-		// separator set. A real Claude response of
-		// `Vault{...} initialises the receiver` tokenised as
-		// `Vault{...}` because braces were nowhere in the split or
-		// trim sets. extractSymbols then read it as a dot-bearing
-		// candidate (the `{...}` looked like a dotted segment to the
-		// `strings.Contains(tok, ".")` filter — `.` from the `...`
-		// placeholder), and the false positive flowed into the
-		// hallucination count. Promoting `{` and `}` to splitters
-		// splits the struct-literal placeholder from the type name,
-		// the bare `Vault` then fails the "must contain a dot" check,
-		// and the false positive is gone.
-		//
-		// 2026-05-22 (post-A+B+D smoke run): Hangul characters added
-		// to the separator set. Real Claude responses on Korean prose
-		// produced tokens like `Vault.deposit을` (where `을` is the
-		// Korean accusative particle attached to the symbol). The
-		// validator then classified the whole thing as hallucinated
-		// because nothing in the graph is named `Vault.deposit을`.
-		// Hangul syllable block (U+AC00..U+D7A3) covers every
-		// composed Korean syllable, so any Korean letter touching the
-		// symbol becomes a boundary. Non-syllable Hangul (jamo,
-		// compatibility forms) is rare in prose and not worth the
-		// extra rune ranges right now.
-		if r >= 0xAC00 && r <= 0xD7A3 {
-			return true
-		}
-		// 2026-05-22 (cycle 7): #, @, and Unicode arrows added as
-		// separators. The post-cycle-6 smoke run surfaced two new
-		// noise classes:
-		//   - VaultService.depositFn#CallSite@153 — β graph dump
-		//     leaks ckg node IDs (`<name>#<kind>@<startByte>`) into
-		//     the prompt verbatim; the LLM copies them into the
-		//     answer. Splitting on # / @ breaks the ID back into a
-		//     dotted-identifier token (`VaultService.depositFn`)
-		//     plus drop-able tail segments.
-		//   - NewHandler→service.New — Claude uses U+2192 to denote
-		//     "X is a caller of Y" in prose. Without the arrow as a
-		//     separator the whole thing reads as one token.
-		// Both fixes are pure splitter-set widening; no existing
-		// dotted-identifier pattern uses these characters.
-		if r == '#' || r == '@' || r == 0x2192 {
-			return true
-		}
-		return r == ' ' || r == ',' || r == '\n' || r == '`' || r == '"' ||
-			r == '(' || r == ')' || r == '{' || r == '}'
-	}) {
-		// Normalise pointer-receiver sigils + bracket/punct wrappers before
-		// the dot-position check, so `*pkg.Func.` or `[pkg.Func]` both
-		// reduce to `pkg.Func`. Parens stay in the Trim set as a defensive
-		// belt-and-suspenders — if a future splitter change removes paren
-		// separation, Trim still cleans simple wrappers.
-		tok = strings.Trim(tok, ".:;()[]*&")
-		if !strings.Contains(tok, ".") || strings.HasPrefix(tok, ".") || strings.HasSuffix(tok, ".") {
+	var out []string
+	for _, raw := range strings.FieldsFunc(s, isSymbolSeparator) {
+		tok := strings.Trim(raw, symbolTrimChars)
+		if !hasInteriorDot(tok) {
 			continue
 		}
-		// L2-2-1 file path / extension blacklist (§8.3).
-		if strings.Contains(tok, "/") {
-			continue
-		}
-		if dot := strings.LastIndex(tok, "."); dot >= 0 && isFileExtension(tok[dot:]) {
-			continue
-		}
-		// 2026-05-22 (post-A+B+D smoke run): line-ref blacklist.
-		// Claude responses cite source locations as `file.ext:N`
-		// (`handler.go:23`, `vault.ts:5`, `simple_class.ts:7`,
-		// `Vault.sol:3`). The token contains a dot (file extension)
-		// so it survives the file-extension blacklist above — the
-		// blacklist drops `handler.go` cleanly but `handler.go:23`
-		// keeps the colon-and-line-number suffix that lifts it back
-		// into the candidate set. We split on the last `:`; if the
-		// suffix parses as an integer AND the prefix is a file path
-		// the extension blacklist would catch, drop the whole token.
-		if colon := strings.LastIndex(tok, ":"); colon > 0 && colon < len(tok)-1 {
-			suffix := tok[colon+1:]
-			isNum := true
-			for _, c := range suffix {
-				if c < '0' || c > '9' {
-					isNum = false
-					break
-				}
-			}
-			if isNum {
-				prefix := tok[:colon]
-				if dot := strings.LastIndex(prefix, "."); dot >= 0 && isFileExtension(prefix[dot:]) {
-					continue
-				}
-			}
-		}
-		// Prose abbreviation blacklist (T-04 V1 finding 2026-05-21).
-		// `e.g`, `i.e`, `et.al`, `vs.something` shapes that LLMs use in
-		// explanatory text but that have no chance of resolving in the
-		// graph. Case-folded lookup so `E.g` is filtered the same as
-		// `e.g`.
-		if isProseAbbreviation(tok) {
-			continue
-		}
-		// 2026-05-22 (cycle 7): all-numeric dotted tokens dropped.
-		// Claude responses leak task-description thresholds (`0.7`,
-		// `0.7`) and float literals (`1.0`) as dot-bearing tokens
-		// that survive every previous blacklist. They are never
-		// graph symbols. The test is conservative — all runes must
-		// be digits OR a single dot — so identifiers that happen to
-		// start with a digit (`v1.Func`) still survive.
-		if isAllNumeric(tok) {
+		if isFilePathLike(tok) ||
+			isBareFileName(tok) ||
+			isFileLineCitation(tok) ||
+			isProseAbbreviation(tok) ||
+			isAllNumeric(tok) {
 			continue
 		}
 		out = append(out, tok)
@@ -390,10 +268,71 @@ func extractSymbols(s string) []string {
 	return out
 }
 
-// isProseAbbreviation matches common explanatory-prose tokens that
-// extractSymbols' "dot-bearing identifier" filter would otherwise
-// catch. The set is intentionally small and case-folded — adding
-// rarer abbreviations is cheap. Keys are stored already case-folded.
+// symbolTrimChars are stripped from each token's edges after splitting.
+// Parens stay here as a belt-and-suspenders — they are also separators,
+// but Trim catches anything a future splitter change might miss.
+const symbolTrimChars = ".:;()[]*&"
+
+// isSymbolSeparator reports whether a rune terminates a token. The set
+// has grown organically: each entry was added to fix a real LLM-output
+// false positive (see eval-trajectory cycles).
+func isSymbolSeparator(r rune) bool {
+	switch r {
+	case ' ', ',', '\n', '`', '"', '(', ')', '{', '}':
+		return true
+	case '#', '@', 0x2192: // ckg node-ID sigils + Unicode arrow (→)
+		return true
+	}
+	// Hangul syllables (U+AC00..U+D7A3) — Korean particles attach to
+	// symbols ("Vault.deposit을") and must break the token.
+	return r >= 0xAC00 && r <= 0xD7A3
+}
+
+// hasInteriorDot returns true when tok contains a '.' that is neither
+// at the start nor at the end. Empty / dot-prefixed / dot-suffixed
+// tokens cannot be valid `pkg.Func` identifiers.
+func hasInteriorDot(tok string) bool {
+	if !strings.Contains(tok, ".") {
+		return false
+	}
+	return !strings.HasPrefix(tok, ".") && !strings.HasSuffix(tok, ".")
+}
+
+// isFilePathLike treats any token containing '/' as a path citation,
+// not a symbol. LLMs write "see core/blockchain.go" — the slash is the
+// signal.
+func isFilePathLike(tok string) bool {
+	return strings.Contains(tok, "/")
+}
+
+// isBareFileName matches tokens whose trailing dot-segment is a
+// recognised source/markup extension ("blockchain.go", "schema.yaml").
+func isBareFileName(tok string) bool {
+	dot := strings.LastIndex(tok, ".")
+	return dot >= 0 && isFileExtension(tok[dot:])
+}
+
+// isFileLineCitation matches "file.ext:N" patterns where the suffix
+// after the last colon is purely numeric and the prefix is a bare file
+// name. Drops "handler.go:23", "Vault.sol:7" etc.
+func isFileLineCitation(tok string) bool {
+	colon := strings.LastIndex(tok, ":")
+	if colon <= 0 || colon >= len(tok)-1 {
+		return false
+	}
+	suffix := tok[colon+1:]
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	prefix := tok[:colon]
+	dot := strings.LastIndex(prefix, ".")
+	return dot >= 0 && isFileExtension(prefix[dot:])
+}
+
+// isProseAbbreviation matches common explanatory-prose tokens that the
+// "dot-bearing identifier" filter would otherwise catch. Case-folded.
 func isProseAbbreviation(tok string) bool {
 	switch strings.ToLower(tok) {
 	case "e.g", "i.e", "et.al", "etc.", "vs.":
@@ -402,22 +341,17 @@ func isProseAbbreviation(tok string) bool {
 	return false
 }
 
-// isAllNumeric reports whether tok consists only of digits and at
-// most one dot (i.e., is a plain numeric literal like "0.7" or
-// "1.0"). Returns false for identifiers that contain digits but
-// also non-digit / non-dot runes (`v1.Func`, `T123.x`).
+// isAllNumeric reports whether tok consists only of digits and dots
+// (numeric literal like "0.7" or "1.0"). Identifiers with letters
+// such as "v1.Func" return false.
 func isAllNumeric(tok string) bool {
 	if tok == "" {
 		return false
 	}
 	for _, r := range tok {
-		if r >= '0' && r <= '9' {
-			continue
+		if (r < '0' || r > '9') && r != '.' {
+			return false
 		}
-		if r == '.' {
-			continue
-		}
-		return false
 	}
 	return true
 }
