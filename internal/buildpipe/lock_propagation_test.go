@@ -133,6 +133,35 @@ func TestLockPropagation_StdlibSkip(t *testing.T) {
 	}
 }
 
+// TestLockPropagation_NamedGoroutine verifies the P2 #8 W-A fix: a
+// `go gh.touchAsync()` call from inside a lock-holding chain now
+// surfaces an accessed_under_lock edge on the goroutine target's
+// field accesses. Pre-fix the Go parser emitted only a `spawns` edge
+// for named-function goroutines, so the propagator's calls/invokes
+// DFS skipped the target body entirely; the GoroutineHolder fixture
+// documented the gap as a known limitation. statements.go GoStmt
+// now queues a PendingRef alongside spawns so Pass 2 Resolve
+// materialises the calls edge, and the propagator reaches the field.
+//
+// Q4 ("Goroutine body INFERRED") rides the existing uniform cross-
+// fn INFERRED label — confidence stays consistent with the other
+// W-A propagation paths.
+func TestLockPropagation_NamedGoroutine(t *testing.T) {
+	edges, nodes := buildAndQueryFull(t, "testdata/lock_propagation", true)
+	valueID := findNodeIDBySuffix(nodes, "GoroutineHolder.value")
+	muID := findNodeIDBySuffix(nodes, "GoroutineHolder.mu#mutex")
+	if valueID == "" || muID == "" {
+		t.Fatalf("fixture nodes missing: value=%q mu=%q", valueID, muID)
+	}
+	found := findEdge(edges, valueID, muID, types.EdgeAccessedUnderLock)
+	if found == nil {
+		t.Fatalf("expected accessed_under_lock(GoroutineHolder.value -> GoroutineHolder.mu) via named-goroutine path")
+	}
+	if found.Confidence != types.ConfInferred {
+		t.Errorf("named-goroutine cross-fn emit confidence=%q, want INFERRED (W-A §5.0 Q4)", found.Confidence)
+	}
+}
+
 // TestLockPropagation_NoLockNoEdge verifies the negative guard: when the
 // caller doesn't acquire any lock, the callee's field accesses produce
 // zero accessed_under_lock edges even via propagation.

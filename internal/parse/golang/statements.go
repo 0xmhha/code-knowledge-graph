@@ -96,6 +96,22 @@ func (v *declVisitor) emitFunctionBodyPos(parentQname, parentID string, body *as
 			})
 			// Emit sends_to/recvs_from from goroutine body to known channels.
 			v.emitGoroutineChannelEdges(goroutineID, s.Call)
+			// W-A §3.3 fix (P2 #8): named-function goroutines like
+			// `go x.method()` previously emitted no calls/invokes edge,
+			// so the cross-function lock propagator skipped the body of
+			// x.method entirely (it could only see anonymous goroutine
+			// literals via the intra-fn parent attribution path). Emit
+			// a PendingRef here so Pass 2 Resolve materialises a calls
+			// (or invokes, for interface dispatch) edge from the parent
+			// function to the goroutine's target. Anonymous `go func(){}()`
+			// is skipped — the FuncLit body has no resolvable target
+			// qname and the existing parent-attribution path already
+			// covers field touches inside it.
+			if s.Call != nil {
+				if _, isFuncLit := s.Call.Fun.(*ast.FuncLit); !isFuncLit {
+					v.pending = append(v.pending, v.parsePendingFromCall(parentID, s.Call))
+				}
+			}
 			return false // goroutine body handled by emitGoroutineChannelEdges; prevent double-walk
 		case *ast.SendStmt:
 			chanName := channelVarName(s.Chan)

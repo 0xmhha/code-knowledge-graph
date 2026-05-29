@@ -2,28 +2,30 @@ package lockprop
 
 import "sync"
 
-// GoroutineBody exercises W-A §5.0 Q4 — but with a *negative* assertion
-// after W-A review (2026-05-11 Important #2): named-function goroutine
-// bodies are NOT reached by the propagator in V0.
+// GoroutineBody exercises W-A §5.0 Q4 (Goroutine body INFERRED). The
+// 2026-05-11 W-A landed missed this case because the Go parser did not
+// emit a `calls` edge for the `go gh.touchAsync()` shape — only a
+// `spawns` edge from parent to the Goroutine node, leaving the named-
+// function callee unreachable to the propagator's calls/invokes DFS.
 //
-// Apply() locks mu and calls helperWithLock() inline. helperWithLock
-// spawns `go gh.touchAsync()`. The propagator follows `calls` + `invokes`
-// edges (Q3), but the Go parser does not emit a `calls` edge for the
-// `go gh.touchAsync()` shape — it emits a `spawns` edge instead
-// (concurrency.go:530-531 "Named-function goroutine body" known gap).
-// Consequently `touchAsync.gh.value` does NOT receive an
-// accessed_under_lock edge under the current propagator.
+// P2 #8 fix (statements.go GoStmt case): the parser now also queues a
+// PendingRef for the call inside `go x.method()`, so Pass 2 Resolve
+// materialises a calls (or invokes, for interface dispatch) edge from
+// the parent function to the goroutine target. The propagator then
+// reaches `touchAsync.gh.value` through that edge and emits an
+// accessed_under_lock(touchAsync.gh.value, GoroutineHolder.mu) row
+// at INFERRED confidence — Q4's "goroutine path is the lowest-trust"
+// policy lands automatically via the uniform cross-function INFERRED
+// label, no extra confidence-handling needed.
 //
-// Q4 ("Goroutine body INFERRED") therefore lands as a *forward-compatible
-// confidence policy* — when a future PR adds `spawns` to the propagator's
-// adjacency (or fixes the parser's named-fn goroutine emit), the existing
-// uniform-INFERRED path will already produce the right confidence label
-// without further code change. Until then this fixture asserts the gap is
-// known and reproducible, not that Q4 fires.
+// Anonymous goroutine literals — `go func(){…}()` — still go through
+// the intra-fn parent-attribution path, not this one, because there's
+// no resolvable target qname for a literal body.
 //
 // Implication for lock_propagation_test.go: GoroutineHolder.touchAsync
-// must NOT have an accessed_under_lock edge after flag-ON build.
-// Adding `spawns` to buildCalleeAdjacency is tracked as a W-A follow-up.
+// MUST have an accessed_under_lock edge to GoroutineHolder.mu after
+// flag-ON build (post-P2 #8). The TestLockPropagation_NamedGoroutine
+// case pins this.
 type GoroutineHolder struct {
 	mu    sync.Mutex
 	value int
