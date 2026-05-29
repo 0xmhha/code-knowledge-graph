@@ -64,6 +64,24 @@ type Options struct {
 	// MaxBodies full sources. Default 25.
 	MaxSummaries int
 
+	// HopDepth controls how many edge hops the expand stage walks
+	// out from the seed candidate set. 1 (default) preserves the
+	// original O(candidates · avgFanout) cost. 2 enables a second
+	// BFS hop — useful when the query's relevant context lives two
+	// edges away (caller-of-caller, type-of-field-type). Bounded
+	// at HopFrontierCap per hop to prevent fan-out explosions on
+	// hub nodes. P2 #7 follow-up to the P0 #3 widening.
+	HopDepth int
+
+	// HopFrontierCap caps the per-hop frontier size when HopDepth
+	// > 1. Without it a hub node like a generic "Logger" symbol
+	// could pull in tens of thousands of callers at hop 2 and
+	// blow the rank/pack budget. Default 200 — wide enough that
+	// the BM25 re-ranker still has a meaningful set to discriminate
+	// from, narrow enough that the per-hop store.NodesByIDs round
+	// trip stays bounded.
+	HopFrontierCap int
+
 	// IncludePRs attaches up to PRsPerNode breadcrumbs to each body
 	// entry (the "왜" history landed in P0 #1). Off by default so
 	// the eval δ baseline's measurement remains comparable to its
@@ -97,6 +115,15 @@ func (o Options) withDefaults() Options {
 	if o.MaxSummaries <= 0 {
 		o.MaxSummaries = defaultMaxSummaries
 	}
+	if o.HopDepth <= 0 {
+		o.HopDepth = defaultHopDepth
+	}
+	if o.HopDepth > maxHopDepth {
+		o.HopDepth = maxHopDepth
+	}
+	if o.HopFrontierCap <= 0 {
+		o.HopFrontierCap = defaultHopFrontierCap
+	}
 	if o.PRsPerNode <= 0 {
 		o.PRsPerNode = 3
 	}
@@ -121,6 +148,18 @@ const (
 	defaultCandidateLimit = 100 // (a) Search top-N from FTS+CJK router
 	defaultRankedCap      = 50  // (d) Diversify cap on the ranked set
 	defaultMaxSummaries   = 25  // (e) Pack cap on signature/doc entries
+
+	// Hop-depth knobs for (b) Expand. defaultHopDepth=1 preserves
+	// the historical 1-hop behaviour. maxHopDepth=3 clamps over-
+	// eager callers since hop ≥ 4 quickly degenerates into "the
+	// whole reachable graph" on dense codebases and provides no
+	// useful retrieval signal beyond what BM25 ranking already
+	// surfaces. defaultHopFrontierCap=200 caps the per-hop
+	// expansion so a single hub node (e.g. a Logger) can't pull
+	// in tens of thousands of callers at hop 2.
+	defaultHopDepth       = 1
+	maxHopDepth           = 3
+	defaultHopFrontierCap = 200
 )
 
 // scoredNode pairs a node with its composite relevance score.
@@ -134,7 +173,8 @@ type scoredNode struct {
 // BuildContext is the shared smart-retrieval algorithm:
 //
 //	(a) Search   — top opt.CandidateLimit via the store's smart router.
-//	(b) Expand   — 1-hop neighbours via QueryEdgesForNodes.
+//	(b) Expand   — opt.HopDepth-hop BFS via QueryEdgesForNodes, each
+//	               hop capped at opt.HopFrontierCap new nodes.
 //	(c) Score    — 0.5 BM25 + 0.3 PageRank + 0.2 Usage.
 //	(d) Diversify — V0: opt.RankedCap. Per-cluster diversity is V1+.
 //	(e) Pack     — top MaxBodies get full source; next ≤MaxSummaries get
@@ -152,7 +192,7 @@ func BuildContext(store persist.StoreReader, query string, opt Options) (map[str
 		return emptyResult(query), nil
 	}
 
-	expanded, edges := expandOneHop(store, cands)
+	expanded, edges := expandToDepth(store, cands, opt.HopDepth, opt.HopFrontierCap)
 	rows := rankCandidates(query, expanded)
 	if len(rows) > opt.RankedCap {
 		rows = rows[:opt.RankedCap]
@@ -198,26 +238,58 @@ func emptyResult(query string) map[string]any {
 	}
 }
 
-// expandOneHop performs the (b) Expand step: gather every node id
-// touched by an edge incident on the candidate set, then re-fetch the
-// full node payloads. Returns the expanded node slice plus the edges
-// (needed later by buildSubgraphView).
-func expandOneHop(store persist.StoreReader, cands []types.Node) ([]types.Node, []types.Edge) {
-	ids := make([]string, 0, len(cands))
+// expandToDepth performs the (b) Expand step over `depth` BFS hops.
+// depth=1 is the historical behaviour: one round of QueryEdgesForNodes
+// over the seed candidates, then a NodesByIDs round-trip to re-hydrate
+// the touched nodes. depth>1 takes the newly-discovered ids from the
+// previous hop's edges and runs QueryEdgesForNodes against them,
+// repeating until depth or until no new ids appear.
+//
+// frontierCap bounds the per-hop frontier so a hub node (Logger,
+// common error type, …) can't pull tens of thousands of callers in
+// at hop 2 and starve the rank/pack stage. The cap is applied
+// AFTER the seen-set dedupe — already-visited ids never enter the
+// frontier — so the bound is on "new nodes introduced this hop",
+// not on raw edge count.
+//
+// The accumulated edges slice carries every edge touched across all
+// hops, in the order they were discovered, so buildSubgraphView's
+// keptIDs filter naturally prunes the cross-hop noise without an
+// extra dedupe pass.
+func expandToDepth(store persist.StoreReader, cands []types.Node, depth, frontierCap int) ([]types.Node, []types.Edge) {
+	seen := make(map[string]struct{}, len(cands))
+	frontier := make([]string, 0, len(cands))
 	for _, n := range cands {
-		ids = append(ids, n.ID)
+		if _, dup := seen[n.ID]; dup {
+			continue
+		}
+		seen[n.ID] = struct{}{}
+		frontier = append(frontier, n.ID)
 	}
-	edges, _ := store.QueryEdgesForNodes(ids)
-	expSet := make(map[string]struct{}, len(ids)+2*len(edges))
-	for _, id := range ids {
-		expSet[id] = struct{}{}
+	var allEdges []types.Edge
+
+	for hop := 0; hop < depth && len(frontier) > 0; hop++ {
+		edges, _ := store.QueryEdgesForNodes(frontier)
+		allEdges = append(allEdges, edges...)
+
+		next := make([]string, 0, len(edges))
+		for _, e := range edges {
+			for _, id := range [2]string{e.Src, e.Dst} {
+				if _, dup := seen[id]; dup {
+					continue
+				}
+				seen[id] = struct{}{}
+				next = append(next, id)
+			}
+		}
+		if len(next) > frontierCap {
+			next = next[:frontierCap]
+		}
+		frontier = next
 	}
-	for _, e := range edges {
-		expSet[e.Src] = struct{}{}
-		expSet[e.Dst] = struct{}{}
-	}
-	expanded, _ := store.NodesByIDs(setKeys(expSet))
-	return expanded, edges
+
+	expanded, _ := store.NodesByIDs(setKeys(seen))
+	return expanded, allEdges
 }
 
 // rankCandidates performs the (c) Score step: compute the composite

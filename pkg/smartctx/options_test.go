@@ -41,8 +41,31 @@ func TestOptionsDefaults(t *testing.T) {
 	if got.ImpactDepth != 1 {
 		t.Errorf("ImpactDepth: got %d, want 1", got.ImpactDepth)
 	}
+	if got.HopDepth != defaultHopDepth {
+		t.Errorf("HopDepth: got %d, want %d", got.HopDepth, defaultHopDepth)
+	}
+	if got.HopDepth != 1 {
+		t.Errorf("HopDepth default drifted: got %d, want 1 (P2 #7)", got.HopDepth)
+	}
+	if got.HopFrontierCap != defaultHopFrontierCap {
+		t.Errorf("HopFrontierCap: got %d, want %d", got.HopFrontierCap, defaultHopFrontierCap)
+	}
+	if got.HopFrontierCap != 200 {
+		t.Errorf("HopFrontierCap default drifted: got %d, want 200 (P2 #7)", got.HopFrontierCap)
+	}
 	if !got.PRCutoff.IsZero() {
 		t.Errorf("PRCutoff should be zero (no cutoff) when unset, got %v", got.PRCutoff)
+	}
+}
+
+// TestOptionsHopDepthClamp confirms the loader caps HopDepth at
+// maxHopDepth — a caller that asks for 5 hops gets 3 instead, with
+// no error. Deeper hops degenerate into "the whole reachable graph"
+// without useful retrieval signal beyond what BM25 already surfaces.
+func TestOptionsHopDepthClamp(t *testing.T) {
+	got := Options{HopDepth: 5}.withDefaults()
+	if got.HopDepth != maxHopDepth {
+		t.Errorf("HopDepth=5 should clamp to maxHopDepth=%d; got %d", maxHopDepth, got.HopDepth)
 	}
 }
 
@@ -55,6 +78,8 @@ func TestOptionsOverrides(t *testing.T) {
 		CandidateLimit: 200,
 		RankedCap:      80,
 		MaxSummaries:   40,
+		HopDepth:       2,
+		HopFrontierCap: 150,
 		PRsPerNode:     5,
 		ImpactDepth:    2,
 		PRCutoff:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -80,6 +105,12 @@ func TestOptionsOverrides(t *testing.T) {
 	}
 	if got.ImpactDepth != 2 {
 		t.Errorf("ImpactDepth override lost: %d", got.ImpactDepth)
+	}
+	if got.HopDepth != 2 {
+		t.Errorf("HopDepth override lost: %d", got.HopDepth)
+	}
+	if got.HopFrontierCap != 150 {
+		t.Errorf("HopFrontierCap override lost: %d", got.HopFrontierCap)
 	}
 	if got.PRCutoff.IsZero() {
 		t.Errorf("PRCutoff override lost: %v", got.PRCutoff)

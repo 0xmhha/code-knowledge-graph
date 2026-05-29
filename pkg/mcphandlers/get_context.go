@@ -35,6 +35,7 @@ func RegisterGetContextForTask(s *server.MCPServer, reader store.Reader) {
 		mcp.WithNumber("prs_per_node", mcp.DefaultNumber(3)),
 		mcp.WithBoolean("include_impact", mcp.DefaultBool(false)),
 		mcp.WithNumber("impact_depth", mcp.DefaultNumber(1)),
+		mcp.WithNumber("hop_depth", mcp.DefaultNumber(1)),
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		desc := req.GetString("task_description", "")
@@ -46,6 +47,7 @@ func RegisterGetContextForTask(s *server.MCPServer, reader store.Reader) {
 			PRsPerNode:    int(req.GetFloat("prs_per_node", 3)),
 			IncludeImpact: req.GetBool("include_impact", false),
 			ImpactDepth:   int(req.GetFloat("impact_depth", 1)),
+			HopDepth:      int(req.GetFloat("hop_depth", 1)),
 		}
 		out, err := smartctx.BuildContext(reader, desc, opt)
 		if err != nil {
