@@ -1,7 +1,7 @@
 # Self-Verification Manual
 
 > **목적**: ckg 프로젝트가 자기 자신의 코드를 분석한 결과(self-graph)로 7가지 사용자 검토항목이 충족되는지 수동으로 확인하기 위한 명령 모음.
-> **대상 corpus**: `/Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph` (CKG 자기 자신).
+> **대상 corpus**: CKG repo 루트 (`$REPO_ROOT`) — CKG 자기 자신.
 > **선행 문서**: `docs/analysis/SELF-GRAPH-COMPARISON.md` (변경 이력) / `docs/analysis/CKS-SPEC-COMPLIANCE.md` (spec 충실도).
 
 각 절은 단계별로 실행하며, 기대 출력과 함께 정리되어 있습니다. 빠른 한 번 체크는 [§ 9 자동 검증 스크립트](#9-자동-검증-스크립트)로 끝납니다.
@@ -11,7 +11,7 @@
 ## 0. 사전 준비
 
 ```bash
-cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
+cd "$REPO_ROOT"   # CKG 저장소 루트 (예: ~/Work/.../code-knowledge-graph)
 
 # 최신 binary 빌드
 go build -o bin/ckg ./cmd/ckg
@@ -559,7 +559,7 @@ qdb "SELECT qualified_name FROM nodes WHERE type='Interface'
 cat > /tmp/verify-all.sh <<'EOF'
 #!/bin/bash
 set -e
-cd /Users/wm-it-22-00661/Work/github/tools/code-knowledge-graph
+cd "${REPO_ROOT:?REPO_ROOT must point at the CKG repo root}"
 
 OUT=/tmp/ckg-verify
 echo "=== 1. Build (--strict-validate, lang=go) ==="

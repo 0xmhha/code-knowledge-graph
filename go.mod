@@ -5,8 +5,9 @@ go 1.25.5
 toolchain go1.25.9
 
 require (
-	github.com/0xmhha/cli-wrapper v0.2.1
+	github.com/0xmhha/cli-wrapper v0.4.6
 	github.com/anthropics/anthropic-sdk-go v1.38.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/mark3labs/mcp-go v0.49.0
 	github.com/spf13/cobra v1.10.2
@@ -24,7 +25,6 @@ require (
 	github.com/creack/pty v1.1.21 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -57,5 +57,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/0xmhha/cli-wrapper => /Users/wm-it-22-00661/Work/github/tools/cli-wrapper
