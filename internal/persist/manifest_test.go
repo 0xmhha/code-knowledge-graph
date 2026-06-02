@@ -12,7 +12,7 @@ func TestManifestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.Migrate(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestManifestRoundTrip_FilesV2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.Migrate(); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestManifestRoundTrip_FilesAbsent_LegacyCompat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.Migrate(); err != nil {
 		t.Fatal(err)
 	}

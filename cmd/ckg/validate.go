@@ -40,21 +40,21 @@ Exit codes:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, cleanup, err := newLogger(rootVerbose, rootLogFile)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: validate: init logger: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: init logger: %v\n", err)
 				return validateExitCode(2)
 			}
 			defer cleanup()
 
 			store, err := openValidateStore(graphDir, dbDsn)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: validate: open graph: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: open graph: %v\n", err)
 				return validateExitCode(2)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			g, err := loadGraphFromStore(store)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: validate: load graph: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: load graph: %v\n", err)
 				return validateExitCode(2)
 			}
 
@@ -73,7 +73,7 @@ Exit codes:
 			for _, v := range validators {
 				r, err := v.Validate(ctx, g, store)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "ckg: validate: %s: %v\n", v.Name(), err)
+					_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: %s: %v\n", v.Name(), err)
 					return validateExitCode(2)
 				}
 				if r.HasErrors() {
@@ -86,13 +86,13 @@ Exit codes:
 			switch format {
 			case "json":
 				if err := writeReportsJSON(out, reports); err != nil {
-					fmt.Fprintf(os.Stderr, "ckg: validate: write json: %v\n", err)
+					_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: write json: %v\n", err)
 					return validateExitCode(2)
 				}
 			case "text":
 				writeReportsText(out, reports)
 			default:
-				fmt.Fprintf(os.Stderr, "ckg: validate: unknown format %q (want text|json)\n", format)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: validate: unknown format %q (want text|json)\n", format)
 				return validateExitCode(2)
 			}
 
@@ -151,7 +151,7 @@ func writeReportsJSON(w writer, reports []*validate.Report) error {
 func writeReportsText(w writer, reports []*validate.Report) {
 	for _, r := range reports {
 		counts := r.CountBySeverity()
-		fmt.Fprintf(w, "── %s ──  errors=%d  warnings=%d  info=%d\n",
+		_, _ = fmt.Fprintf(w, "── %s ──  errors=%d  warnings=%d  info=%d\n",
 			r.Validator,
 			counts[validate.SeverityError],
 			counts[validate.SeverityWarning],
@@ -167,7 +167,7 @@ func writeReportsText(w writer, reports []*validate.Report) {
 			if iss.FilePath != "" {
 				tail += "  " + iss.FilePath
 			}
-			fmt.Fprintf(w, "  %-7s  %-22s  %s%s\n",
+			_, _ = fmt.Fprintf(w, "  %-7s  %-22s  %s%s\n",
 				iss.Severity, iss.Code, iss.Message, tail)
 		}
 	}

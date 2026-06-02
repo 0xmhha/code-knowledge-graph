@@ -137,7 +137,7 @@ func TestBuildCmd_LockPropagationFlagWired(t *testing.T) {
 		if err != nil {
 			t.Fatalf("OpenReadOnly: %v", err)
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		edges, err := store.QueryEdgesByType(string(types.EdgeAccessedUnderLock))
 		if err != nil {
 			t.Fatalf("QueryEdgesByType: %v", err)
@@ -229,7 +229,7 @@ func TestServeCmd_PortInUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-bind: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	cmd := newServeCmd()
@@ -265,7 +265,7 @@ func TestServeCmd_PortInUseWithOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pre-bind: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	cmd := newServeCmd()
@@ -300,11 +300,11 @@ func TestMCPCmd_EOFStdin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
-	w.Close() // writer closed → reader immediately returns EOF
+	_ = w.Close() // writer closed → reader immediately returns EOF
 	os.Stdin = r
 	defer func() {
 		os.Stdin = origStdin
-		r.Close()
+		_ = r.Close()
 	}()
 
 	cmd := newMCPCmd()

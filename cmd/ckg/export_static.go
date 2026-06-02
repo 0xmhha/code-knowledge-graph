@@ -28,7 +28,7 @@ func newExportStaticCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			// Chunk sizes match spec §6.6: 5k nodes, 10k edges per chunk —
 			// small enough to stream incrementally, big enough to keep
@@ -44,7 +44,7 @@ func newExportStaticCmd() *cobra.Command {
 				return fmt.Errorf("copy viewer assets: %w", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "ckg: exported static graph to %s\n", out)
+			_, _ = fmt.Fprintf(os.Stderr, "ckg: exported static graph to %s\n", out)
 			return nil
 		},
 	}

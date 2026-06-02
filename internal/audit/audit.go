@@ -107,13 +107,13 @@ func (r Report) WriteText(w io.Writer) error {
 		if len(sec.items) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "\n%s (%d):\n", sec.head, len(sec.items))
+		_, _ = fmt.Fprintf(w, "\n%s (%d):\n", sec.head, len(sec.items))
 		n := min(len(sec.items), previewN)
 		for i := range n {
-			fmt.Fprintf(w, "  %s\n", sec.items[i])
+			_, _ = fmt.Fprintf(w, "  %s\n", sec.items[i])
 		}
 		if len(sec.items) > previewN {
-			fmt.Fprintf(w, "  ... (%d more)\n", len(sec.items)-previewN)
+			_, _ = fmt.Fprintf(w, "  ... (%d more)\n", len(sec.items)-previewN)
 		}
 	}
 	verdict := "PARITY"

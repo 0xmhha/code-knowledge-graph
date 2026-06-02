@@ -89,7 +89,7 @@ func runServe(o serveOpts) error {
 		}
 		sourceLabel = db
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// CKG_DEV_VIEWER_DIR points to a `make viewer` output dir (typically
 	// `internal/server/web_assets/`) so viewer changes are picked up by
@@ -105,11 +105,11 @@ func runServe(o serveOpts) error {
 	defer cancel()
 
 	addr := fmt.Sprintf("127.0.0.1:%d", o.Port)
-	fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", sourceLabel, addr)
+	_, _ = fmt.Fprintf(os.Stderr, "ckg: serving %s on http://%s\n", sourceLabel, addr)
 	if o.NoViewer {
-		fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
+		_, _ = fmt.Fprintln(os.Stderr, "ckg: viewer disabled (--no-viewer); only /api/* is reachable")
 	} else if opts.DevViewerDir != "" {
-		fmt.Fprintf(os.Stderr, "ckg: viewer served from %s (CKG_DEV_VIEWER_DIR)\n", opts.DevViewerDir)
+		_, _ = fmt.Fprintf(os.Stderr, "ckg: viewer served from %s (CKG_DEV_VIEWER_DIR)\n", opts.DevViewerDir)
 	}
 
 	if o.OpenBrowser && !o.NoViewer {

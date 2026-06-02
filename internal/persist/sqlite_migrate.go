@@ -65,7 +65,7 @@ func ensureAttrsColumn(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("table_info(nodes): %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
 			cid     int
@@ -97,7 +97,7 @@ func ensureSearchTokensColumn(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("table_info(nodes): %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
 			cid     int
@@ -160,7 +160,7 @@ func ensureDispatchKindColumn(db *sql.DB, table string) error {
 	if err != nil {
 		return fmt.Errorf("table_info(%s): %w", table, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
 			cid     int

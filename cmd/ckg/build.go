@@ -44,7 +44,7 @@ func newBuildCmd() *cobra.Command {
 			}
 
 			if !force && !noCache && graphExists(effectiveOut) {
-				fmt.Fprintf(os.Stderr, "ckg: graph already exists at %s (use --force to rebuild)\n", effectiveOut)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: graph already exists at %s (use --force to rebuild)\n", effectiveOut)
 				return nil
 			}
 
@@ -66,7 +66,7 @@ func newBuildCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "ckg: built %d nodes / %d edges into %s\n",
+			_, _ = fmt.Fprintf(os.Stderr, "ckg: built %d nodes / %d edges into %s\n",
 				m.Stats["nodes"], m.Stats["edges"], effectiveOut)
 			return nil
 		},
@@ -135,13 +135,13 @@ func checkoutWorktree(repoSrc, commit string) (string, func(), error) {
 		return "", nil, err
 	}
 	if out, err := exec.Command("git", "-C", repoRoot, "worktree", "add", "--detach", wtDir, sha).CombinedOutput(); err != nil {
-		os.RemoveAll(wtDir)
+		_ = os.RemoveAll(wtDir)
 		return "", nil, fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	cleanup := func() {
-		exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", wtDir).Run()
-		os.RemoveAll(wtDir)
+		_ = exec.Command("git", "-C", repoRoot, "worktree", "remove", "--force", wtDir).Run()
+		_ = os.RemoveAll(wtDir)
 	}
 	return wtDir, cleanup, nil
 }

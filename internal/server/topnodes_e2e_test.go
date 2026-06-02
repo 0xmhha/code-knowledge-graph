@@ -34,16 +34,16 @@ func TestTopNodesAgainstSelfGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	srv := server.New(store, nil)
 	ts := httptest.NewServer(srv)
-	defer ts.Close()
+	defer func() { ts.Close() }()
 
 	resp, err := http.Get(ts.URL + "/api/nodes/top?metric=pagerank&limit=10")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status=%d", resp.StatusCode)
 	}
@@ -52,7 +52,7 @@ func TestTopNodesAgainstSelfGraph(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	var prev float64 = 1e18
+	var prev = 1e18
 	for i, n := range arr {
 		pr, _ := n["pagerank"].(float64)
 		fmt.Printf("#%d  pr=%.6f  type=%v  name=%v  qname=%v\n",

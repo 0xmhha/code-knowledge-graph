@@ -60,7 +60,7 @@ func (s *sqliteStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize 
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	nodes, err := scanNodes(rows)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (s *sqliteStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize 
 	if err != nil {
 		return err
 	}
-	defer er.Close()
+	defer func() { _ = er.Close() }()
 	edges, err := scanEdges(er)
 	if err != nil {
 		return err
@@ -104,7 +104,7 @@ func (s *sqliteStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize 
 	if err != nil {
 		return err
 	}
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for br.Next() {
 		var id string
 		var b []byte

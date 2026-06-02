@@ -27,7 +27,7 @@ func newFixtureStore(t *testing.T) persist.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
@@ -347,7 +347,7 @@ func TestQueryNodes_LimitRespected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestTopNodes_PageRankDescOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestTopNodes_LimitRespected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -987,7 +987,7 @@ func TestIncremental_FKCascadeOnDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
@@ -1083,7 +1083,7 @@ func TestReverseDepsForFiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

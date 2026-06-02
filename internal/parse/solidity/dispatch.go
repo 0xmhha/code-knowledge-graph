@@ -86,9 +86,9 @@ func (v *declVisitor) runDispatch() {
 	if qErr != nil {
 		return
 	}
-	defer q.Close()
+	defer func() { q.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(q, v.root, v.src)
 	names := q.CaptureNames()
 	for {

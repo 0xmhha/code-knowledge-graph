@@ -59,9 +59,9 @@ func (v *declVisitor) runInheritance() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {

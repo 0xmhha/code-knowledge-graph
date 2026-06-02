@@ -198,7 +198,7 @@ func buildAndQueryFull(t *testing.T, src string, lockProp bool) ([]types.Edge, [
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	edges, err := store.QueryEdgesByType(string(types.EdgeAccessedUnderLock))
 	if err != nil {
 		t.Fatalf("QueryEdgesByType: %v", err)

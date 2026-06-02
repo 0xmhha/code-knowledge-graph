@@ -56,7 +56,7 @@ func (s *sqliteStore) DistinctFilePaths(language string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("distinct file_path (lang=%q): %w", language, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var p string
@@ -84,7 +84,7 @@ func (s *sqliteStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query edges by type %q: %w", t, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []types.Edge
 	for rows.Next() {
 		var e types.Edge
@@ -126,7 +126,7 @@ func (s *sqliteStore) LoadHierarchy(kind string) ([]HierarchyRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query hierarchy %q: %w", kind, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []HierarchyRow
 	for rows.Next() {
 		var r HierarchyRow
@@ -158,7 +158,7 @@ func (s *sqliteStore) QueryNodes(parent string, limit int) ([]types.Node, error)
 	if err != nil {
 		return nil, fmt.Errorf("query nodes (parent=%q): %w", parent, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -198,7 +198,7 @@ func (s *sqliteStore) TopNodes(metric string, limit int, excludeTypes ...string)
 	if err != nil {
 		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -225,7 +225,7 @@ func (s *sqliteStore) EdgeCountsByType() (map[string]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edge counts by type: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var t string
@@ -276,7 +276,8 @@ func (s *sqliteStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 			return nil, fmt.Errorf("query edges chunk [%d:%d] of %d: %w", start, end, len(ids), err)
 		}
 		es, err := scanEdges(rows)
-		rows.Close()
+		_ = rows.Close()
+
 		if err != nil {
 			return nil, err
 		}
@@ -336,7 +337,7 @@ func (s *sqliteStore) FindSymbol(name string, exact bool, opts FindSymbolOptions
 	if err != nil {
 		return nil, fmt.Errorf("find symbol %q: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -445,7 +446,7 @@ func (s *sqliteStore) edgesFrom(ids []string, edgeTypes []string) ([]types.Edge,
 	if err != nil {
 		return nil, fmt.Errorf("edges from %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEdges(rows)
 }
 
@@ -466,7 +467,7 @@ func (s *sqliteStore) edgesPointingTo(ids []string, edgeTypes []string) ([]types
 	if err != nil {
 		return nil, fmt.Errorf("edges pointing to %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEdges(rows)
 }
 
@@ -480,7 +481,7 @@ func (s *sqliteStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nodes by %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -501,7 +502,7 @@ func (s *sqliteStore) AmbiguousMetaNodes() ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ambiguous meta nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -513,7 +514,7 @@ func (s *sqliteStore) AllNodes() ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("all nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -525,7 +526,7 @@ func (s *sqliteStore) AllEdges() ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("all edges: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []types.Edge
 	for rows.Next() {
 		var e types.Edge
@@ -557,7 +558,7 @@ func (s *sqliteStore) NodesByFilePath(path string) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nodes by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }
 
@@ -573,7 +574,7 @@ func (s *sqliteStore) EdgesByFilePath(path string) ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edges by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanEdges(rows)
 }
 
@@ -589,7 +590,7 @@ func (s *sqliteStore) BlobsByFilePath(path string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("blobs by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var id string
 		var b []byte
@@ -626,7 +627,7 @@ func (s *sqliteStore) GetNodePRs(nodeID string, cutoff time.Time) ([]types.PRRef
 	if err != nil {
 		return nil, fmt.Errorf("node_prs for %s: %w", nodeID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []types.PRRef
 	for rows.Next() {
 		var (
@@ -664,7 +665,7 @@ func (s *sqliteStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error
 	if err != nil {
 		return nil, fmt.Errorf("pending_refs by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []PendingRefRow
 	for rows.Next() {
 		var r PendingRefRow
@@ -711,7 +712,7 @@ func (s *sqliteStore) ReverseDepsForFiles(dirtyPaths []string) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("reverse deps for %d paths: %w", len(dirtyPaths), err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var p string

@@ -31,26 +31,26 @@ func newAuditCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, cleanup, err := newLogger(rootVerbose, rootLogFile)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: audit: init logger: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: init logger: %v\n", err)
 				return auditExitCode(2)
 			}
 			defer cleanup()
 
 			if language != "go" {
-				fmt.Fprintf(os.Stderr, "ckg: audit: only --language=go is supported in V0\n")
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: only --language=go is supported in V0\n")
 				return auditExitCode(2)
 			}
 			db := filepath.Join(graph, "graph.db")
 			store, err := persist.OpenReadOnly(db)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: audit: open graph: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: open graph: %v\n", err)
 				return auditExitCode(2)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			report, err := audit.RunGo(src, store)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ckg: audit: %v\n", err)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: %v\n", err)
 				return auditExitCode(2)
 			}
 
@@ -58,16 +58,16 @@ func newAuditCmd() *cobra.Command {
 			switch format {
 			case "json":
 				if err := report.WriteJSON(out); err != nil {
-					fmt.Fprintf(os.Stderr, "ckg: audit: write json: %v\n", err)
+					_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: write json: %v\n", err)
 					return auditExitCode(2)
 				}
 			case "text":
 				if err := report.WriteText(out); err != nil {
-					fmt.Fprintf(os.Stderr, "ckg: audit: write text: %v\n", err)
+					_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: write text: %v\n", err)
 					return auditExitCode(2)
 				}
 			default:
-				fmt.Fprintf(os.Stderr, "ckg: audit: unknown format %q (want text|json)\n", format)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: audit: unknown format %q (want text|json)\n", format)
 				return auditExitCode(2)
 			}
 

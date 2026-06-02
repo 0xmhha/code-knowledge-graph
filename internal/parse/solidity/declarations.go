@@ -272,9 +272,9 @@ func (v *declVisitor) runDecl(q string, nt types.NodeType) {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -329,9 +329,9 @@ func (v *declVisitor) runStateVarDecl() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	// W-C W9 V0/V2 (2026-05-18): per-contract packing slot state.
@@ -528,9 +528,9 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 		// Fallback: try plain assignment_expression too.
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -543,9 +543,10 @@ func (v *declVisitor) queueMappingWrites(mappingName string) {
 		for _, c := range m.Captures {
 			capName := names[c.Index]
 			node := c.Node
-			if capName == "arr" {
+			switch capName {
+			case "arr":
 				arrName = node.Utf8Text(v.src)
-			} else if capName == "stmt" {
+			case "stmt":
 				// The capture's Node is a value type; we need a stable pointer
 				// for the parent walk below. Take address of the local copy.
 				stmtCopy := node
@@ -577,9 +578,9 @@ func (v *declVisitor) runEmits() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -617,9 +618,9 @@ func (v *declVisitor) runHasModifier() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -721,9 +722,9 @@ func (v *declVisitor) runModifierMeta() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -895,9 +896,9 @@ func (v *declVisitor) runConstructorDecl() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -962,9 +963,9 @@ func (v *declVisitor) runFallbackReceiveDecl() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -1147,9 +1148,9 @@ func (v *declVisitor) runStructFieldMeta() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {

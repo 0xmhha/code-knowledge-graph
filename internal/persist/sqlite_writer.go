@@ -57,7 +57,7 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO nodes
 		(id, type, name, qualified_name, file_path, start_line, end_line,
 		 start_byte, end_byte, language, visibility, signature, doc_comment,
@@ -66,7 +66,7 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, n := range nodes {
 		attrs := marshalNodeAttrs(&n)
 		tokens := buildSearchTokens(n.Name, n.QualifiedName)
@@ -89,14 +89,14 @@ func (s *sqliteStore) InsertEdges(edges []types.Edge) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT INTO edges
 		(src, dst, type, file_path, line, count, confidence, dispatch_kind)
 		VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, e := range edges {
 		if _, err := stmt.Exec(e.Src, e.Dst, string(e.Type), e.FilePath, e.Line,
 			e.Count, string(e.Confidence), e.DispatchKind); err != nil {
@@ -112,12 +112,12 @@ func (s *sqliteStore) InsertPkgTree(edges []ClusterEdge) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO pkg_tree (parent_id, child_id, level) VALUES (?,?,?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, e := range edges {
 		if _, err := stmt.Exec(e.ParentID, e.ChildID, e.Level); err != nil {
 			return fmt.Errorf("insert pkg_tree %s->%s: %w", e.ParentID, e.ChildID, err)
@@ -143,7 +143,7 @@ func (s *sqliteStore) InsertTopicTree(t TopicTreeInput) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`DELETE FROM topic_tree`); err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (s *sqliteStore) InsertTopicTree(t TopicTreeInput) error {
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for i := 0; i < t.ResolutionsCount(); i++ {
 		members := t.ResolutionMembers(i)
 		for label, ids := range members {
@@ -171,12 +171,12 @@ func (s *sqliteStore) InsertBlobs(blobs map[string][]byte) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO blobs (node_id, source) VALUES (?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for id, b := range blobs {
 		if _, err := stmt.Exec(id, b); err != nil {
 			return fmt.Errorf("insert blob %s: %w", id, err)
@@ -201,14 +201,14 @@ func (s *sqliteStore) InsertPendingRefs(refs []PendingRefRow) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO pending_refs
 		(file_path, src_id, target_qname, edge_type, line, hint_file, dispatch_kind)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, r := range refs {
 		if _, err := stmt.Exec(r.FilePath, r.SrcID, r.TargetQName,
 			r.EdgeType, r.Line, r.HintFile, r.DispatchKind); err != nil {
@@ -231,14 +231,14 @@ func (s *sqliteStore) InsertNodePRs(byNode map[string][]types.PRRef) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO node_prs
 		(node_id, number, title, summary, base_sha, head_sha, merged_at, repo)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for nodeID, refs := range byNode {
 		for _, r := range refs {
 			if _, err := stmt.Exec(nodeID, r.Number, r.Title, r.Summary,

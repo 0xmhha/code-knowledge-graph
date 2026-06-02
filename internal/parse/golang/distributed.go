@@ -536,7 +536,7 @@ func (v *declVisitor) maybeEmitJSONRPCHandler(fd *ast.FuncDecl) {
 		return
 	}
 	argPkg, argName := splitSelectorName(fd.Type.Params.List[0].Type)
-	qname := argName
+	var qname string
 	if argPkg != "" {
 		qname = argPkg + "." + argName
 	} else {
@@ -689,7 +689,7 @@ func isExportedIdent(s string) bool {
 		return false
 	}
 	c := s[0]
-	if !(c >= 'A' && c <= 'Z') {
+	if c < 'A' || c > 'Z' {
 		return false
 	}
 	for i := 1; i < len(s); i++ {

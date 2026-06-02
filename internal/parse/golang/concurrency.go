@@ -482,7 +482,7 @@ func (v *declVisitor) emitChannelFromMake(parentID string, call *ast.CallExpr) s
 	}
 	dir := channelDirection(chType.Dir)
 	elem := exprName(chType.Value)
-	buf := -1
+	var buf int
 	if len(call.Args) >= 2 {
 		buf = literalIntValue(call.Args[1])
 	} else {

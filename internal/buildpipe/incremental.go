@@ -91,7 +91,7 @@ func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
 		if err != nil {
 			return nil
 		}
-		defer store.Close()
+		defer func() { _ = store.Close() }()
 		m, err := store.GetManifest()
 		if err != nil {
 			return nil
@@ -105,7 +105,7 @@ func readOldManifestFromDB(dbPath, dbDsn string) *persist.Manifest {
 	if err != nil {
 		return nil
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	m, err := store.GetManifest()
 	if err != nil {
 		return nil
@@ -148,7 +148,7 @@ func runIncremental(opt Options, log *slog.Logger,
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := store.Migrate(); err != nil {
 		return persist.Manifest{}, err
 	}
@@ -478,7 +478,7 @@ func runShortCircuit(opt Options, log *slog.Logger, decisions CacheDecisions,
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	// Old manifest fields stay; bump timestamp + recompute staleness.
 	m := *old
 	m.BuildTimestamp = time.Now().UTC().Format(time.RFC3339)

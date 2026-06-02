@@ -244,7 +244,7 @@ func TestCache_HitSkipsHeavyWork(t *testing.T) {
 	// hits groupByCommit so getBlobCalls grows by exactly one per
 	// returned hunk — but the corpus-build pass is skipped.
 	postCallDelta := store.getBlobCalls.Load() - firstBlobs
-	if postCallDelta > int64(len(store.fakeStore.nodes)) {
+	if postCallDelta > int64(len(store.nodes)) {
 		t.Errorf("cache miss on GetBlob: delta=%d, want ≤ groupByCommit reach",
 			postCallDelta)
 	}

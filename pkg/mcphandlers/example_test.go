@@ -42,7 +42,7 @@ func TestRegisterAll_LocksEightTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	s := server.NewMCPServer("smoke", "0.0.0")
 	mcphandlers.RegisterAll(s, r)
@@ -86,7 +86,7 @@ func TestRegisterFindSymbol_ExternalShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	s := server.NewMCPServer("smoke", "0.0.0")
 	mcphandlers.RegisterFindSymbol(s, r)
@@ -142,7 +142,7 @@ func TestRegisterEvidenceForIntent_RequiresCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	s := server.NewMCPServer("smoke", "0.0.0")
 	cache := evidence.NewCache()

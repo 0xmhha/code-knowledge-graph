@@ -23,7 +23,7 @@ func TestMCPServerConstructs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	// We can't easily invoke stdio in a unit test; this just verifies
 	// registration doesn't panic.
 	_ = mcppkg.Run // referenced for compilation; full registration smoke in T29

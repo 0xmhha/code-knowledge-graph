@@ -50,7 +50,7 @@ func TestResolveOutDir_AutoCommitHash_NonGitDir(t *testing.T) {
 
 func TestGraphExists_True(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "graph.db"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "graph.db"), []byte("x"), 0o644)
 	if !graphExists(dir) {
 		t.Error("should detect existing graph.db")
 	}

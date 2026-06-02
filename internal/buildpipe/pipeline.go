@@ -381,7 +381,7 @@ func runCold(opt Options, log *slog.Logger,
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree, hunkBlobs); err != nil {
 		return persist.Manifest{}, err
 	}
@@ -490,7 +490,8 @@ func openColdStore(outDir, dbDsn string) (persist.Store, error) {
 		return nil, err
 	}
 	if err := store.Migrate(); err != nil {
-		store.Close()
+		_ = store.Close()
+
 		return nil, err
 	}
 	return store, nil

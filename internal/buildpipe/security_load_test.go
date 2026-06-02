@@ -77,7 +77,7 @@ security_patterns:
 	if err != nil {
 		t.Fatalf("open graph.db: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Exactly one SecurityPattern node landed.
 	hits, err := store.FindSymbol("fixture.greet-risk", true, persist.FindSymbolOptions{})

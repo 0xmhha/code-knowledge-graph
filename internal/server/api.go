@@ -302,7 +302,7 @@ func gunzipBytes(b []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gr.Close()
+	defer func() { _ = gr.Close() }()
 	return io.ReadAll(gr)
 }
 

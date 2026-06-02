@@ -35,7 +35,7 @@ func TestAnalyze_GoStablenetSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open graph %q: %v", dbPath, err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Concurrency edges must exist on real go-stablenet code.
 	locks, err := r.QueryEdgesByType(string(types.EdgeAcquiresLock))

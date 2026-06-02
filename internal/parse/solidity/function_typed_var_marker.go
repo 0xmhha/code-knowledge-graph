@@ -47,9 +47,9 @@ func (v *declVisitor) runFunctionTypedVarMarker() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	// fnByID: enclosing function/modifier ID → set of identifier
@@ -167,9 +167,9 @@ func (v *declVisitor) findFunctionPointerPropagators(
 	// Pass 1: assignments. RHS bare identifier of fn-typed name.
 	const aq = `(assignment_expression) @assign`
 	if query, qErr := sitter.NewQuery(v.lang, aq); qErr == nil {
-		defer query.Close()
+		defer func() { query.Close() }()
 		cur := sitter.NewQueryCursor()
-		defer cur.Close()
+		defer func() { cur.Close() }()
 		matches := cur.Matches(query, v.root, v.src)
 		names := query.CaptureNames()
 		for {
@@ -192,9 +192,9 @@ func (v *declVisitor) findFunctionPointerPropagators(
 	// Pass 2: call arguments.
 	const cq = `(call_expression) @call`
 	if query, qErr := sitter.NewQuery(v.lang, cq); qErr == nil {
-		defer query.Close()
+		defer func() { query.Close() }()
 		cur := sitter.NewQueryCursor()
-		defer cur.Close()
+		defer func() { cur.Close() }()
 		matches := cur.Matches(query, v.root, v.src)
 		names := query.CaptureNames()
 		for {
@@ -229,9 +229,9 @@ func (v *declVisitor) findFunctionPointerPropagators(
 	// emit_statement and mark any that matches a fn-typed name.
 	const eq = `(emit_statement) @emit`
 	if query, qErr := sitter.NewQuery(v.lang, eq); qErr == nil {
-		defer query.Close()
+		defer func() { query.Close() }()
 		cur := sitter.NewQueryCursor()
-		defer cur.Close()
+		defer func() { cur.Close() }()
 		matches := cur.Matches(query, v.root, v.src)
 		names := query.CaptureNames()
 		for {
@@ -254,9 +254,9 @@ func (v *declVisitor) findFunctionPointerPropagators(
 	// propagates the function pointer to the caller.
 	const rq = `(return_statement) @ret`
 	if query, qErr := sitter.NewQuery(v.lang, rq); qErr == nil {
-		defer query.Close()
+		defer func() { query.Close() }()
 		cur := sitter.NewQueryCursor()
-		defer cur.Close()
+		defer func() { cur.Close() }()
 		matches := cur.Matches(query, v.root, v.src)
 		names := query.CaptureNames()
 		for {
@@ -338,9 +338,9 @@ func (v *declVisitor) findFunctionPointerCallers(
 	if qErr != nil {
 		return nil
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	out := map[string]bool{}

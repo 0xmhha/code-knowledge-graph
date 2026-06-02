@@ -33,7 +33,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 		rel = path
 	}
 	parser := sitter.NewParser()
-	defer parser.Close()
+	defer func() { parser.Close() }()
 	lang := languageForExt(filepath.Ext(path))
 	if err := parser.SetLanguage(lang); err != nil {
 		return nil, fmt.Errorf("typescript: SetLanguage: %w", err)
@@ -42,7 +42,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	if tree == nil {
 		return nil, fmt.Errorf("typescript: parser returned nil tree for %s", rel)
 	}
-	defer tree.Close()
+	defer func() { tree.Close() }()
 	root := tree.RootNode()
 	v := newDeclVisitor(rel, src, lang, root)
 	v.visit()

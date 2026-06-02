@@ -69,7 +69,7 @@ security_patterns:
 	if err != nil {
 		t.Fatalf("open graph.db: %v", err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 
 	pol, err := st.FindSymbol("gsn.blockchain-init", true, persist.FindSymbolOptions{})
 	if err != nil {

@@ -79,7 +79,7 @@ func TestAddWatchedDirs(t *testing.T) {
 	if err != nil {
 		t.Skipf("fsnotify unavailable: %v", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	if err := addWatchedDirs(w, root); err != nil {
 		t.Fatalf("addWatchedDirs: %v", err)

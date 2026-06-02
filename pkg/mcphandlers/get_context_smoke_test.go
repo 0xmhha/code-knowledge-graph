@@ -27,7 +27,7 @@ func TestBuildContextNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	res, err := smartctx.BuildContext(store, "zzzzz_no_match", smartctx.Options{
 		BudgetTokens: 4000, IncludeBlobs: true, MaxBodies: 5,

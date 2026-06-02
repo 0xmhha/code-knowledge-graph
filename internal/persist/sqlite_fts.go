@@ -71,7 +71,7 @@ func (s *sqliteStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]S
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	hits, err := scanSearchHits(rows)
 	if err != nil {
 		return nil, err
@@ -268,7 +268,7 @@ func isFTS5Reserved(t string) bool {
 // rewriteFTSQuery entirely via the early-return at line 643.
 func trimFTSToken(t string) string {
 	return strings.TrimFunc(t, func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_')
+		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_'
 	})
 }
 
@@ -351,6 +351,6 @@ func (s *sqliteStore) SearchSubstr(q string, limit int) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("substring search %q: %w", q, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanNodes(rows)
 }

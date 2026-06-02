@@ -186,7 +186,7 @@ func TestIncremental_FileRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	nodes, err := store.NodesByFilePath("c.go")
 	if err != nil {
 		t.Fatalf("NodesByFilePath: %v", err)
@@ -253,7 +253,7 @@ func TestIncremental_SchemaBumpInvalidates(t *testing.T) {
 	if err := store.SetManifest(corrupted); err != nil {
 		t.Fatalf("SetManifest(1.0): %v", err)
 	}
-	store.Close()
+	_ = store.Close()
 
 	second := runBuild(t, src, out)
 	if second.SchemaVersion != buildpipe.SchemaVersion {
@@ -478,7 +478,7 @@ func countEdgesByType(t *testing.T, dbPath, edgeType string) int {
 	if err != nil {
 		t.Fatalf("open db %s: %v", dbPath, err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	edges, err := store.QueryEdgesByType(edgeType)
 	if err != nil {
 		t.Fatalf("query %s edges: %v", edgeType, err)
@@ -494,7 +494,7 @@ func countCrossFileCallsEdges(t *testing.T, dbPath string) int {
 	if err != nil {
 		t.Fatalf("open db %s: %v", dbPath, err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	// QueryEdgesByType doesn't filter by file — fetch all calls, then
 	// look up each endpoint's file_path and count cross-file pairs.
 	edges, err := store.QueryEdgesByType("calls")

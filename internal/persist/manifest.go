@@ -62,7 +62,7 @@ func (s *sqliteStore) SetManifest(m Manifest) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.Exec(`DELETE FROM manifest`); err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (s *sqliteStore) GetManifest() (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	kv := make(map[string]string)
 	for rows.Next() {
 		var k, v string

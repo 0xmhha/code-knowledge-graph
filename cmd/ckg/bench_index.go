@@ -52,7 +52,7 @@ p50/p95 latencies.`,
 			if err != nil {
 				return err
 			}
-			defer os.RemoveAll(workDir)
+			defer func() { _ = os.RemoveAll(workDir) }()
 
 			srcCopy := filepath.Join(workDir, "src")
 			if err := copyDir(src, srcCopy); err != nil {
@@ -135,10 +135,10 @@ p50/p95 latencies.`,
 				enc.SetIndent("", "  ")
 				return enc.Encode(result)
 			default:
-				fmt.Fprintf(os.Stderr, "ckg bench-index: full=%dms incr=%dms speedup=%.1fx modified=%s\n",
+				_, _ = fmt.Fprintf(os.Stderr, "ckg bench-index: full=%dms incr=%dms speedup=%.1fx modified=%s\n",
 					result.FullBuildMS, result.IncrBuildMS, result.SpeedupRatio, result.ModifiedFile)
 				if result.IncrP50MS > 0 {
-					fmt.Fprintf(os.Stderr, "  p50=%dms p95=%dms (%d iterations)\n",
+					_, _ = fmt.Fprintf(os.Stderr, "  p50=%dms p95=%dms (%d iterations)\n",
 						result.IncrP50MS, result.IncrP95MS, result.Iterations)
 				}
 				return nil

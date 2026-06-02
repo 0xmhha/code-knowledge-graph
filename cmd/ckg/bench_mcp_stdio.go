@@ -71,7 +71,7 @@ in-flight request at a time, matching how production clients
 			_ = store.Close()
 			probes := defaultMCPProbes(seed)
 
-			fmt.Fprintf(os.Stderr, "bench-mcp-stdio: graph=%s iters=%d probes=%d binary=%s\n",
+			_, _ = fmt.Fprintf(os.Stderr, "bench-mcp-stdio: graph=%s iters=%d probes=%d binary=%s\n",
 				graph, iterations, len(probes), ckgBinary)
 
 			results, err := runStdioBench(ckgBinary, graph, probes, iterations)
@@ -79,7 +79,7 @@ in-flight request at a time, matching how production clients
 				return err
 			}
 			for _, r := range results {
-				fmt.Fprintf(os.Stderr, "  %-26s p50=%6.2f p95=%6.2f p99=%6.2f mean=%6.2f errors=%d\n",
+				_, _ = fmt.Fprintf(os.Stderr, "  %-26s p50=%6.2f p95=%6.2f p99=%6.2f mean=%6.2f errors=%d\n",
 					r.Endpoint, r.P50Ms, r.P95Ms, r.P99Ms, r.MeanMs, r.ErrorCount)
 			}
 
@@ -115,7 +115,7 @@ in-flight request at a time, matching how production clients
 			if err := os.WriteFile(output, append(payload, '\n'), 0o644); err != nil {
 				return fmt.Errorf("write output: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "bench-mcp-stdio: wrote %s\n", output)
+			_, _ = fmt.Fprintf(os.Stderr, "bench-mcp-stdio: wrote %s\n", output)
 			return nil
 		},
 	}

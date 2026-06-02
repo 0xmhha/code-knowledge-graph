@@ -175,6 +175,7 @@ func OpenPostgres(dsn string) (Store, error) {
 	}
 	if err := pool.Ping(background); err != nil {
 		pool.Close()
+
 		return nil, fmt.Errorf("ping postgres: %w", err)
 	}
 	return &pgStore{pool: pool}, nil
@@ -191,6 +192,7 @@ func OpenPostgresReadOnly(dsn string) (StoreReader, error) {
 	}
 	if err := pool.Ping(background); err != nil {
 		pool.Close()
+
 		return nil, fmt.Errorf("ping postgres ro: %w", err)
 	}
 	return &pgStore{pool: pool, ro: true}, nil
@@ -206,6 +208,7 @@ func OpenPostgresCold(dsn string) (Store, error) {
 	}
 	if err := pool.Ping(background); err != nil {
 		pool.Close()
+
 		return nil, fmt.Errorf("ping postgres cold: %w", err)
 	}
 	s := &pgStore{pool: pool}
@@ -215,6 +218,7 @@ func OpenPostgresCold(dsn string) (Store, error) {
 		`TRUNCATE TABLE node_prs, pending_refs, topic_tree, pkg_tree, blobs, edges, nodes, manifest CASCADE`)
 	if err := s.Migrate(); err != nil {
 		pool.Close()
+
 		return nil, fmt.Errorf("migrate postgres cold: %w", err)
 	}
 	return s, nil
@@ -227,6 +231,7 @@ func OpenPostgresCold(dsn string) (Store, error) {
 // Close releases the connection pool.
 func (s *pgStore) Close() error {
 	s.pool.Close()
+
 	return nil
 }
 
@@ -326,7 +331,7 @@ func (s *pgStore) InsertNodes(nodes []types.Node) error {
 			string(n.Confidence), n.SubKind)
 	}
 	br := s.pool.SendBatch(background, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for i := range nodes {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("insert node %s: %w", nodes[i].ID, err)
@@ -360,7 +365,7 @@ func (s *pgStore) InsertEdges(edges []types.Edge) error {
 		batch.Queue(q, e.Src, e.Dst, string(e.Type), fp, line, e.Count, string(e.Confidence), e.DispatchKind)
 	}
 	br := s.pool.SendBatch(background, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for i := range edges {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("insert edge %s->%s: %w", edges[i].Src, edges[i].Dst, err)
@@ -385,7 +390,7 @@ func (s *pgStore) InsertBlobs(blobs map[string][]byte) error {
 		batch.Queue(q, id, b)
 	}
 	br := s.pool.SendBatch(background, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for id := range blobs {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("insert blob %s: %w", id, err)
@@ -420,7 +425,8 @@ func (s *pgStore) InsertPkgTreeFromCluster(edges []cluster.PersistClusterEdge) e
 	br := tx.SendBatch(background, batch)
 	for i := range edges {
 		if _, err := br.Exec(); err != nil {
-			br.Close()
+			_ = br.Close()
+
 			return fmt.Errorf("insert pkg_tree %s->%s: %w", edges[i].ParentID, edges[i].ChildID, err)
 		}
 	}
@@ -494,7 +500,7 @@ func (s *pgStore) InsertPendingRefs(refs []PendingRefRow) error {
 		batch.Queue(q, r.FilePath, r.SrcID, r.TargetQName, r.EdgeType, r.Line, hf, dk)
 	}
 	br := s.pool.SendBatch(background, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for i := range refs {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("insert pending_ref %s→%s: %w", refs[i].SrcID, refs[i].TargetQName, err)
@@ -534,7 +540,7 @@ func (s *pgStore) InsertNodePRs(byNode map[string][]types.PRRef) error {
 		}
 	}
 	br := s.pool.SendBatch(background, batch)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for i := 0; i < count; i++ {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("insert node_pr: %w", err)
@@ -562,7 +568,7 @@ func (s *pgStore) GetNodePRs(nodeID string, cutoff time.Time) ([]types.PRRef, er
 	if err != nil {
 		return nil, fmt.Errorf("node_prs for %s: %w", nodeID, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	var out []types.PRRef
 	for rows.Next() {
 		var r types.PRRef
@@ -675,7 +681,7 @@ func (s *pgStore) FindSymbol(name string, exact bool, opts FindSymbolOptions) ([
 	if err != nil {
 		return nil, fmt.Errorf("find symbol %q: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -689,7 +695,7 @@ func (s *pgStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nodes by %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -710,7 +716,7 @@ func (s *pgStore) QueryNodes(parent string, limit int) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query nodes (parent=%q): %w", parent, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -744,7 +750,7 @@ func (s *pgStore) TopNodes(metric string, limit int, excludeTypes ...string) ([]
 	if err != nil {
 		return nil, fmt.Errorf("top nodes (metric=%q): %w", metric, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -757,7 +763,7 @@ func (s *pgStore) DistinctFilePaths(language string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("distinct file_path (lang=%q): %w", language, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var p string
@@ -784,7 +790,7 @@ func (s *pgStore) QueryEdgesByType(t string) ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query edges by type %q: %w", t, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGEdges(rows)
 }
 
@@ -798,7 +804,7 @@ func (s *pgStore) AmbiguousMetaNodes() ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ambiguous meta nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -809,7 +815,7 @@ func (s *pgStore) AllNodes() ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("all nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -821,7 +827,7 @@ func (s *pgStore) AllEdges() ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("all edges: %w", err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGEdges(rows)
 }
 
@@ -832,7 +838,7 @@ func (s *pgStore) EdgeCountsByType() (map[string]int, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edge counts by type: %w", err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var t string
@@ -872,6 +878,7 @@ func (s *pgStore) QueryEdgesForNodes(ids []string) ([]types.Edge, error) {
 		}
 		es, err := scanPGEdges(rows)
 		rows.Close()
+
 		if err != nil {
 			return nil, err
 		}
@@ -986,7 +993,7 @@ func (s *pgStore) pgEdgesFrom(ids []string, edgeTypes []string) ([]types.Edge, e
 	if err != nil {
 		return nil, fmt.Errorf("edges from %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGEdges(rows)
 }
 
@@ -1010,7 +1017,7 @@ func (s *pgStore) pgEdgesPointingTo(ids []string, edgeTypes []string) ([]types.E
 	if err != nil {
 		return nil, fmt.Errorf("edges pointing to %d ids: %w", len(ids), err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGEdges(rows)
 }
 
@@ -1103,7 +1110,7 @@ func (s *pgStore) SearchFTS(q string, limit int, opts SearchFTSOptions) ([]Searc
 	if err != nil {
 		return nil, fmt.Errorf("fts search %q: %w", q, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	hits, err := scanPGSearchHits(rows)
 	if err != nil {
 		return nil, err
@@ -1132,7 +1139,7 @@ func (s *pgStore) SearchSubstr(q string, limit int) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("substring search %q: %w", q, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -1171,7 +1178,7 @@ func (s *pgStore) NodesByFilePath(path string) ([]types.Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("nodes by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGNodes(rows)
 }
 
@@ -1187,7 +1194,7 @@ func (s *pgStore) EdgesByFilePath(path string) ([]types.Edge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("edges by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	return scanPGEdges(rows)
 }
 
@@ -1204,7 +1211,7 @@ func (s *pgStore) BlobsByFilePath(path string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("blobs by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	for rows.Next() {
 		var id string
 		var b []byte
@@ -1232,7 +1239,7 @@ func (s *pgStore) PendingRefsByFilePath(path string) ([]PendingRefRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pending_refs by file_path %q: %w", path, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	var out []PendingRefRow
 	for rows.Next() {
 		var r PendingRefRow
@@ -1271,7 +1278,7 @@ func (s *pgStore) ReverseDepsForFiles(dirtyPaths []string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reverse deps for %d paths: %w", len(dirtyPaths), err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var p string
@@ -1305,7 +1312,7 @@ func (s *pgStore) LoadHierarchy(kind string) ([]HierarchyRow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query hierarchy %q: %w", kind, err)
 	}
-	defer rows.Close()
+	defer func() { rows.Close() }()
 	var out []HierarchyRow
 	for rows.Next() {
 		var r HierarchyRow
@@ -1369,6 +1376,7 @@ func (s *pgStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int)
 	}
 	nodes, err := scanPGNodes(nrows)
 	nrows.Close()
+
 	if err != nil {
 		return err
 	}
@@ -1391,6 +1399,7 @@ func (s *pgStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int)
 	}
 	edges, err := scanPGEdges(erows)
 	erows.Close()
+
 	if err != nil {
 		return err
 	}
@@ -1410,7 +1419,7 @@ func (s *pgStore) ExportChunked(outDir string, nodeChunkSize, edgeChunkSize int)
 	if err != nil {
 		return err
 	}
-	defer brows.Close()
+	defer func() { brows.Close() }()
 	for brows.Next() {
 		var id string
 		var b []byte

@@ -57,7 +57,7 @@ names, package fragments) for best results.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			nodes, err := store.AllNodes()
 			if err != nil {
@@ -238,13 +238,13 @@ func renderQueryAnswer(w *os.File, question string,
 	for _, n := range allNodes {
 		idx[n.ID] = n
 	}
-	fmt.Fprintf(w, "## Query: %s\n\n", question)
-	fmt.Fprintf(w, "Seeds (top-%d by keyword score):\n\n", len(seeds))
+	_, _ = fmt.Fprintf(w, "## Query: %s\n\n", question)
+	_, _ = fmt.Fprintf(w, "Seeds (top-%d by keyword score):\n\n", len(seeds))
 	for i, s := range seeds {
-		fmt.Fprintf(w, "%d. **`%s`** [%s] · `%s` · %s:%d\n",
+		_, _ = fmt.Fprintf(w, "%d. **`%s`** [%s] · `%s` · %s:%d\n",
 			i+1, s.Name, s.Type, s.QualifiedName, s.FilePath, s.StartLine)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	visited := make(map[string]bool, 128)
 	for _, s := range seeds {
@@ -281,7 +281,7 @@ bfs:
 					rendered.WriteString("- _… token budget reached; rerun with --budget=N for more._\n")
 					tokens = rendered.Len() / charsPerToken
 					_, _ = w.WriteString(rendered.String())
-					fmt.Fprintf(w, "\n_~%d tokens, %d nodes visited_\n", tokens, len(visited))
+					_, _ = fmt.Fprintf(w, "\n_~%d tokens, %d nodes visited_\n", tokens, len(visited))
 					return
 				}
 				rendered.WriteString(line)
@@ -296,5 +296,5 @@ bfs:
 	}
 	tokens = rendered.Len() / charsPerToken
 	_, _ = w.WriteString(rendered.String())
-	fmt.Fprintf(w, "\n_~%d tokens, %d nodes visited_\n", tokens, len(visited))
+	_, _ = fmt.Fprintf(w, "\n_~%d tokens, %d nodes visited_\n", tokens, len(visited))
 }

@@ -133,27 +133,27 @@ port allocation or cleanup race; safe to invoke from CI.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			seed, err := pickFunctionSeed(store)
 			if err != nil {
 				// Non-fatal — just skip the impact probe.
-				fmt.Fprintf(os.Stderr, "ckg bench-server: no Function node for impact seed; skipping that probe\n")
+				_, _ = fmt.Fprintf(os.Stderr, "ckg bench-server: no Function node for impact seed; skipping that probe\n")
 			}
 			probes := defaultProbes(seed)
 
 			srv := server.New(store, nil)
 			ts := httptest.NewServer(srv)
-			defer ts.Close()
+			defer func() { ts.Close() }()
 
-			fmt.Fprintf(os.Stderr, "bench-server: graph=%s iters=%d concurrency=%d probes=%d\n",
+			_, _ = fmt.Fprintf(os.Stderr, "bench-server: graph=%s iters=%d concurrency=%d probes=%d\n",
 				graph, iterations, concurrency, len(probes))
 
 			results := make([]benchResult, 0, len(probes))
 			for _, p := range probes {
 				r := runBench(ts.URL, p, iterations, concurrency)
 				results = append(results, r)
-				fmt.Fprintf(os.Stderr, "  %-26s p50=%6.2f p95=%6.2f p99=%6.2f mean=%6.2f errors=%d\n",
+				_, _ = fmt.Fprintf(os.Stderr, "  %-26s p50=%6.2f p95=%6.2f p99=%6.2f mean=%6.2f errors=%d\n",
 					r.Endpoint, r.P50Ms, r.P95Ms, r.P99Ms, r.MeanMs, r.ErrorCount)
 			}
 
@@ -179,7 +179,7 @@ port allocation or cleanup race; safe to invoke from CI.`,
 			if err := os.WriteFile(output, append(payload, '\n'), 0o644); err != nil {
 				return fmt.Errorf("write output: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "bench-server: wrote %s\n", output)
+			_, _ = fmt.Fprintf(os.Stderr, "bench-server: wrote %s\n", output)
 			return nil
 		},
 	}

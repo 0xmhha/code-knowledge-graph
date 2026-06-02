@@ -79,7 +79,7 @@ func TestMCPListsAllTools(t *testing.T) {
 
 func send(w io.Writer, m map[string]any) {
 	buf, _ := json.Marshal(m)
-	fmt.Fprintf(w, "%s\n", buf)
+	_, _ = fmt.Fprintf(w, "%s\n", buf)
 }
 
 func read(br *bufio.Reader) map[string]any {

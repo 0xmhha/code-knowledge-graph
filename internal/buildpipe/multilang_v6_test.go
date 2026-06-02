@@ -38,7 +38,7 @@ func TestPipelineMultilangV6Markers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	nodes, err := store.AllNodes()
 	if err != nil {

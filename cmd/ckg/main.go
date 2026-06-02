@@ -19,7 +19,7 @@ func main() {
 		if errors.As(err, &ve) {
 			os.Exit(int(ve))
 		}
-		fmt.Fprintln(os.Stderr, "ckg:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "ckg:", err)
 		os.Exit(1)
 	}
 }

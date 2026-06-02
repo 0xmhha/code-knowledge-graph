@@ -19,7 +19,7 @@ func TestExportChunked(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, _ := persist.OpenReadOnly(filepath.Join(src, "graph.db"))
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	dst := t.TempDir()
 	if err := store.ExportChunked(dst, 5000, 10000); err != nil {
 		t.Fatal(err)

@@ -31,7 +31,7 @@ func newConcurrencyStore(t *testing.T) persist.Store {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -74,7 +74,7 @@ func newImplementsStore(t *testing.T) persist.Store {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -278,7 +278,7 @@ func TestImpact_SelfGraph(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Seed 1: persist.Store interface — implementers should appear in
 	// interface_impact (sqliteStore satisfies it; PG backend may or may
@@ -514,7 +514,7 @@ func TestImpact_SelfGraph_Deterministic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	a, err := computeImpact(store, "persist.StoreReader.AllNodes", "", 2, false)
 	if err != nil {

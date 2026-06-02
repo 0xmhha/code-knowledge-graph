@@ -125,7 +125,7 @@ and language so the export is lossless against the SQLite source.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			manifest, err := store.GetManifest()
 			if err != nil {
@@ -144,9 +144,9 @@ and language so the export is lossless against the SQLite source.`,
 			if err != nil {
 				return fmt.Errorf("create out: %w", err)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }()
 			w := bufio.NewWriter(f)
-			defer w.Flush()
+			defer func() { _ = w.Flush() }()
 
 			if err := writeGraphJSON(w, manifest, nodes, edges, pretty, minimal); err != nil {
 				return fmt.Errorf("write json: %w", err)
@@ -155,7 +155,7 @@ and language so the export is lossless against the SQLite source.`,
 			if minimal {
 				mode = "minimal"
 			}
-			fmt.Fprintf(os.Stderr,
+			_, _ = fmt.Fprintf(os.Stderr,
 				"ckg: exported %d nodes / %d edges to %s (%s)\n",
 				len(nodes), len(edges), out, mode)
 			return nil

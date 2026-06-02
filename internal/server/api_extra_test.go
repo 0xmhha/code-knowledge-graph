@@ -33,7 +33,7 @@ func buildFixture(t *testing.T) persist.Store {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	t.Cleanup(func() { store.Close() })
+	t.Cleanup(func() { _ = store.Close() })
 	return store
 }
 
@@ -52,7 +52,7 @@ func TestHandlersExtended(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("GET %s = %d, body: %s", path, resp.StatusCode, body)
@@ -207,7 +207,7 @@ func TestHandlersExtended(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST /api/edges: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			b, _ := io.ReadAll(resp.Body)
 			t.Fatalf("POST /api/edges = %d, body: %s", resp.StatusCode, b)
@@ -228,7 +228,7 @@ func TestHandlersExtended(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST /api/edges (empty): %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("POST /api/edges (empty ids) = %d, want 200", resp.StatusCode)
 		}
@@ -239,7 +239,8 @@ func TestHandlersExtended(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST /api/edges (bad body): %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
+
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("POST /api/edges (bad body) = %d, want 400", resp.StatusCode)
 		}
@@ -252,7 +253,7 @@ func TestHandlersExtended(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET /api/blob/%s: %v", funcNodeID, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				t.Fatalf("GET /api/blob/%s = %d, body: %s", funcNodeID, resp.StatusCode, body)
@@ -274,7 +275,8 @@ func TestHandlersExtended(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /api/blob/nonexistent: %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
+
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET /api/blob/nonexistent = %d, want 404", resp.StatusCode)
 		}
@@ -294,7 +296,7 @@ func TestHandleTopNodes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /api/nodes/top: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			t.Fatalf("status=%d body=%s", resp.StatusCode, body)
@@ -315,7 +317,8 @@ func TestHandleTopNodes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
+
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status=%d, want 200", resp.StatusCode)
 		}
@@ -326,7 +329,8 @@ func TestHandleTopNodes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET: %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
+
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status=%d, want 400", resp.StatusCode)
 		}

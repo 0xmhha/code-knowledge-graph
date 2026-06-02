@@ -29,7 +29,7 @@ func TestGoStablenetQuerySmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open graph %q: %v", dbPath, err)
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// (1) FindSymbol resolves known symbols to the expected file => the parser
 	// discovered + indexed them with correct location (graph-gen integrity).

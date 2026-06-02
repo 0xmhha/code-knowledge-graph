@@ -74,7 +74,7 @@ Output formats:
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			pack, err := evidence.NewCache().BuildPack(store, evidence.Options{
 				Intent:       intent,
@@ -123,32 +123,32 @@ Output formats:
 // 100-column terminal.
 func renderEvidenceText(w io.Writer, pack *evidence.Pack) {
 	if pack == nil || len(pack.Hits) == 0 {
-		fmt.Fprintln(w, "(no hits)")
+		_, _ = fmt.Fprintln(w, "(no hits)")
 		return
 	}
 	const previewLines = 5
-	fmt.Fprintf(w, "%d commit(s):\n\n", len(pack.Hits))
+	_, _ = fmt.Fprintf(w, "%d commit(s):\n\n", len(pack.Hits))
 	for i, hit := range pack.Hits {
 		issues := ""
 		if len(hit.Commit.IssueIDs) > 0 {
 			issues = " [" + strings.Join(hit.Commit.IssueIDs, ",") + "]"
 		}
-		fmt.Fprintf(w, "%d. %s%s — %s\n",
+		_, _ = fmt.Fprintf(w, "%d. %s%s — %s\n",
 			i+1, hit.Commit.SHA[:12], issues, hit.Commit.Subject)
 		for _, h := range hit.Hunks {
-			fmt.Fprintf(w, "   %s L%d-%d:\n", h.FilePath, h.StartLine, h.EndLine)
+			_, _ = fmt.Fprintf(w, "   %s L%d-%d:\n", h.FilePath, h.StartLine, h.EndLine)
 			lines := strings.Split(h.PatchText, "\n")
 			n := len(lines)
 			if n > previewLines {
 				n = previewLines
 			}
 			for _, line := range lines[:n] {
-				fmt.Fprintf(w, "     %s\n", line)
+				_, _ = fmt.Fprintf(w, "     %s\n", line)
 			}
 			if len(lines) > previewLines {
-				fmt.Fprintf(w, "     … (%d more lines)\n", len(lines)-previewLines)
+				_, _ = fmt.Fprintf(w, "     … (%d more lines)\n", len(lines)-previewLines)
 			}
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 }

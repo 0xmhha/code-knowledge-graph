@@ -22,7 +22,7 @@ func LoadCKGIgnore(root string) (*CKGIgnore, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	c := &CKGIgnore{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

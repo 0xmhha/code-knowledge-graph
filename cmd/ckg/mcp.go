@@ -29,8 +29,8 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
-			fmt.Fprintf(os.Stderr, "ckg mcp: stdio server bound to %s\n", db)
+			defer func() { _ = store.Close() }()
+			_, _ = fmt.Fprintf(os.Stderr, "ckg mcp: stdio server bound to %s\n", db)
 			return mcp.Run(context.Background(), store)
 		},
 	}

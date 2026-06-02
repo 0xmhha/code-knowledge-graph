@@ -67,9 +67,9 @@ func (v *declVisitor) runUsingFor() {
 	if qErr != nil {
 		return
 	}
-	defer query.Close()
+	defer func() { query.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(query, v.root, v.src)
 	names := query.CaptureNames()
 	for {
@@ -342,9 +342,9 @@ func (v *declVisitor) runUsingForCalls() {
 	if qErr != nil {
 		return
 	}
-	defer q.Close()
+	defer func() { q.Close() }()
 	cur := sitter.NewQueryCursor()
-	defer cur.Close()
+	defer func() { cur.Close() }()
 	matches := cur.Matches(q, v.root, v.src)
 	names := q.CaptureNames()
 	for {

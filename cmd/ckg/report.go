@@ -42,7 +42,7 @@ calls, runs in seconds even on 220K-node graphs.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			manifest, err := store.GetManifest()
 			if err != nil {
@@ -74,7 +74,7 @@ calls, runs in seconds even on 220K-node graphs.`,
 			if err := os.WriteFile(out, []byte(report), 0o644); err != nil {
 				return fmt.Errorf("write report: %w", err)
 			}
-			fmt.Fprintf(os.Stderr, "ckg: wrote GRAPH_REPORT to %s (%d bytes)\n", out, len(report))
+			_, _ = fmt.Fprintf(os.Stderr, "ckg: wrote GRAPH_REPORT to %s (%d bytes)\n", out, len(report))
 			return nil
 		},
 	}
@@ -97,17 +97,17 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 	var b strings.Builder
 
 	// ── Header
-	fmt.Fprintf(&b, "# GRAPH_REPORT\n\n")
-	fmt.Fprintf(&b, "Generated from CKG schema **%s** • %s\n\n",
+	_, _ = fmt.Fprintf(&b, "# GRAPH_REPORT\n\n")
+	_, _ = fmt.Fprintf(&b, "Generated from CKG schema **%s** • %s\n\n",
 		m.SchemaVersion, m.BuildTimestamp)
 	if m.SrcRoot != "" {
-		fmt.Fprintf(&b, "- **Source**: `%s`", m.SrcRoot)
+		_, _ = fmt.Fprintf(&b, "- **Source**: `%s`", m.SrcRoot)
 		if m.SrcCommit != "" {
-			fmt.Fprintf(&b, " @ `%s`", shortSHA(m.SrcCommit))
+			_, _ = fmt.Fprintf(&b, " @ `%s`", shortSHA(m.SrcCommit))
 		}
 		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "- **Nodes**: %d • **Edges**: %d\n",
+	_, _ = fmt.Fprintf(&b, "- **Nodes**: %d • **Edges**: %d\n",
 		len(nodes), len(edges))
 	if len(m.Languages) > 0 {
 		var langs []string
@@ -115,7 +115,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 			langs = append(langs, fmt.Sprintf("%s=%d", k, v))
 		}
 		sort.Strings(langs)
-		fmt.Fprintf(&b, "- **Languages** (files): %s\n", strings.Join(langs, ", "))
+		_, _ = fmt.Fprintf(&b, "- **Languages** (files): %s\n", strings.Join(langs, ", "))
 	}
 	b.WriteString("\n")
 
@@ -125,13 +125,13 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 	for _, ax := range []string{"G1", "G2", "G3", "G4", "G5", "G6"} {
 		c := axisCounts[ax]
 		bar := bar(c, axisCounts["max"], 30)
-		fmt.Fprintf(&b, "- **%s** %s — %d edges %s\n",
+		_, _ = fmt.Fprintf(&b, "- **%s** %s — %d edges %s\n",
 			ax, axisLabel(ax), c, bar)
 	}
 	b.WriteString("\n")
 
 	// ── God nodes
-	fmt.Fprintf(&b, "## God nodes (top-%d by PageRank)\n\n", topGod)
+	_, _ = fmt.Fprintf(&b, "## God nodes (top-%d by PageRank)\n\n", topGod)
 	b.WriteString("Symbols that everything else flows through. Removing or refactoring these has the highest blast radius.\n\n")
 	gods := topPageRank(nodes, topGod)
 	if len(gods) == 0 {
@@ -140,7 +140,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 		b.WriteString("| # | Type | Name | Qualified Name | PageRank | In/Out |\n")
 		b.WriteString("|---|------|------|----------------|---------:|-------:|\n")
 		for i, n := range gods {
-			fmt.Fprintf(&b, "| %d | %s | `%s` | `%s` | %.5f | %d/%d |\n",
+			_, _ = fmt.Fprintf(&b, "| %d | %s | `%s` | `%s` | %.5f | %d/%d |\n",
 				i+1, n.Type, n.Name, n.QualifiedName,
 				n.PageRank, n.InDegree, n.OutDegree)
 		}
@@ -155,7 +155,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 		b.WriteString("| # | File | Symbols | Σ PageRank |\n")
 		b.WriteString("|---|------|--------:|-----------:|\n")
 		for i, f := range hotFiles {
-			fmt.Fprintf(&b, "| %d | `%s` | %d | %.5f |\n",
+			_, _ = fmt.Fprintf(&b, "| %d | `%s` | %d | %.5f |\n",
 				i+1, f.path, f.nodeCount, f.sumPR)
 		}
 		b.WriteString("\n")
@@ -172,7 +172,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 		b.WriteString("|-----------|-----:|---------:|----------------|\n")
 		for _, c := range commSummary {
 			samples := sampleCommunityNames(c.members, nodes, 5)
-			fmt.Fprintf(&b, "| `%s` | %d | %.3f | %s |\n",
+			_, _ = fmt.Fprintf(&b, "| `%s` | %d | %.3f | %s |\n",
 				truncateRunes(c.parentID, 24), c.size, c.cohesion, samples)
 		}
 		b.WriteString("\n")
@@ -184,7 +184,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 		b.WriteString("## Knowledge Gaps\n\n")
 		b.WriteString("Low-signal regions. Possible missing edges, undocumented components, or candidates for refactoring.\n\n")
 		if len(gaps.isolated) > 0 {
-			fmt.Fprintf(&b, "- **%d isolated node(s)** (degree ≤ 1):", len(gaps.isolated))
+			_, _ = fmt.Fprintf(&b, "- **%d isolated node(s)** (degree ≤ 1):", len(gaps.isolated))
 			labels := []string{}
 			for i, n := range gaps.isolated {
 				if i >= 5 {
@@ -194,16 +194,16 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 			}
 			b.WriteString(" " + strings.Join(labels, ", "))
 			if len(gaps.isolated) > 5 {
-				fmt.Fprintf(&b, " (+%d more)", len(gaps.isolated)-5)
+				_, _ = fmt.Fprintf(&b, " (+%d more)", len(gaps.isolated)-5)
 			}
 			b.WriteString("\n  These have ≤1 connection — possible missing edges or unused symbols.\n")
 		}
 		if len(gaps.thinComms) > 0 {
-			fmt.Fprintf(&b, "- **%d thin communities** (< 3 members) — may indicate stranded code or parser-coverage holes.\n",
+			_, _ = fmt.Fprintf(&b, "- **%d thin communities** (< 3 members) — may indicate stranded code or parser-coverage holes.\n",
 				len(gaps.thinComms))
 		}
 		if gaps.ambiguousPct > 20 {
-			fmt.Fprintf(&b, "- **High ambiguity: %.0f%% of edges are AMBIGUOUS.** Review and disambiguate to improve graph quality.\n",
+			_, _ = fmt.Fprintf(&b, "- **High ambiguity: %.0f%% of edges are AMBIGUOUS.** Review and disambiguate to improve graph quality.\n",
 				gaps.ambiguousPct)
 		}
 		b.WriteString("\n")
@@ -214,7 +214,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 	b.WriteString("Questions the graph is uniquely positioned to answer.\n\n")
 	bc := score.ApproxBetweenness(nodes, edges, 100, 42)
 	for _, q := range suggestedQuestionsV2(nodes, edges, gods, hotFiles, communities, cohesions, gaps, bc, axisCounts) {
-		fmt.Fprintf(&b, "- %s\n", q)
+		_, _ = fmt.Fprintf(&b, "- %s\n", q)
 	}
 	b.WriteString("\n")
 
@@ -222,7 +222,7 @@ func buildReport(m persist.Manifest, nodes []types.Node, edges []types.Edge,
 	b.WriteString("## Confidence breakdown\n\n")
 	confEdges := confidenceCounts(edges)
 	for _, c := range []types.Confidence{types.ConfExtracted, types.ConfInferred, types.ConfAmbiguous} {
-		fmt.Fprintf(&b, "- **%s**: %d edges\n", c, confEdges[c])
+		_, _ = fmt.Fprintf(&b, "- **%s**: %d edges\n", c, confEdges[c])
 	}
 	b.WriteString("\n")
 

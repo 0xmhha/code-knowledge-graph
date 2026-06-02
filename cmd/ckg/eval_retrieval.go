@@ -54,7 +54,7 @@ Exit codes:
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			fs, err := retrieval.LoadFixtures(fixtures)
 			if err != nil {
@@ -77,7 +77,7 @@ Exit codes:
 			// outcome without scrolling through JSON. The numeric
 			// detail lives in the report file (or stdout when
 			// --output=-).
-			fmt.Fprintf(os.Stderr,
+			_, _ = fmt.Fprintf(os.Stderr,
 				"eval-retrieval: %d/%d passed (aggregate R=%.2f P=%.2f F1=%.2f)\n",
 				report.Passed, report.FixturesTotal,
 				report.Aggregate.Recall, report.Aggregate.Precision, report.Aggregate.F1)

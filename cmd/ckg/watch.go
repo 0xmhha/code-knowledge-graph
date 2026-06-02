@@ -73,7 +73,7 @@ takes the incremental cache path.`,
 				}
 			}
 
-			fmt.Fprintf(os.Stderr, "ckg watch: initial build src=%s out=%s\n", src, effectiveOut)
+			_, _ = fmt.Fprintf(os.Stderr, "ckg watch: initial build src=%s out=%s\n", src, effectiveOut)
 			if _, err := buildpipe.Run(runOpts()); err != nil {
 				return fmt.Errorf("initial build: %w", err)
 			}
@@ -111,7 +111,7 @@ func runWatchLoop(ctx context.Context, src string, debounce time.Duration,
 	if err != nil {
 		return fmt.Errorf("fsnotify.NewWatcher: %w", err)
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }()
 
 	if err := addWatchedDirs(w, src); err != nil {
 		return fmt.Errorf("add watches: %w", err)
@@ -142,12 +142,12 @@ func runWatchLoop(ctx context.Context, src string, debounce time.Duration,
 		timer = time.AfterFunc(debounce, doRebuild)
 	}
 
-	fmt.Fprintf(os.Stderr, "ckg watch: watching %s (debounce=%v); Ctrl-C to stop\n",
+	_, _ = fmt.Fprintf(os.Stderr, "ckg watch: watching %s (debounce=%v); Ctrl-C to stop\n",
 		src, debounce)
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "ckg watch: stopping")
+			_, _ = fmt.Fprintln(os.Stderr, "ckg watch: stopping")
 			if timer != nil {
 				timer.Stop()
 			}

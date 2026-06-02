@@ -66,7 +66,7 @@ work") rather than a precision benchmark.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			manifest, err := store.GetManifest()
 			if err != nil {
@@ -84,7 +84,7 @@ work") rather than a precision benchmark.`,
 			corpusTokens := estimateCorpusTokens(manifest.SrcRoot, nodes)
 			gods := topPageRank(nodes, questions)
 			if len(gods) == 0 {
-				fmt.Fprintln(os.Stderr,
+				_, _ = fmt.Fprintln(os.Stderr,
 					"benchmark: no PageRank-ranked nodes found — was the graph built without scoring?")
 				return nil
 			}
@@ -284,20 +284,20 @@ func ratio(corpus, query int) float64 {
 }
 
 func printBenchmark(w *os.File, m persist.Manifest, corpusTokens, avgQT int, perQ []queryStat) {
-	fmt.Fprintln(w, "ckg token-reduction benchmark")
-	fmt.Fprintf(w, "  Source:    %s\n", m.SrcRoot)
-	fmt.Fprintf(w, "  Corpus:    ~%s tokens (sum of indexed source files)\n",
+	_, _ = fmt.Fprintln(w, "ckg token-reduction benchmark")
+	_, _ = fmt.Fprintf(w, "  Source:    %s\n", m.SrcRoot)
+	_, _ = fmt.Fprintf(w, "  Corpus:    ~%s tokens (sum of indexed source files)\n",
 		humanInt(corpusTokens))
-	fmt.Fprintf(w, "  Avg query: ~%s tokens (top-%d god nodes, k-hop BFS)\n",
+	_, _ = fmt.Fprintf(w, "  Avg query: ~%s tokens (top-%d god nodes, k-hop BFS)\n",
 		humanInt(avgQT), len(perQ))
 	if avgQT > 0 {
-		fmt.Fprintf(w, "  Reduction: %.1fx fewer tokens per query\n",
+		_, _ = fmt.Fprintf(w, "  Reduction: %.1fx fewer tokens per query\n",
 			ratio(corpusTokens, avgQT))
 	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Per-question breakdown:")
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w, "Per-question breakdown:")
 	for i, q := range perQ {
-		fmt.Fprintf(w, "  %d. `%s` → ~%s tokens (%.1fx reduction)\n",
+		_, _ = fmt.Fprintf(w, "  %d. `%s` → ~%s tokens (%.1fx reduction)\n",
 			i+1, q.name, humanInt(q.tokens), q.reduction)
 	}
 }

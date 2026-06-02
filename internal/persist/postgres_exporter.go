@@ -118,7 +118,7 @@ func (e *PostgresExporter) Export(ctx context.Context, dsn string, store StoreRe
 	if err != nil {
 		return fmt.Errorf("connect to postgres: %w", err)
 	}
-	defer pool.Close()
+	defer func() { pool.Close() }()
 
 	if err := pool.Ping(ctx); err != nil {
 		return fmt.Errorf("ping postgres: %w", err)

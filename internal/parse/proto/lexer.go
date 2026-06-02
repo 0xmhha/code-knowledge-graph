@@ -111,9 +111,9 @@ func (l *lexer) next() token {
 	if ch >= '0' && ch <= '9' {
 		for l.offset < len(l.src) {
 			c, sz := utf8.DecodeRune(l.src[l.offset:])
-			if !(c == '.' || c == 'x' || c == 'X' || c == '-' || c == '+' ||
-				(c >= '0' && c <= '9') ||
-				(c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			if c != '.' && c != 'x' && c != 'X' && c != '-' && c != '+' &&
+				(c < '0' || c > '9') &&
+				(c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 				break
 			}
 			l.offset += sz

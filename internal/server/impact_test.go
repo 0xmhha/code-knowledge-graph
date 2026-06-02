@@ -31,7 +31,7 @@ func TestHandleImpact_FunctionCallers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/impact: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("GET /api/impact = %d, body: %s", resp.StatusCode, body)
@@ -81,7 +81,7 @@ func TestHandleImpact_BadRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/impact: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -105,7 +105,8 @@ func TestHandleImpact_SeedTooLong(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/impact (qname): %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
+
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("oversized seed_qname status = %d, want 400", resp.StatusCode)
 	}
@@ -117,7 +118,8 @@ func TestHandleImpact_SeedTooLong(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/impact (file): %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
+
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("oversized seed_file status = %d, want 400", resp.StatusCode)
 	}
@@ -138,7 +140,7 @@ func TestHandleImpact_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/impact: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}

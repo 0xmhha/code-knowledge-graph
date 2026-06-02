@@ -59,7 +59,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	}
 	lang := solang.GetLanguage()
 	parser := sitter.NewParser()
-	defer parser.Close()
+	defer func() { parser.Close() }()
 	if err := parser.SetLanguage(lang); err != nil {
 		return nil, fmt.Errorf("solidity: SetLanguage: %w", err)
 	}
@@ -67,7 +67,7 @@ func (p *Parser) ParseFile(path string, src []byte) (*parse.ParseResult, error) 
 	if tree == nil {
 		return nil, fmt.Errorf("solidity: parser returned nil tree for %s", rel)
 	}
-	defer tree.Close()
+	defer func() { tree.Close() }()
 	v := newDeclVisitor(rel, src, lang, tree.RootNode())
 	v.visit()
 	// Merge per-visitor abi into the shared Parser.abi under lock —

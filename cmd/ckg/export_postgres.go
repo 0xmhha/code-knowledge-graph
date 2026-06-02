@@ -38,7 +38,7 @@ the export continues when the extension is unavailable.`,
 			if err != nil {
 				return fmt.Errorf("open graph at %s: %w", dbPath, err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			log.Info("starting postgres export",
 				"source", dbPath,

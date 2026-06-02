@@ -25,7 +25,8 @@ func TestOptions_NoViewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/manifest: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("api still required; got %d", resp.StatusCode)
 	}
@@ -34,7 +35,8 @@ func TestOptions_NoViewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
+
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("GET / with NoViewer = %d, want 404", resp.StatusCode)
 	}
@@ -60,7 +62,7 @@ func TestOptions_DevViewerDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), marker) {
 		t.Errorf("disk index not served; body = %q", body)

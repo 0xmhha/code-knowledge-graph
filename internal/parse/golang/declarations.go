@@ -335,7 +335,7 @@ func formatSignature(d *ast.FuncDecl) string {
 	var b strings.Builder
 	b.WriteString("func ")
 	if d.Recv != nil && len(d.Recv.List) > 0 {
-		fmt.Fprintf(&b, "(%s) ", exprName(d.Recv.List[0].Type))
+		_, _ = fmt.Fprintf(&b, "(%s) ", exprName(d.Recv.List[0].Type))
 	}
 	b.WriteString(d.Name.Name)
 	b.WriteString("(...)")

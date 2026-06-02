@@ -49,7 +49,7 @@ pair, plus a summary line showing the hop count.`,
 			if err != nil {
 				return fmt.Errorf("open graph: %w", err)
 			}
-			defer store.Close()
+			defer func() { _ = store.Close() }()
 
 			nodes, err := store.AllNodes()
 			if err != nil {
@@ -73,11 +73,11 @@ pair, plus a summary line showing the hop count.`,
 				return nil
 			}
 			if fromHits > 1 {
-				fmt.Fprintf(os.Stderr, "ckg path: %q matched %d nodes; using highest-PageRank.\n",
+				_, _ = fmt.Fprintf(os.Stderr, "ckg path: %q matched %d nodes; using highest-PageRank.\n",
 					args[0], fromHits)
 			}
 			if toHits > 1 {
-				fmt.Fprintf(os.Stderr, "ckg path: %q matched %d nodes; using highest-PageRank.\n",
+				_, _ = fmt.Fprintf(os.Stderr, "ckg path: %q matched %d nodes; using highest-PageRank.\n",
 					args[1], toHits)
 			}
 
@@ -210,12 +210,12 @@ func printPath(w *os.File, nodes []types.Node, path []string, edgeTypes []string
 			}
 		}
 	}
-	fmt.Fprintf(w, "Path (%d hops):\n\n", len(path)-1)
+	_, _ = fmt.Fprintf(w, "Path (%d hops):\n\n", len(path)-1)
 	for i, id := range path {
 		n := idx[id]
-		fmt.Fprintf(w, "  %2d. [%s] %s — `%s`\n", i+1, n.Type, n.Name, n.QualifiedName)
+		_, _ = fmt.Fprintf(w, "  %2d. [%s] %s — `%s`\n", i+1, n.Type, n.Name, n.QualifiedName)
 		if i < len(edgeTypes) {
-			fmt.Fprintf(w, "       └──[%s]──>\n", edgeTypes[i])
+			_, _ = fmt.Fprintf(w, "       └──[%s]──>\n", edgeTypes[i])
 		}
 	}
 }

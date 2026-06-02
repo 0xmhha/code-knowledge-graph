@@ -21,7 +21,7 @@ func newKindsFixtureStore(t *testing.T) persist.Store {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	if err := s.Migrate(); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}

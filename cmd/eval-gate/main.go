@@ -51,8 +51,8 @@ type retrievalReport struct {
 type validateReport []validatorRun
 
 type validatorRun struct {
-	Validator string  `json:"Validator"`
-	Issues    []any   `json:"Issues"`
+	Validator string `json:"Validator"`
+	Issues    []any  `json:"Issues"`
 }
 
 func (r validateReport) IssueCount() int {
@@ -82,9 +82,9 @@ func main() {
 		fmt.Println("eval-gate: PASS — no regressions detected")
 		return
 	}
-	fmt.Fprintf(os.Stderr, "eval-gate: FAIL — %d regression(s)\n", len(failures))
+	_, _ = fmt.Fprintf(os.Stderr, "eval-gate: FAIL — %d regression(s)\n", len(failures))
 	for _, f := range failures {
-		fmt.Fprintf(os.Stderr, "  - %s\n", f)
+		_, _ = fmt.Fprintf(os.Stderr, "  - %s\n", f)
 	}
 	os.Exit(1)
 }

@@ -89,7 +89,7 @@ policies:
 	if err != nil {
 		t.Fatalf("open graph.db: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Assert: at least one NodePolicy row landed. The YAML declares
 	// exactly one policy entry; FindSymbol on its qname should find

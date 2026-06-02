@@ -30,11 +30,11 @@ func TestHandlersBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	srv := server.New(store, nil)
 	ts := httptest.NewServer(srv)
-	defer ts.Close()
+	defer func() { ts.Close() }()
 
 	cases := []struct {
 		name, path string
@@ -48,7 +48,7 @@ func TestHandlersBasic(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET %s: %v", c.path, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("GET %s = %d, want 200", c.path, resp.StatusCode)
 			}
@@ -69,7 +69,7 @@ func TestHandlersBasic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /api/evidence: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
 		}
@@ -79,7 +79,7 @@ func TestHandlersBasic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /api/evidence?mode=xor: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400 (mode allow-list failure)", resp.StatusCode)
 		}
@@ -92,7 +92,7 @@ func TestHandlersBasic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /api/evidence?mode=and: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("status = %d, want 200 (wiring sanity for mode=and)", resp.StatusCode)
 		}

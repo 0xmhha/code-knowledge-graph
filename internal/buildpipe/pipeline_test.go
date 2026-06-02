@@ -28,7 +28,7 @@ func TestPipelineRunsOnGoFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	m, err := store.GetManifest()
 	if err != nil {
@@ -63,7 +63,7 @@ func TestPipelineXLangBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenReadOnly: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	rows, err := store.QueryEdgesByType("binds_to")
 	if err != nil {

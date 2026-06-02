@@ -67,7 +67,7 @@ markdown summary when you only need the SQLite output.`,
 				return fmt.Errorf("mkdir out: %w", err)
 			}
 
-			fmt.Fprintf(os.Stderr, "ckg quickstart: build %s → %s\n", absSrc, absOut)
+			_, _ = fmt.Fprintf(os.Stderr, "ckg quickstart: build %s → %s\n", absSrc, absOut)
 			if _, err := buildpipe.Run(buildpipe.Options{
 				SrcRoot:    absSrc,
 				OutDir:     absOut,
@@ -83,15 +83,15 @@ markdown summary when you only need the SQLite output.`,
 				if err := generateReport(absOut, reportPath); err != nil {
 					return fmt.Errorf("report: %w", err)
 				}
-				fmt.Fprintf(os.Stderr, "ckg quickstart: wrote %s\n", reportPath)
+				_, _ = fmt.Fprintf(os.Stderr, "ckg quickstart: wrote %s\n", reportPath)
 			}
 
 			if noServe {
-				fmt.Fprintf(os.Stderr, "ckg quickstart: build complete (skip serve per --no-serve)\n")
+				_, _ = fmt.Fprintf(os.Stderr, "ckg quickstart: build complete (skip serve per --no-serve)\n")
 				return nil
 			}
 
-			fmt.Fprintf(os.Stderr, "ckg quickstart: starting viewer at http://localhost:%d\n", port)
+			_, _ = fmt.Fprintf(os.Stderr, "ckg quickstart: starting viewer at http://localhost:%d\n", port)
 			return runServe(serveOpts{
 				GraphDir: absOut, Port: port, Log: log,
 			})
@@ -113,7 +113,7 @@ func generateReport(graphDir, outPath string) error {
 	if err != nil {
 		return fmt.Errorf("open graph: %w", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	manifest, err := store.GetManifest()
 	if err != nil {
 		return fmt.Errorf("manifest: %w", err)
