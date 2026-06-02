@@ -30,6 +30,7 @@ func RegisterAll(s *server.MCPServer, reader store.Reader) {
 	RegisterSearchText(s, safe)
 	RegisterGetContextForTask(s, safe)
 	RegisterImpactOfChange(s, safe)
+	RegisterConcurrencyImpact(s, safe)
 	// One Cache per Run amortises BM25 corpus indexing across every
 	// evidence_for_intent call. Manifest-keyed invalidation handles
 	// the case where a concurrent `ckg build` rebuilds the graph.
