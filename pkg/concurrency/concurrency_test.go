@@ -89,19 +89,26 @@ func edge(src, dst string, t types.EdgeType, line int) types.Edge {
 	return types.Edge{Src: src, Dst: dst, Type: t, Line: line, Count: 1, Confidence: types.ConfInferred}
 }
 
-// fixture builds:
+// fixture mirrors the REAL go-stablenet concurrency topology (verified against
+// a 255k-node build): goroutine/channel/lock edges are anchored on the
+// ENCLOSING FUNCTION, and channel ops point to a per-site CallSite node
+// (Function -> sends_to/recvs_from -> CallSite), NOT Goroutine -> Channel.
 //
-//	Worker --spawns--> g1 --sends_to--> ch <--recvs_from-- g2 <--spawns-- Peer
+//	Worker --spawns--> g1
+//	Worker --sends_to--> cs_send (CallSite)
+//	Peer   --spawns--> g2
+//	Peer   --recvs_from--> cs_recv (CallSite)
 //	Touch  --acquires_lock--> mu
 //	Touch  --accessed_under_lock--> balance
-//	Touch  --releases_lock--> mu     (must NOT surface)
+//	Touch  --releases_lock--> mu        (must NOT surface)
 func fixture() *fakeReader {
 	nodes := []types.Node{
 		node("n_worker", "Worker", "pkg.Worker", "a.go", 10, types.NodeFunction),
-		node("n_g1", "goroutine", "pkg.Worker$g1", "a.go", 12, types.NodeGoroutine),
-		node("n_ch", "ch", "pkg.ch", "a.go", 11, types.NodeChannel),
-		node("n_g2", "goroutine", "pkg.Peer$g2", "b.go", 22, types.NodeGoroutine),
+		node("n_g1", "goroutine", "pkg.Worker#Goroutine@12", "a.go", 12, types.NodeGoroutine),
+		node("n_cs_send", "ch<-", "pkg.Worker#CallSite@13", "a.go", 13, types.NodeCallSite),
 		node("n_peer", "Peer", "pkg.Peer", "b.go", 20, types.NodeFunction),
+		node("n_g2", "goroutine", "pkg.Peer#Goroutine@22", "b.go", 22, types.NodeGoroutine),
+		node("n_cs_recv", "<-ch", "pkg.Peer#CallSite@23", "b.go", 23, types.NodeCallSite),
 		node("n_mu", "mu", "pkg.State.mu", "c.go", 30, types.NodeMutex),
 		node("n_bal", "balance", "pkg.State.balance", "c.go", 31, types.NodeField),
 		node("n_touch", "Touch", "pkg.Touch", "c.go", 35, types.NodeFunction),
@@ -114,12 +121,12 @@ func fixture() *fakeReader {
 		nodes: m,
 		edges: []types.Edge{
 			edge("n_worker", "n_g1", types.EdgeSpawns, 12),
-			edge("n_g1", "n_ch", types.EdgeSendsTo, 13),
-			edge("n_g2", "n_ch", types.EdgeRecvsFrom, 23),
+			edge("n_worker", "n_cs_send", types.EdgeSendsTo, 13), // Function -> CallSite (real)
 			edge("n_peer", "n_g2", types.EdgeSpawns, 22),
+			edge("n_peer", "n_cs_recv", types.EdgeRecvsFrom, 23), // Function -> CallSite (real)
 			edge("n_touch", "n_mu", types.EdgeAcquiresLock, 36),
 			edge("n_touch", "n_bal", types.EdgeAccessedUnderLock, 37),
-			edge("n_touch", "n_mu", types.EdgeReleasesLock, 38), // excluded
+			edge("n_touch", "n_mu", types.EdgeReleasesLock, 38), // excluded by design
 		},
 	}
 }
@@ -148,6 +155,9 @@ func TestAnalyze_LockSeed_ExcludesReleasesLock(t *testing.T) {
 	if mu.Direction != "affected_by" {
 		t.Errorf("mu direction = %q, want affected_by", mu.Direction)
 	}
+	if mu.Type != types.NodeMutex {
+		t.Errorf("mu type = %q, want Mutex", mu.Type)
+	}
 	if _, ok := mods["pkg.State.balance"]; !ok {
 		t.Errorf("expected pkg.State.balance in modules, got %+v", res.Modules)
 	}
@@ -159,7 +169,6 @@ func TestAnalyze_LockSeed_ExcludesReleasesLock(t *testing.T) {
 			t.Errorf("releases_lock edge must NOT be surfaced, got %+v", e)
 		}
 	}
-	// acquires_lock must be present.
 	var sawAcquire bool
 	for _, e := range res.Edges {
 		if e[2].(string) == string(types.EdgeAcquiresLock) {
@@ -187,22 +196,25 @@ func TestAnalyze_FieldSeed_ReverseFindsTouchers(t *testing.T) {
 	}
 }
 
-func TestAnalyze_FunctionSeed_ForwardChannel(t *testing.T) {
+func TestAnalyze_FunctionSeed_ForwardCallSiteTopology(t *testing.T) {
+	// Real go-stablenet topology: a function reaches its own goroutine (spawns)
+	// and the per-site CallSite of its channel op (sends_to), but NOT the peer
+	// function across the channel (single-direction BFS; channel edges are
+	// Function -> CallSite, not Goroutine -> Channel).
 	res, err := concurrency.Analyze(fixture(), "pkg.Worker", concurrency.Options{Depth: 3})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
 	}
 	mods := qnames(res.Modules)
-	if _, ok := mods["pkg.Worker$g1"]; !ok {
-		t.Errorf("expected own goroutine in modules, got %+v", res.Modules)
+	if g := mods["pkg.Worker#Goroutine@12"]; g.Type != types.NodeGoroutine {
+		t.Errorf("expected own Goroutine via spawns, got %+v", res.Modules)
 	}
-	if _, ok := mods["pkg.ch"]; !ok {
-		t.Errorf("expected channel in modules, got %+v", res.Modules)
+	cs, ok := mods["pkg.Worker#CallSite@13"]
+	if !ok || cs.Type != types.NodeCallSite {
+		t.Errorf("expected the send CallSite via sends_to, got %+v", res.Modules)
 	}
-	// Documented limitation: a function seed does NOT cross the channel to
-	// the peer (single-direction BFS). Peer must be unreachable here.
 	if _, ok := mods["pkg.Peer"]; ok {
-		t.Errorf("function seed should NOT reach peer across channel, got %+v", res.Modules)
+		t.Errorf("function seed must NOT reach the peer across a CallSite, got %+v", res.Modules)
 	}
 }
 
