@@ -78,21 +78,26 @@ func TestGoStablenetQuerySmoke(t *testing.T) {
 	if len(hits) == 0 {
 		t.Fatal("SearchFTS(quorum) returned 0 hits")
 	}
-	var scored, relevant bool
-	for _, h := range hits {
-		if h.Score > 0 || h.RawScore != 0 {
-			scored = true
+	// G1 Score contract (runtime, real data): every hit's Score is in [0,1] and
+	// hits are returned in non-increasing Score order — the contract cks's
+	// rerankers depend on.
+	var relevant bool
+	prev := 2.0
+	for i, h := range hits {
+		if h.Score < 0 || h.Score > 1 {
+			t.Errorf("hit %d (%s) Score=%f out of [0,1] (G1 contract)", i, h.Node.QualifiedName, h.Score)
 		}
+		if h.Score > prev+1e-9 {
+			t.Errorf("hits not in non-increasing Score order at %d: %f > prev %f", i, h.Score, prev)
+		}
+		prev = h.Score
 		if strings.Contains(strings.ToLower(h.Node.QualifiedName), "quorum") {
 			relevant = true
 		}
-		t.Logf("  hit: %-60s (%s) score=%.3f", h.Node.QualifiedName, h.Node.FilePath, h.Score)
-	}
-	if !scored {
-		t.Error("expected SearchFTS hits to carry a score")
 	}
 	if !relevant {
 		t.Errorf("expected at least one 'quorum' keyword hit whose name contains quorum, got %d hits", len(hits))
 	}
-	t.Logf("SearchFTS(quorum): %d hits, scored=%v relevant=%v", len(hits), scored, relevant)
+	t.Logf("SearchFTS(quorum): %d hits, top score=%.3f, relevant=%v (G1: Score in [0,1] + descending OK)",
+		len(hits), hits[0].Score, relevant)
 }
