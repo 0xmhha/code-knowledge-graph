@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version: '1.25.11' }
       - run: go vet ./...
       - run: go test -race ./...
       - uses: actions/setup-node@v4
@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: cd web/viewer-next && npm ci
@@ -80,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: go install golang.org/x/vuln/cmd/govulncheck@latest
@@ -95,7 +95,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: cd web/viewer-next && npm ci && npx playwright install --with-deps chromium && npm run build
@@ -128,6 +128,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.25' }
+        with: { go-version: '1.25.11' }
       - run: make eval
       - run: go run ./cmd/eval-gate
