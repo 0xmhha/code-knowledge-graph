@@ -11,13 +11,19 @@
 // stick to what's directly observable so the smoke job stays reliable.
 
 import { test, expect } from '@playwright/test';
+import { seedFirstTimeSeen } from './_lib.js';
+
+test.beforeEach(async ({ page }) => {
+  await seedFirstTimeSeen(page);
+});
 
 async function waitForBoot(page) {
   await page.goto('/');
   await expect(page.locator('.canvas-host canvas')).toBeVisible({ timeout: 30000 });
+  // Wait for the boot commit to populate at least one node.
   await page.waitForFunction(() => {
-    const text = document.querySelector('.bottombar')?.textContent ?? '';
-    return /\d+\s*nodes\s*\/\s*\d+\s*edges/.test(text);
+    const m = document.querySelector('.bottombar')?.textContent?.match(/(\d+)\s*nodes/);
+    return !!m && parseInt(m[1], 10) > 0;
   }, null, { timeout: 30000 });
 }
 

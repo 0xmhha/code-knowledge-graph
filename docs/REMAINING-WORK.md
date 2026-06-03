@@ -66,6 +66,7 @@ plans/01-ckg-plan.md}` 명세에 따라 다음을 land:
 | **errcheck `defer ... .Close()` 정리** | persist/sqlite_*.go, buildpipe/* 등 | ~1h | `defer rows.Close()` → `defer func() { _ = rows.Close() }()` 패턴 |
 | **modernize sweep 잔여** | distributed.go, declarations.go (Sol), topnodes_e2e_test.go | ~30분 | de Morgan, switch, 타입 추론 |
 | **`.gitignore` root `/ckg` 패턴** | `.gitignore` | 1줄 | `make build-no-viewer` 산출물 재발 방지 |
+| **viewer Playwright spec ↔ UI 표류 모니터링** | `web/viewer-next/tests/` | 상시 | 5-29 ~ 6-02 사이 누적된 4건 회귀를 2026-06-03 land. UI(`.canvas-legend.collapsed` → `.canvas-legend-trigger`, anchor가 NodeList 클릭에서 분리, FirstTimeOverlay 추가)가 spec 미반영 상태로 머무는 패턴. 신규 UI 변경 시 spec 동반 업데이트 강제할 방법 검토 (lint rule 또는 PR template). |
 
 ### Tier C — within-language semantics (R1' 영역 밖, hold/optional)
 
