@@ -1,0 +1,765 @@
+policies:
+    - id: A1.concurrency.core_lock_discipline
+      name: WBFT Core lock discipline — never read Core.current off currentMutex
+      category: A1
+      description: |
+        The WBFT Core's `current` round-state pointer is guarded by
+        `currentMutex` (consensus/wbft/core/core.go:106 — a sync.RWMutex).
+        Every accessor that reads `c.current` MUST hold currentMutex.RLock
+        (read) or currentMutex.Lock (write). Examples in-repo: the
+        current-proposal accessor at core.go:155-157 acquires RLock around
+        the read; the round-state mutator at core.go:162-166 acquires
+        Lock for the entire write region.
+
+        The priorState struct (core.go:72) embeds its own sync.RWMutex —
+        this is a SEPARATE lock, NOT a substitute. Reading `c.current.X`
+        while holding only priorState's lock (or no lock) is a data race
+        against round-change writers and produces non-deterministic
+        consensus outcomes (e.g. accepting a Prepare for a stale round).
+
+        The trap: an LLM adding telemetry, a new RPC, or a fast-path early
+        return that touches `c.current` outside the locked region. The
+        race is subtle — tests pass under low contention — but under real
+        network load it shows up as occasional fork or stall. Any new
+        read of `c.current` (or its sub-fields like Sequence/Round/
+        pendingRequest) MUST be inside currentMutex's read region; any
+        write MUST be inside the write region.
+      governs:
+        - core.Core.currentMutex
+        - core.priorState
+    - id: A1.wbft_core.consensus_flow_architecture
+      name: WBFT consensus flow — actors and message sequence per height
+      category: A1
+      description: |
+        The WBFT consensus engine drives one block per height through four
+        phases inside Core: handleRequest emits a Preprepare from the
+        current proposer; every validator broadcasts a Prepare in response;
+        once each validator has seen a Prepare quorum it broadcasts a Commit;
+        once each validator has seen a Commit quorum the block is finalised
+        and Core advances to the next height via startNewRound. RoundChange
+        fires on RequestTimeout and selects a new proposer for the same
+        height. Backend (consensus/wbft/backend) is the bridge between Core
+        and the blockchain — it broadcasts/gossips messages, signs with BLS,
+        fetches Validators, and commits sealed blocks back. Engine
+        (consensus/wbft/engine) handles header validation, BaseFee
+        distribution, and epoch construction. The Istanbul/100 P2P
+        subprotocol (A9) carries the messages between nodes.
+      governs:
+        - core.Core.startNewRound
+    - id: A1.wbft_core.message_handlers
+      name: 'WBFT consensus message handlers: preprepare, prepare, commit'
+      category: A1
+      description: |
+        Three handlers drive the per-round state machine. handlePreprepareMsg
+        validates the proposer's block and transitions to StatePreprepared;
+        handlePrepareMsg accumulates PREPARE votes and transitions to
+        StatePrepared at quorum; handleCommitMsg accumulates COMMIT votes and
+        finalises the block at quorum. Every handler verifies the message
+        signature, the sequence/round view, and the sender's authorisation
+        before applying state changes.
+      governs:
+        - core.Core.handleCommitMsg
+        - core.Core.handlePrepareMsg
+        - core.Core.handlePreprepareMsg
+    - id: A1.wbft_core.quorum_calc
+      name: WBFT quorum size calculation
+      category: A1
+      description: |
+        WBFT requires QuorumSize = ceil(N - F) where N is the validator set
+        size and F = (N-1)/3 evaluated in float64. The quorum is the minimum
+        count of Prepare or Commit messages needed before the consensus core
+        advances state. State advancement in handlePrepareMsg uses the
+        expression WBFTPrepares.Size() >= valSet.QuorumSize().
+
+        ceil(N - F) is the AUTHORITATIVE quorum; any reimplementation MUST
+        reproduce it exactly. The dangerous refactor is not int-vs-float (see
+        the correctness note below) but swapping the FORMULA: the PBFT-textbook
+        2f+1 or a simple majority N/2+1 DIVERGE from ceil(N - F) for N not of
+        the form 3f+1, and a lower quorum finalizes with too few honest nodes
+        (a safety violation). Examples: N=5 -> ceil=4 but 2f+1=3; N=6 -> ceil=5
+        but 2f+1=3; N=8 -> ceil=6 but 2f+1=5.
+      governs:
+        - core.Core.handlePrepareMsg
+        - validator.defaultSet.F
+        - validator.defaultSet.QuorumSize
+        - wbft.ValidatorSet
+    - id: A1.wbft_core.round_change_protocol
+      name: 'WBFT round change: timeout-triggered round bump with prepared-block justification'
+      category: A1
+      description: |
+        WBFT recovers from a stuck round (PRE-PREPARE or COMMIT quorum not
+        reached within RequestTimeout) by broadcasting a ROUND-CHANGE message
+        for round+1. The message carries the highest prepared block and its
+        PREPARE justification from prior rounds; a node accepts the view
+        change once it has collected a quorum of ROUND-CHANGE messages for
+        the same target round.
+      governs:
+        - core.Core.broadcastNextRoundChange
+        - core.Core.broadcastRoundChange
+        - core.Core.handleRoundChangeMsg
+        - messages.RoundChange
+        - messages.SignedRoundChangePayload
+    - id: A10.codegen.contract_regen_procedure
+      name: 'System contract artifact regeneration: solc 0.8.14 to artifacts/v1 and v2'
+      category: A10
+      description: |
+        System contract bytecode (governance v1 and v2, NativeCoinAdapter) is
+        produced by systemcontracts/compile. The tool downloads solc 0.8.14
+        to ~/.solc-bin if absent, invokes it on the Solidity sources under
+        systemcontracts/solidity/, and writes binaries to
+        systemcontracts/artifacts/v1 and artifacts/v2/. Those binaries are
+        go:embed'd into contracts.go and consumed at genesis time via
+        InjectContracts. The do-not-edit constraint on the artifacts (see
+        A10.codegen.no_edit_zones) is enforced by re-running this procedure,
+        not by static checks.
+      governs:
+        - compiler.Compile
+        - compiler.compiledTy.ExportContractCode
+        - compiler.solcVersion
+    - id: A10.codegen.no_edit_zones
+      name: 'Codegen no-edit zones: which files are generated and how to regenerate'
+      category: A10
+      description: |
+        Four categories of files in go-stablenet are produced by tools and
+        must never be hand-edited: trezor protobuf bindings under
+        accounts/usbwallet/trezor/*.pb.go (regenerated with protoc), JSON
+        marshalling helpers core/types/gen_*.go and similar in beacon/,
+        tests/, eth/tracers/, cmd/evm/ (regenerated with fjl/gencodec), RLP
+        helpers core/types/gen_*_rlp.go (regenerated with rlp/rlpgen), and
+        Solidity bytecode artifacts under systemcontracts/artifacts/v{N}/
+        (regenerated by go run ./systemcontracts/compile). Direct edits
+        drift the file out of sync with its source and the next regenerator
+        run produces a noisy CI-breaking diff. Adding a new code-generated
+        file (or a new Solidity contract version) requires registering it
+        in the corresponding generator config (e.g. compile/main.go for
+        Solidity) so subsequent runs preserve it.
+    - id: A11.state_transition.blacklist_check_points
+      name: Blacklist check points along the state transition path
+      category: A11
+      description: |
+        When rules.IsAnzeon is active, a transaction can be rejected for
+        blacklist reasons at four distinct points before its state changes
+        persist. Three live in core/state_transition.go TransitionDb (Sender,
+        Recipient, FeePayer) and one lives in core/vm/evm.go Call (zero
+        address / native precompile transfer). Adding a new transaction type
+        or a new transfer path requires confirming every one of these gates
+        still fires; missing one creates a route by which a blacklisted
+        account can move value.
+      governs:
+        - core.StateTransition.TransitionDb
+        - vm.EVM.Call
+    - id: A12.seals.bls_seal_scheme
+      name: WBFT BLS seal scheme — 96-byte aggregate + SealerSet bitpack
+      category: A12
+      description: |
+        WBFT consensus seals are BLS aggregate signatures. The data structure
+        is WBFTAggregatedSeal (core/types/istanbul.go:52) carrying a
+        SealerSet bitpack (which validators signed, by ordered index) plus
+        the aggregate 96-byte BLS signature. Two such seals live in
+        WBFTExtra (core/types/istanbul.go:81): PrevPreparedSeal and
+        PrevCommittedSeal, the latter being the previous block's commit
+        attestation. BLS primitives are in crypto/bls/.
+
+        The trap: an LLM editing seal encoding, hashing, or verification
+        often assumes Ethereum's secp256k1 ECDSA signatures (65 bytes,
+        recoverable v/r/s) and mis-sizes buffers, mis-computes hashes (using
+        Keccak over the wrong payload), or attempts ecrecover on a BLS
+        signature. The SealerSet bitpack also encodes WHO signed; dropping
+        or reordering bits changes the attested validator set without
+        changing the signature, which a naive verifier will accept. Any
+        change to extra-data, seal serialization, or filtered-header hashing
+        MUST preserve the WBFTAggregatedSeal byte layout exactly.
+      governs:
+        - types.WBFTAggregatedSeal
+        - types.WBFTExtra
+        - types.WBFTExtra.PrevCommittedSeal
+    - id: A12.seals.feepayer_sighash
+      name: Fee-delegation sigHash — feepayer signs the wrapped, not the inner, tx
+      category: A12
+      description: |
+        StableNet's FeeDelegateDynamicFeeTx (tx type 0x16) is DOUBLE-signed:
+        the sender signs the inner DynamicFee tx, then the feepayer signs a
+        WRAPPER over [[inner-incl-sender-V/R/S], FeePayer]. The feepayer's
+        sigHash is therefore computed by RLP-encoding the inner tx WITH the
+        sender's V/R/S already populated, followed by the FeePayer address —
+        NOT by re-hashing the bare inner tx. See sigHash at
+        core/types/tx_fee_delegation.go:158 (the prefix-list payload at line
+        170-178 explicitly includes the inner tx values then FeePayer);
+        setSignatureValues at :147 places the feepayer signature on the
+        outer struct without touching the sender's signature.
+
+        The trap: a naive sigHash implementation that hashes only the inner
+        payload (omitting V/R/S) or omits the FeePayer trailing field will
+        produce a different digest, accept a valid-looking but unrelated
+        signature, and allow a feepayer to be substituted server-side
+        without the sender's consent. Worse, the chain will still accept the
+        malformed tx if the verifier follows the same broken hash. Any
+        refactor of fee-delegation signing must preserve the exact
+        payload-shape (inner-with-VRS, then FeePayer) byte for byte.
+      governs:
+        - types.FeeDelegateDynamicFeeTx.FeePayer
+        - types.FeeDelegateDynamicFeeTx.setSignatureValues
+        - types.FeeDelegateDynamicFeeTx.sigHash
+    - id: A13.sealing.reorg_serialization
+      name: Txpool mutation must serialize through the reorg loop
+      category: A13
+      description: |
+        The legacy txpool runs a single goroutine — `pool.loop()` (started at
+        core/txpool/legacypool/legacypool.go:366 `go pool.loop()`) — that
+        owns the txpool's internal maps (pending/queue/all). All mutation
+        events (head change, new tx, reorg) are queued and applied INSIDE
+        that loop, which is why the txpool data structures are not
+        individually locked: the loop is the serializer.
+
+        The sealer (miner/) and the txpool reorg loop interact across this
+        boundary: when the sealer requests a payload, it observes the
+        txpool's state at a point AFTER a reorg-run; mutating txpool maps
+        directly from the sealer (or from a tx-submission handler) WITHOUT
+        going through the loop is a data race that can either lose pending
+        txs or double-include them.
+
+        The trap: an LLM adding a "fast path" that mutates pool.pending /
+        pool.queue / pool.all from outside the loop (e.g. inside an RPC
+        handler, or inside the sealer's payload-building hook). Symptoms are
+        intermittent: tx drops, double-spend rejection on a tx that was
+        validly removed, occasional miner crash on map iteration. Any new
+        txpool mutation MUST enqueue into the loop's channel, not call the
+        map mutators directly.
+      governs:
+        - legacypool.LegacyPool.loop
+        - legacypool.queueTxEvent
+    - id: A14.foundations.base_fee_redistribution
+      name: Base fee is redistributed to validators (not burned)
+      category: A14
+      description: |
+        Ethereum EIP-1559 BURNS the base fee. go-stablenet does NOT — under
+        WBFT the base fee is REDISTRIBUTED to validators as part of block
+        finalization, because StableNet's economic model treats validators
+        as the operational counterparty rather than burning the native
+        stablecoin (WKRC) supply away. The redistribution happens in the WBFT
+        engine's Finalize path: consensus/wbft/backend/engine.go:174
+        Backend.Finalize delegates to the underlying Engine().Finalize(),
+        which performs the per-validator base-fee crediting (see also A3
+        validator-set + A6 fee-delegation for the tip path).
+
+        The trap: an LLM editing finalization, fee accounting, or block
+        reward code may apply Ethereum's burn assumption — leaving the base
+        fee unaccounted, or worse, calling state.SubBalance against a "burn
+        address." Both break WKRC supply integrity and the validator
+        incentive contract. Any change to fee accounting must preserve the
+        redistribution invariant and be cross-checked against the WBFT
+        Finalize implementation, not against Ethereum EIP-1559 references.
+      governs:
+        - backend.Backend.Finalize
+    - id: A14.foundations.cherry_pick_principle
+      name: Isolate StableNet code so upstream geth fixes stay cherry-pickable
+      category: A14
+      description: |
+        go-stablenet keeps an active "cherry-pick channel" from upstream
+        go-ethereum: when upstream lands a security or correctness fix, the
+        StableNet team wants to cherry-pick it cleanly. To preserve that,
+        StableNet-unique code is ISOLATED into new files, not interleaved
+        into geth files. Canonical example: WBFT P2P glue lives in
+        `eth/handler_istanbul.go` (a NEW file), not as edits inside
+        `eth/handler.go` (geth's file). The "StableNet 고유" column in
+        `.claude/docs/build-source-files.md` (table at :114, :140, :176,
+        :296) enumerates which files are unique to StableNet vs. inherited
+        from geth; that mapping IS the cherry-pick boundary.
+
+        The trap: an LLM "fixing" or "tidying" geth-origin code by inlining
+        StableNet logic into it (e.g. adding a feepayer-sigHash branch
+        inside `core/types/transaction_signing.go` instead of the existing
+        `tx_fee_delegation.go`) silently destroys cherry-pickability — the
+        next upstream merge will conflict in subtle, security-relevant
+        spots. Any new logic that is StableNet-specific must live in a
+        StableNet-owned file; only minimal hook points (interface
+        satisfaction, dispatch glue) belong in geth files.
+      governs:
+        - docs.StableNet 고유 코드 식별
+    - id: A14.foundations.equal_power
+      name: Equal-power validators — every validator has voting power = 1
+      category: A14
+      description: |
+        go-stablenet is PoA with equal-weight validators: every validator's
+        voting power is 1, with no stake field, no weight field, no slashing.
+        The defaultValidator struct (consensus/wbft/validator/default.go:32)
+        carries only Address + BLSPublicKey — no Power/Weight/Stake field
+        exists anywhere in the validator set. Quorum is computed by COUNT
+        (ceil(N − F), see A1.wbft_core.quorum_calc), not by stake sum.
+
+        Any change that introduces stake-weighted voting, weighted quorum,
+        proposer selection biased by stake, or stake-conditioned rewards is
+        a STABILITY-VIOLATING bug — even if the test suite passes — because
+        it imports Ethereum/WEMIX validator economics that go-stablenet
+        explicitly does NOT follow. This trap fires when an LLM extrapolates
+        from generic PBFT / PoS literature without checking the validator
+        type.
+      governs:
+        - validator.defaultSet
+        - validator.defaultSet.QuorumSize
+        - validator.defaultValidator
+    - id: A14.foundations.instant_finality_inert_reorg
+      name: Instant BFT finality — geth reorg / Td code is inert (a trap)
+      category: A14
+      description: |
+        Under WBFT consensus a Commit-quorum block is FINAL the moment it is
+        written; there is no probabilistic finality and no honest reorg.
+        However, geth's fork-choice machinery is still present in the tree:
+        ForkChoice (core/forkchoice.go) compares TotalDifficulty, BlockChain
+        has a forker field (core/blockchain.go:260), and ReorgNeeded is
+        called at ~6 call sites (core/blockchain.go:1143, :1459, :1604,
+        :1819, :1983, …). Under WBFT, ReorgNeeded effectively never returns
+        true on honest input, but the code paths exist and compile.
+
+        The trap: an LLM editing block-import, finalization, or
+        consensus-glue code may "fix" or extend these reorg/Td paths on the
+        assumption that they govern real behaviour. They do not — touching
+        them invites correctness drift (e.g. accidentally accepting a
+        competing chain on the wrong side of finality). Treat the forker / Td
+        code as inert geth residue; do not extend it for StableNet logic. Any
+        consensus-related fork-choice change belongs in consensus/wbft/, not
+        in core/forkchoice.go.
+      governs:
+        - core.BlockChain.forker
+        - core.ForkChoice.ReorgNeeded
+    - id: A14.foundations.wkrc_not_eth
+      name: Native asset is WKRC (KRW stablecoin), not ETH
+      category: A14
+      description: |
+        The native coin on go-stablenet is **WKRC** — a KRW-pegged
+        stablecoin — not ETH. Source of truth: params/config.go genesis
+        alloc carries name="WKRC", symbol="WKRC", currency="KRW", decimals=18;
+        core/genesis_mainnet.json:58 mirrors the same. Mint/burn is
+        bank-backed via GovMinter (A4) and the NativeCoinManager precompile
+        (A5), tied to off-chain deposit/withdrawal.
+
+        ETH-denominated assumptions baked into geth (`Ether=1e18`,
+        `GasFloor`, gas-price units assumed to be ETH-wei) survive in the
+        tree as residue but do NOT describe StableNet semantics — the unit
+        is WKRC-wei, the asset is a KRW stablecoin, and supply changes are
+        authorized real-asset events, not protocol issuance. An LLM that
+        designs fee/reward/transfer logic against "ETH" assumptions will
+        emit code that is silently wrong for regulatory reporting, fee
+        accounting, and user-facing balances.
+    - id: A14.theory.3f1_intersection
+      name: BFT 3f+1 quorum intersection — why ceil(N − F) is the safety floor
+      category: A14
+      description: |
+        Classical BFT (Castro–Liskov PBFT, QBFT) proves SAFETY under up to F
+        byzantine nodes only if any two quorums intersect in at least one
+        honest node. With N validators and F = floor((N−1)/3), the minimum
+        quorum that satisfies the intersection lemma is Q = ceil(N − F).
+        WBFT instantiates exactly this Q in defaultSet.QuorumSize
+        (consensus/wbft/validator/default.go:226) using F() = (N−1)/3 as
+        float64 (:222). Examples that surprise int-only refactors:
+        N=5 → Q=4 (not 2f+1=3); N=6 → Q=5 (not 3); N=8 → Q=6 (not 5).
+
+        Implication for designs: any code path that "approves" something on
+        fewer than Q distinct validators violates the intersection lemma and
+        may finalize on an unsafe quorum (a safety violation — two
+        conflicting blocks both reach quorum). This applies not only to the
+        consensus state machine but to ANY validator-signature aggregation
+        added later (e.g. a custom-precompile attestation, a system-contract
+        vote count). Use valSet.QuorumSize(), do not hardcode 2f+1.
+      governs:
+        - core.Core.handlePrepareMsg
+        - validator.defaultSet.F
+        - validator.defaultSet.QuorumSize
+    - id: A14.theory.equivocation
+      name: Equivocation — byzantine validators may send conflicting messages
+      category: A14
+      description: |
+        EQUIVOCATION is the byzantine behaviour where one validator emits
+        two (or more) DIFFERENT messages for the same (Sequence, Round,
+        MessageType) — e.g. two different Prepare votes for the same view.
+        Honest BFT must tolerate this: a validator's "vote" is counted at
+        most ONCE per view, and the second message either replaces the
+        first deterministically or is dropped. WBFT inherits QBFT/PBFT's
+        message-handling discipline in consensus/wbft/core/handler.go
+        (signature verification + per-sender deduplication in the message
+        set) and in the typed Set structures behind WBFTPrepares /
+        WBFTCommits used by handlePrepareMsg (consensus/wbft/core/prepare.go
+        :121) and the analogous commit path.
+
+        Implication: code that aggregates validator signatures (consensus
+        itself, but also any later-added precompile vote / system-contract
+        attestation / off-chain bridge proof) MUST deduplicate by sender
+        before counting toward quorum. A naive `count := len(messages)`
+        lets a single byzantine validator stuff the set and forge quorum.
+        The flip side is liveness: when an equivocator is detected, WBFT
+        does NOT slash (validators have no stake — see
+        A14.foundations.equal_power); the protocol relies on the byzantine
+        bound F to bound the damage, not on punishment.
+      governs:
+        - core.Core.handlePrepareMsg
+        - core.Core.handlePreprepareMsg
+    - id: A14.theory.flp_partial_synchrony
+      name: FLP impossibility — WBFT trades termination for partial synchrony
+      category: A14
+      description: |
+        The FLP result (Fischer–Lynch–Paterson, 1985) proves no deterministic
+        consensus algorithm can guarantee both SAFETY and LIVENESS in a
+        purely asynchronous system with even one crash. Practical BFT
+        algorithms (PBFT, QBFT, WBFT) escape FLP by assuming PARTIAL
+        SYNCHRONY: there exists a Global Stabilization Time (GST) after which
+        message delays are bounded by a known Δ. WBFT implements this
+        assumption via the round-change timer (consensus/wbft/core/core.go:
+        110 `roundChangeTimer`, :409 `time.AfterFunc(timeout, ...)`); when a
+        round times out before quorum is reached, the protocol advances to
+        the next round with the same view-change machinery PBFT/QBFT use.
+
+        Implication: LIVENESS is NOT unconditional — it requires GST + a
+        correct timeout. Setting RequestTimeout too low can cause perpetual
+        round-changes (no round ever finishes before the timer fires);
+        setting it too high stalls progress under transient asymmetry. The
+        default 1000ms (see A3.timing.wbft_config_defaults) is the
+        calibrated value; design changes that touch timer scheduling,
+        RequestTimeout, or round-change backoff MUST reason about
+        partial-synchrony implications, not just throughput.
+      governs:
+        - core.Core.roundChangeTimer
+        - validator.defaultSet.QuorumSize
+    - id: A14.theory.justification_locking
+      name: Justification + locking — why view changes preserve safety
+      category: A14
+      description: |
+        In PBFT/QBFT/WBFT, a PRE-PREPARE proposed in round r > 0 MUST carry
+        a JUSTIFICATION proving it is consistent with what previous rounds
+        may have committed: a quorum of ROUND-CHANGE messages plus, if any
+        validator was already "locked" on a value, the PREPARE certificate
+        for that locked value. WBFT enforces this in preprepare.go: a new
+        proposal attaches `JustificationRoundChanges` and `Justification
+        Prepares` (preprepare.go:69, :79); the receiver validates them via
+        `isJustified(...)` (preprepare.go:135) before accepting the
+        preprepare. The locking discipline says: once you Prepare on a
+        value, you stay locked until a higher round shows a quorum-justified
+        different value — this is what guarantees that a view change cannot
+        silently overwrite a previously Committed block.
+
+        Implication: any change to the preprepare validator, round-change
+        payload format, or the message handler that handles justification
+        payloads (consensus/wbft/core/handler.go:265–292) directly affects
+        the SAFETY proof. Skipping `isJustified` for a "fast path", or
+        loosening which payloads count as justification, is a SAFETY
+        violation — two conflicting blocks can both reach quorum. This is
+        the single most subtle place in WBFT and the most common
+        hand-rolled-PBFT bug.
+      governs:
+        - core.Core.handlePreprepareMsg
+    - id: A2.block_encoding.filtered_header_hash
+      name: Block hash computation requires WBFTFilteredHeader first
+      category: A2
+      description: |
+        WBFT block hashing has a non-obvious requirement: before computing a
+        block hash you must strip the round number and the PreparedSeal /
+        CommittedSeal from the header's WBFTExtra, because those fields are
+        filled in by the consensus layer after the header is created and
+        therefore differ between proposer and recipient. WBFTFilteredHeader
+        returns a copy of the header with Round set to 0 and Seal fields
+        cleared; WBFTFilteredHeaderWithRound does the same but preserves a
+        caller-supplied round. Hashing the raw header instead of the filtered
+        one produces a hash nobody else can reproduce, breaking signature
+        verification and block lookup.
+      governs:
+        - types.ExtractWBFTExtra
+        - types.WBFTFilteredHeader
+        - types.WBFTFilteredHeaderWithRound
+    - id: A2.block_encoding.wbft_extra_struct
+      name: WBFTExtra struct layout and contained types
+      category: A2
+      description: |
+        WBFTExtra is the RLP-encoded payload that lives inside every WBFT
+        block's Header.Extra. It carries vanity bytes, randao reveal, the
+        previous and current round numbers, the previous and current
+        PreparedSeal / CommittedSeal aggregated BLS signatures, the
+        governance-voted GasTip for this block, and (on epoch-boundary
+        blocks only) the EpochInfo that pins the next epoch's validator
+        set. AggregatedSeal pairs a SealerSet bit-packed bitmap with a 96-byte
+        BLS aggregate signature; the bit index in SealerSet corresponds to
+        the validator index in the active ValidatorSet. EpochInfo lists
+        Candidate {Addr, Diligence} entries plus a Validators slice of
+        *indices* (not addresses) into Candidates, and a parallel
+        BLSPublicKeys slice.
+      governs:
+        - types.Candidate
+        - types.EpochInfo
+        - types.IstanbulExtraSeal
+        - types.IstanbulExtraVanity
+        - types.SealerSet
+        - types.WBFTAggregatedSeal
+        - types.WBFTExtra
+    - id: A3.timing.wbft_config_defaults
+      name: 'WBFT timing and config defaults: RequestTimeout, BlockPeriod, EpochLength'
+      category: A3
+      description: |
+        WBFT consensus timing is parameterised by RequestTimeoutSeconds (per-
+        round timeout before bumping rounds), BlockPeriodSeconds (target
+        inter-block interval enforced by the proposer), and EpochLength
+        (blocks per epoch, after which the validator set transitions). The
+        Anzeon default config (params/config_wbft.go DefaultAnzeonConfig) sets
+        these to 2 / 1 / 10 respectively; chains may override per-network.
+        CheckValidity enforces ranges at genesis load time.
+
+        TWO LAYERS (the unit trap): the chain-config field RequestTimeoutSeconds
+        is in SECONDS despite its struct comment saying "milliseconds"
+        (config_wbft.go:187 comment is misleading). The runtime engine config
+        (consensus/wbft/config.go) holds RequestTimeout in MILLISECONDS, and
+        GetConfig bridges chain-config -> engine by multiplying x1000
+        (config.go:167: RequestTimeout = RequestTimeoutSeconds * 1000). So the
+        Anzeon 2 (seconds) becomes 2000ms at the engine. Separately, the engine
+        struct DefaultConfig.RequestTimeout = 1000 (ms) is a fallback used when
+        no chain-config transition supplies the value -- do NOT read the two
+        defaults as one number.
+      governs:
+        - params.DefaultAnzeonConfig
+        - params.WBFTConfig
+        - wbft.Config.GetConfig
+        - wbft.DefaultConfig
+    - id: A3.validator_set.epoch_transition
+      name: 'Epoch transition: how the next epoch''s validator set is selected and pinned'
+      category: A3
+      description: |
+        go-stablenet's validator set is fixed for the duration of an epoch
+        (10 blocks on Mainnet, 140 on Testnet). On the last block of each
+        epoch, the engine calls buildEpochInfo: it queries GovValidator
+        (system contract 0x1001) for the new candidate list and validator
+        indices, then writes an EpochInfo into that block's
+        Header.Extra.WBFTExtra.EpochInfo. From the next block onward,
+        GetValidators returns the new set; intra-epoch blocks omit
+        EpochInfo. Backend.GetValidatorsForVerifying provides the previous
+        epoch's set in parallel so cross-epoch block verification can match
+        signers against the correct validator set.
+      governs:
+        - backend.Backend.GetValidators
+        - backend.Backend.GetValidatorsForVerifying
+        - params.WBFTConfig.Epoch
+        - types.EpochInfo
+    - id: A4.system_contracts.addresses
+      name: System contract canonical addresses (Anzeon)
+      category: A4
+      description: |
+        Five governance system contracts and two native precompiles are
+        deployed at well-known fixed addresses on go-stablenet. Source of
+        truth for the 0x100x governance addresses is params/config_wbft.go;
+        the 0xB000xx precompile address literals are params/protocol_params.go
+        (NativeCoinManager 0xB00002, AccountManager 0xB00003), which
+        core/vm/native_manager.go references when registering their method
+        tables. These values are referenced everywhere in hardfork wiring,
+        genesis JSON, and ABI tooling.
+      governs:
+        - params.DefaultGovCouncilAddress
+        - params.DefaultGovMasterMinterAddress
+        - params.DefaultGovMinterAddress
+        - params.DefaultGovValidatorAddress
+        - params.DefaultNativeCoinAdapterAddress
+        - params.NativeCoinManagerAddress
+    - id: A4.system_contracts.gov_minter
+      name: 'GovMinter (0x1003): native coin minting authority with v1/v2 versions'
+      category: A4
+      description: |
+        GovMinter is the system contract at address 0x1003 that holds the
+        mint authority for native coin. The MasterMinter (0x1002) approves
+        mint proposals which GovMinter executes against NativeCoinAdapter
+        (0x1000). Two versioned implementations exist: v1 (initial) and v2
+        (current). ChainConfig.Anzeon.SystemContracts.GovMinter selects the
+        version per chain. Storage tracks the fiat-token reference, mint
+        proposals, per-account burn balances, refundable balances, and
+        emergency-pause state.
+      governs:
+        - systemcontracts.GetBurnBalance
+        - systemcontracts.GetMintProposalAmount
+        - systemcontracts.GovMinterContractV1
+        - systemcontracts.GovMinterContractV2
+        - systemcontracts.initializeMinter
+    - id: A5.account_extra.bit_layout
+      name: StateAccount.Extra bit layout and immutability invariants
+      category: A5
+      description: |
+        StateAccount.Extra is a uint64 carrying per-account flags. Bit 63
+        (MSB) marks Blacklisted; bit 62 marks Authorized; bits 0-61 are
+        reserved. All mutation helpers (SetBlacklisted, ClearBlacklisted,
+        SetAuthorized, ClearAuthorized) follow an immutable pattern — they
+        take the existing uint64 and return a new uint64 with the requested
+        bit toggled. The original value is never modified in place. New
+        flags must claim a previously unused bit and may require hardfork
+        gating if they affect consensus-reachable state.
+      governs:
+        - types.AccountExtraMaskAuthorized
+        - types.AccountExtraMaskBlacklisted
+        - types.AccountExtraValidMask
+        - types.IsAuthorized
+        - types.IsBlacklisted
+    - id: A5.native_coin.issuance_burn_flow
+      name: Native coin issuance and burn via NativeCoinManager precompile
+      category: A5
+      description: |
+        Native coin mint, burn, and transfer are precompile operations on
+        NativeCoinManager. coinManagerMint credits a target address;
+        coinManagerBurn debits an account; coinManagerTransfer moves between
+        accounts without changing total supply. All three gate on
+        canRunCoinManger, which requires the caller to be NativeCoinAdapter
+        (0x1000) and the opcode to be CALL (not DELEGATECALL or STATICCALL).
+        Total-supply changes therefore route exclusively through 0x1000.
+      governs:
+        - vm.canRunCoinManger
+        - vm.coinManagerBurn.Run
+        - vm.coinManagerMint.CanRun
+        - vm.coinManagerMint.Run
+        - vm.coinManagerTransfer.Run
+    - id: A6.anzeon_gas.tip_override
+      name: Anzeon authorized-account gas tip override
+      category: A6
+      description: |
+        Under the Anzeon hardfork, AnzeonTipEnv overrides the effective gas
+        tip for transactions signed by authorised accounts. GetAnzeonTipCap
+        returns the transaction's own GasTipCap (the sender's chosen tip)
+        for authorised senders, and the block header's GasTip for everyone
+        else. Authorisation is read from StateAccount.Extra at the current
+        block's state root; AnzeonTipEnv caches the lookup per block to avoid
+        re-reading state on every transaction.
+      governs:
+        - gasprice.AnzeonTipEnv
+        - gasprice.AnzeonTipEnv.GetAnzeonTipCap
+        - gasprice.AnzeonTipEnv.IsAnzeon
+        - gasprice.AnzeonTipEnv.SetCurrentBlock
+    - id: A6.fee_delegation.signing_model
+      name: 'Fee delegation signing model: setSignatureValues writes the FeePayer, not the Sender'
+      category: A6
+      description: |
+        FeeDelegateDynamicFeeTx (tx type 0x16) is a double-signed transaction:
+        the Sender signs the inner DynamicFeeTx, then the FeePayer signs the
+        whole envelope. The method names on the outer type are easy to
+        misread. setSignatureValues writes the FeePayer's V/R/S
+        (tx.FV/FR/FS); rawSignatureValues returns the Sender's signature by
+        delegating to SenderTx.rawSignatureValues; rawFeePayerSignatureValues
+        returns the FeePayer's signature. Confusing these breaks both
+        signature verification paths and trips the blacklist guard for the
+        FeePayer in TransitionDb.
+      governs:
+        - types.FeeDelegateDynamicFeeTx.rawFeePayerSignatureValues
+        - types.FeeDelegateDynamicFeeTx.rawSignatureValues
+        - types.FeeDelegateDynamicFeeTx.setSignatureValues
+    - id: A7.hardfork.add_new_fork_procedure
+      name: 'Procedure: adding a new hardfork to go-stablenet'
+      category: A7
+      description: |
+        Adding a hardfork requires changes in seven distinct sites:
+        ChainConfig field, isFork check method, Rules struct + Rules() build,
+        runtime branch in the relevant subsystem, optional NativeManager
+        switch update, optional system contract version pinning via
+        CollectUpgrades, and updates to SetConfigFromChainConfig when WBFT
+        parameters change. The block number must be >= the previous fork's
+        block number; switch-case ordering must place the newest fork on top
+        because the first matching case wins.
+      governs:
+        - ethconfig.SetConfigFromChainConfig
+        - params.ChainConfig
+        - params.ChainConfig.CheckConfigForkOrder
+        - params.ChainConfig.CollectUpgrades
+        - vm.ActiveNativeManagers
+    - id: A8.genesis.bootstrap_architecture
+      name: 'Genesis bootstrap architecture: from JSON to first block on disk'
+      category: A8
+      description: |
+        Node startup with an empty DB takes a Genesis struct (parsed from
+        embedded JSON for Mainnet/Testnet) through three sequential stages:
+        (1) validateAnzeonGenesisConfig enforces that the Anzeon section is
+        well-formed; (2) initializeAnzeonGenesis builds the initial block
+        Extra (vanity + initial validator set + initial BLS keys) and calls
+        InjectContracts which deploys every system contract listed in
+        config.Anzeon.SystemContracts plus any block-0 hardfork overlays
+        collected from CollectUpgrades; (3) genesis.ToBlock writes the
+        resulting Alloc to the state DB, computes the state root, and
+        embeds it in the block header; finally genesis.Commit flushes the
+        trie to disk. The genesis_generator CLI uses the same path with
+        user-supplied parameters and serialises the result to JSON for
+        bootstrapping a new network.
+      governs:
+        - core.DefaultStableNetMainnetGenesisBlock
+        - core.Genesis.Commit
+        - core.Genesis.ToBlock
+        - core.InjectContracts
+        - core.SetupGenesisBlockWithOverride
+        - core.initializeAnzeonGenesis
+        - core.validateAnzeonGenesisConfig
+    - id: A8.genesis.inject_contracts_two_phase
+      name: 'InjectContracts two-phase deploy: baseline then block-0 hardfork overlay'
+      category: A8
+      description: |
+        InjectContracts seeds genesis.Alloc with system contract code and
+        storage in two ordered phases. Phase 1 calls
+        GetSystemContractsTransition with config.Anzeon.SystemContracts —
+        this deploys every v1 contract and runs each initializeXxx() to
+        populate its full Solidity storage layout. Phase 2 iterates
+        config.CollectUpgrades() and applies, for each upgrade whose block
+        is 0, applyUpgradeOverlay onto the same Alloc. The overlay path
+        REPLACES the contract Code only and merges any explicit State
+        entries; pre-existing Balance and Storage from Phase 1 are
+        preserved. Upgrades whose Block is not 0 are skipped at genesis
+        time and are instead applied at runtime by Engine.processFinalize
+        when the chain reaches their activation height.
+      governs:
+        - core.InjectContracts
+        - core.applyUpgradeOverlay
+        - params.ChainConfig.CollectUpgrades
+        - systemcontracts.GetSystemContractsTransition
+    - id: A8.genesis.json_authoring_checklist
+      name: Genesis JSON authoring checklist for stablenet chains
+      category: A8
+      description: |
+        validateAnzeonGenesisConfig is the gate every stablenet genesis JSON
+        passes through before initializeAnzeonGenesis materialises the
+        block-zero state. The authoring checklist captures every section the
+        validator requires: ChainConfig with the Anzeon hardfork block, WBFT
+        consensus parameters, the Init section (validators plus matching BLS
+        keys), the SystemContracts section selecting versions for each of
+        the five governance contracts, and per-account Extra bits that must
+        satisfy ValidateExtra. cmd/genesis_generator provides an interactive
+        tool for filling these in.
+      governs:
+        - core.initializeAnzeonGenesis
+        - core.validateAnzeonGenesisConfig
+    - id: A9.istanbul_p2p.protocol_architecture
+      name: 'istanbul/100 subprotocol architecture: piggy-backed on eth peers'
+      category: A9
+      description: |
+        WBFT consensus messages travel over a dedicated P2P subprotocol
+        named istanbul, version 100, registered alongside the standard
+        eth protocol. The 22-message subprotocol does not create its own
+        peer set — every istanbul peer is an existing eth Peer whose
+        EthPeerRegistered channel signals when it is ready to carry
+        consensus traffic. When an istanbul message arrives, the handler
+        dispatches it into the consensus engine's HandleMsg, which routes
+        it to Core.handleEvents. Messages exceeding protocolMaxMsgSize
+        are rejected before any consensus parsing. wbft.ErrStoppedEngine
+        during peer-receive while the eth downloader is synchronising is
+        expected and downgraded to debug-level logging — the engine starts
+        consuming messages only after sync completes.
+      governs:
+        - eth.EthPeerRegistered
+        - eth.Istanbul100
+        - eth.protocolMaxMsgSize
+        - eth.quorumConsensusProtocolLengths
+        - eth.quorumConsensusProtocolName
+        - eth.wbft.ErrStoppedEngine
+    - id: A9.istanbul_rpc.api_reference
+      name: WBFT custom RPC API (istanbul namespace) — method reference
+      category: A9
+      description: |
+        The WBFT consensus engine exposes a JSON-RPC API under the istanbul
+        namespace via consensus/wbft/backend/api.go. The methods cover
+        node identity (NodeAddress, IsValidator), block-attestation lookup
+        (GetCommitSignersFromBlock / ByHash), validator-set introspection
+        (GetValidators / AtHash), aggregate activity stats over a range
+        (Status), and raw WBFTExtra inspection (GetWbftExtraInfo). These
+        are the operational entry points for monitoring tools and any
+        external client that needs to confirm who signed which block.
+      governs:
+        - backend.API.GetCommitSignersFromBlock
+        - backend.API.GetCommitSignersFromBlockByHash
+        - backend.API.GetValidators
+        - backend.API.GetValidatorsAtHash
+        - backend.API.NodeAddress
+        - backend.API.Status
+        - backend.BlockSigners
+        - backend.Status
