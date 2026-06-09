@@ -242,8 +242,63 @@ func (v *declVisitor) parsePendingFromCall(srcID string, c *ast.CallExpr) parse.
 		// maybeEmitInvokesSelfLoop covers this case. Leave the PendingRef
 		// here as a `calls` so it stays out of the way (Resolve will
 		// drop it because the TargetQName won't match).
+	default:
+		// Static dispatch (concrete method / package function). exprName
+		// captured only the bare callee name (e.g. "Size"), which Pass 2
+		// resolved by bare-name suffix match with last-write-wins — so
+		// `valSet.Size()` could bind to an unrelated `pathdb.Database.Size`
+		// in another package. When go/types is available, replace the bare
+		// name with the callee's fully-qualified qname so it matches the
+		// exact definition node. Falls back to the bare name (AST-only
+		// builds, or callees we can't qualify) so behaviour is unchanged
+		// when type info is absent.
+		if q := v.qualifiedStaticTarget(c.Fun); q != "" {
+			pr.TargetQName = q
+		}
 	}
 	return pr
+}
+
+// qualifiedStaticTarget builds the fully-qualified callee qname for a
+// statically-dispatched call using go/types, in the same form the callee's
+// definition node carries (see visitFuncDecl): "pkg.RecvType.Method" for a
+// concrete method and "pkg.Func" for a package function. Returns "" when type
+// info is unavailable or the callee is not a concrete *types.Func with a
+// package, so the caller keeps the bare-name fallback.
+func (v *declVisitor) qualifiedStaticTarget(fun ast.Expr) string {
+	if v.typesInfo == nil {
+		return ""
+	}
+	var obj gotypes.Object
+	switch f := fun.(type) {
+	case *ast.SelectorExpr:
+		obj = v.typesInfo.ObjectOf(f.Sel)
+	case *ast.Ident:
+		obj = v.typesInfo.ObjectOf(f)
+	default:
+		return ""
+	}
+	fn, ok := obj.(*gotypes.Func)
+	if !ok || fn.Pkg() == nil {
+		return ""
+	}
+	sig, ok := fn.Type().(*gotypes.Signature)
+	if !ok {
+		return ""
+	}
+	pkg := fn.Pkg().Name()
+	if recv := sig.Recv(); recv != nil {
+		rt := recv.Type()
+		if ptr, ok := rt.(*gotypes.Pointer); ok {
+			rt = ptr.Elem()
+		}
+		named, ok := rt.(*gotypes.Named)
+		if !ok || named.Obj() == nil {
+			return ""
+		}
+		return pkg + "." + named.Obj().Name() + "." + fn.Name()
+	}
+	return pkg + "." + fn.Name()
 }
 
 // maybeEmitInvokesSelfLoop emits a self-loop `invokes` edge on the parent
