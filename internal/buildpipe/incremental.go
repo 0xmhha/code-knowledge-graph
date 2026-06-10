@@ -241,7 +241,7 @@ func runIncremental(opt Options, log *slog.Logger,
 	// callees). Operators wanting the W-A KPI must run with --no-cache.
 	// Passing nil + false makes emitDerivedPasses' propagation call a no-op
 	// regardless of opt.LockPropagation.
-	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, nil, false)
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, nil, false, opt.TemporalDepth)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
