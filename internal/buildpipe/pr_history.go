@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
@@ -109,8 +111,145 @@ func ScanPRHistory(srcRoot string, nodes []types.Node) (map[string][]types.PRRef
 		}
 	}
 
+	// Pass 2 (ckg-NEW-4b): override definition-node attribution with
+	// drift-free git-`-L` line-history. The Pass-1 overlap above compares a
+	// node's CURRENT [StartLine,EndLine] against each PR commit's historical
+	// hunk range; when code moves between the commit and HEAD those ranges
+	// diverge, so a definition can miss PRs that genuinely changed it (and
+	// pick up PRs that now sit at the old lines). `git log -L<a>,<b>:<file>`
+	// follows the line range backwards through history, so attribution is
+	// position-independent. File and statement nodes keep the Pass-1 result
+	// (a File node spans the whole file, so overlap is already exact for it).
+	overrideDefinitionHistory(srcRoot, repo, nodes, out)
+
 	dedupePRRefsByNode(out)
 	return out, nil
+}
+
+// defHistoryNodeTypes are the node kinds for which symbol-precise (git-`-L`)
+// change history is worth the per-node `git log` cost: callables and type
+// declarations — the symbols an agent asks "how/why did this change?" about.
+// Sub-symbol nodes (Field/Variable/Constant/Parameter) and statement nodes
+// keep the cheaper Pass-1 overlap attribution.
+var defHistoryNodeTypes = map[types.NodeType]bool{
+	types.NodeFunction:    true,
+	types.NodeMethod:      true,
+	types.NodeStruct:      true,
+	types.NodeInterface:   true,
+	types.NodeConstructor: true,
+	types.NodeModifier:    true,
+	types.NodeContract:    true,
+	types.NodeEvent:       true,
+	types.NodeClass:       true,
+	types.NodeTypeAlias:   true,
+	types.NodeEnum:        true,
+}
+
+// lineHistoryMaxCommits bounds the per-node `git log -L` walk so a hot file's
+// god-function doesn't drag the whole pass. Mirrors the temporal G6 per-file
+// cap intent; deeper genealogy is truncated newest-first.
+const lineHistoryMaxCommits = 40
+
+// overrideDefinitionHistory recomputes PR attribution for definition nodes via
+// `git log -L` and replaces their entry in out. Runs a bounded worker pool of
+// `git log` subprocesses. On a git failure for a node it leaves the Pass-1
+// entry untouched; on success it sets the git-`-L` result (possibly empty,
+// meaning the symbol's lines were never touched by a PR-tagged commit).
+func overrideDefinitionHistory(srcRoot, repo string, nodes []types.Node, out map[string][]types.PRRef) {
+	defs := make([]types.Node, 0, len(nodes))
+	for _, n := range nodes {
+		if defHistoryNodeTypes[n.Type] && n.FilePath != "" && n.StartLine >= 1 && n.EndLine >= n.StartLine {
+			defs = append(defs, n)
+		}
+	}
+	if len(defs) == 0 {
+		return
+	}
+	workers := runtime.NumCPU()
+	if workers < 1 {
+		workers = 1
+	}
+	sem := make(chan struct{}, workers)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, n := range defs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(n types.Node) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			refs, ok := lineHistoryRefs(srcRoot, repo, n)
+			if !ok {
+				return // git failed for this node — keep the Pass-1 baseline
+			}
+			mu.Lock()
+			if len(refs) > 0 {
+				out[n.ID] = refs
+			} else {
+				delete(out, n.ID)
+			}
+			mu.Unlock()
+		}(n)
+	}
+	wg.Wait()
+}
+
+// lineHistoryRefs returns the PR refs whose commits modified node n's source
+// line range, following the range across history with `git log -L`. The bool
+// is false only when git itself errored (so the caller can preserve the
+// Pass-1 baseline rather than wipe it).
+func lineHistoryRefs(srcRoot, repo string, n types.Node) ([]types.PRRef, bool) {
+	const fieldSep = "\x00"
+	const recordSep = "\x01"
+	format := strings.Join([]string{"%H", "%P", "%cI", "%s", "%b"}, "%x00") + "%x01"
+	cmd := exec.Command("git", "-C", srcRoot, "log", "HEAD",
+		fmt.Sprintf("--max-count=%d", lineHistoryMaxCommits),
+		"--no-patch", "--format="+format,
+		fmt.Sprintf("-L%d,%d:%s", n.StartLine, n.EndLine, n.FilePath))
+	stdout, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	var refs []types.PRRef
+	seen := map[int]bool{}
+	for _, rec := range strings.Split(string(stdout), recordSep) {
+		rec = strings.TrimLeft(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		fields := strings.SplitN(rec, fieldSep, 5)
+		if len(fields) < 5 {
+			continue
+		}
+		m := prNumberRE.FindStringSubmatch(fields[3])
+		if len(m) < 2 {
+			continue
+		}
+		num, _ := strconv.Atoi(m[1])
+		if seen[num] {
+			continue
+		}
+		seen[num] = true
+		ts, _ := time.Parse(time.RFC3339, fields[2])
+		parents := strings.Fields(fields[1])
+		base, head := "", fields[0]
+		if len(parents) >= 1 {
+			base = parents[0]
+		}
+		if len(parents) >= 2 {
+			head = parents[1]
+		}
+		refs = append(refs, types.PRRef{
+			Number:      num,
+			Title:       cleanPRTitle(fields[3]),
+			Summary:     bodyExcerpt(fields[4]),
+			BaseSHA:     base,
+			HeadSHA:     head,
+			MergedAtUTC: ts.UTC(),
+			Repo:        repo,
+		})
+	}
+	return refs, true
 }
 
 // prCommit is the in-memory record per PR-tagged commit. Captured from
