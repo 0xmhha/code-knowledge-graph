@@ -50,6 +50,7 @@ import (
 func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
 	log *slog.Logger, strict bool,
 	goFuncFieldTouches map[string]map[string]struct{}, lockPropagation bool,
+	temporalDepth int,
 ) (*cluster.PkgTree, *cluster.TopicTree, map[string][]byte, error) {
 	if solParser != nil {
 		abi := convertABI(solParser.ABI())
@@ -77,7 +78,7 @@ func emitDerivedPasses(g *graph.Graph, srcRoot string, solParser *solp.Parser,
 		"wildcard_hits", httpResult.WildcardHits,
 		"ambiguous_retained", httpResult.AmbiguousRetained,
 		"placeholders_dropped", httpResult.PlaceholdersDropped)
-	hunkBlobs, err := emitTemporalEdges(g, srcRoot, log, 0)
+	hunkBlobs, err := emitTemporalEdges(g, srcRoot, log, temporalDepth)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("temporal: %w", err)
 	}
@@ -167,6 +168,14 @@ type Options struct {
 	// means "no security enrichment". Same cold-only constraint as
 	// PolicyFile — re-run with --no-cache when the YAML changes.
 	SecurityPatternFile string
+
+	// TemporalDepth caps the per-file commit count the temporal pass (G6)
+	// walks when emitting Commit/Hunk nodes and changed_in/blame edges.
+	// 0 (the zero value) means "use the built-in default" (temporalDepthDefault
+	// = 10). Raising it deepens commit-level history at a roughly linear cost
+	// in Commit/Hunk nodes, changed_in edges, and graph size; node_prs symbol
+	// history is independent of this cap (see pr_history.go).
+	TemporalDepth int
 }
 
 // validateAndSanitize runs the lenient/strict validation gate against g and
@@ -368,7 +377,7 @@ func runCold(opt Options, log *slog.Logger,
 	// by temporal living only in cold; the helper makes that recurrence
 	// structurally impossible.
 	log.Debug("metrics.start")
-	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, goFuncFieldTouches, opt.LockPropagation)
+	pkgTree, topicTree, hunkBlobs, err := emitDerivedPasses(g, opt.SrcRoot, solParser, log, opt.StrictValidate, goFuncFieldTouches, opt.LockPropagation, opt.TemporalDepth)
 	if err != nil {
 		return persist.Manifest{}, err
 	}

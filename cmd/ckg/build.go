@@ -16,6 +16,7 @@ func newBuildCmd() *cobra.Command {
 	var src, out, outTag, atCommit, dbDsn, filesFrom, policyFile, securityPatternFile string
 	var langs []string
 	var noCache, force, rebuildMetrics, strictValidate, lockPropagation bool
+	var temporalDepth int
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Parse a source tree and produce graph.db",
@@ -62,6 +63,7 @@ func newBuildCmd() *cobra.Command {
 				LockPropagation:     lockPropagation,
 				PolicyFile:          policyFile,
 				SecurityPatternFile: securityPatternFile,
+				TemporalDepth:       temporalDepth,
 			})
 			if err != nil {
 				return err
@@ -94,6 +96,8 @@ func newBuildCmd() *cobra.Command {
 		"enable Go cross-function lock propagation (W-A, D1 Stage B DFS depth=5); requires --no-cache to take full effect")
 	cmd.Flags().StringVar(&policyFile, "policy-file", "",
 		"path to governance/protocol policy YAML (pkg/policy); enriches the graph with NodePolicy + EdgeGovernedBy rows")
+	cmd.Flags().IntVar(&temporalDepth, "temporal-depth", 0,
+		"max commits per file the temporal pass walks for changed_in/Hunk/blame edges (0 = default 10; higher deepens commit history at ~linear graph-size cost; does not affect node_prs symbol history)")
 	cmd.Flags().StringVar(&securityPatternFile, "security-pattern-file", "",
 		"path to security risk pattern YAML (pkg/security); enriches the graph with NodeSecurityPattern + EdgeHasSecurityPattern rows")
 	_ = cmd.MarkFlagRequired("src")
