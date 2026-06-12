@@ -71,5 +71,11 @@ eval/results/
 # or other curated docs.
 docs/STAGE-B-EVAL-RESULTS-*.md
 
+# func-verify per-session reports/results — point-in-time measurements tied to a
+# specific machine + corpus snapshot (embed absolute paths + src_commit). The
+# reusable scaffolding (verify.py, ground-truth-*.json, PLAN.md) IS tracked.
+eval/stablenet/func-verify/Report-*.md
+eval/stablenet/func-verify/results-*.json
+
 # Per-session code audit reports — one-shot snapshots, not specs.
 docs/CODE-AUDIT-*.md
