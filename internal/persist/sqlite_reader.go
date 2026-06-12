@@ -21,13 +21,13 @@ type HierarchyRow struct {
 
 // GetNode fetches a node by ID. Returns sql.ErrNoRows if not found.
 func (s *sqliteStore) GetNode(id string) (types.Node, error) {
-	row := s.db.QueryRow(`SELECT id, type, name, qualified_name, file_path,
+	row := s.db.QueryRow(`SELECT id, type, name, qualified_name, COALESCE(canonical_id,''), file_path,
 		start_line, end_line, start_byte, end_byte, language, visibility,
 		signature, doc_comment, complexity, in_degree, out_degree, pagerank,
 		usage_score, confidence, sub_kind, COALESCE(attrs,'') FROM nodes WHERE id = ?`, id)
 	var n types.Node
 	var conf, attrs string
-	err := row.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.FilePath,
+	err := row.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.CanonicalID, &n.FilePath,
 		&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
 		&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
 		&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,

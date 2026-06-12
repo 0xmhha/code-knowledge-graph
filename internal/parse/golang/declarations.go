@@ -271,6 +271,11 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 	sig := formatSignature(d)
 	v.appendNode(id, nt, d.Name.Name, qname, startLine, endLine, startByte, endByte,
 		exported(d.Name.Name), commentText(d.Doc), sig)
+	if v.typesInfo != nil {
+		if cid := goCanonicalID(v.typesInfo.ObjectOf(d.Name)); cid != "" {
+			v.nodes[len(v.nodes)-1].CanonicalID = cid
+		}
+	}
 	v.edges = append(v.edges, types.Edge{
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 	})
@@ -317,6 +322,37 @@ func commentText(g *ast.CommentGroup) string {
 		return ""
 	}
 	return strings.TrimSpace(g.Text())
+}
+
+// goCanonicalID builds the globally-unique import-path-qualified identity of a
+// declared symbol from its go/types object, per docs/symbol-identity-design.md:
+//
+//	function: <importpath>.<Func>
+//	method:   <importpath>.(<*?RecvType>).<Method>   (pointer star preserved)
+//	type/const/var: <importpath>.<Name>
+//
+// Returns "" when the object has no package (builtins) so callers leave the
+// node's CanonicalID empty rather than emitting an ambiguous id.
+func goCanonicalID(obj gotypes.Object) string {
+	if obj == nil || obj.Pkg() == nil {
+		return ""
+	}
+	pkgPath := obj.Pkg().Path()
+	if fn, ok := obj.(*gotypes.Func); ok {
+		if sig, ok := fn.Type().(*gotypes.Signature); ok && sig.Recv() != nil {
+			rt := sig.Recv().Type()
+			star := ""
+			if ptr, ok := rt.(*gotypes.Pointer); ok {
+				rt = ptr.Elem()
+				star = "*"
+			}
+			if named, ok := rt.(*gotypes.Named); ok && named.Obj() != nil {
+				return pkgPath + ".(" + star + named.Obj().Name() + ")." + fn.Name()
+			}
+		}
+		return pkgPath + "." + fn.Name()
+	}
+	return pkgPath + "." + obj.Name()
 }
 
 func exprName(e ast.Expr) string {

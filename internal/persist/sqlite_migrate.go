@@ -54,6 +54,43 @@ func (s *sqliteStore) Migrate() error {
 	if err := ensureSearchTokensColumn(s.db); err != nil {
 		return fmt.Errorf("migrate search_tokens on nodes: %w", err)
 	}
+	if err := ensureCanonicalIDColumn(s.db); err != nil {
+		return fmt.Errorf("migrate canonical_id on nodes: %w", err)
+	}
+	return nil
+}
+
+// ensureCanonicalIDColumn ALTER-adds nodes.canonical_id on pre-1.16 DBs.
+// Idempotent (PRAGMA table_info detect-then-no-op), mirroring the attrs and
+// search_tokens migrations.
+func ensureCanonicalIDColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(nodes)`)
+	if err != nil {
+		return fmt.Errorf("table_info(nodes): %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == "canonical_id" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate table_info: %w", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE nodes ADD COLUMN canonical_id TEXT`); err != nil {
+		return fmt.Errorf("alter nodes add canonical_id: %w", err)
+	}
 	return nil
 }
 

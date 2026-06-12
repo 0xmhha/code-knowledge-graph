@@ -6,6 +6,13 @@ type Node struct {
 	Type          NodeType   `json:"type"           validate:"required"`
 	Name          string     `json:"name"           validate:"required"`
 	QualifiedName string     `json:"qualified_name" validate:"required"`
+	// CanonicalID is the globally-unique, import-path-qualified identity of the
+	// symbol (e.g. "github.com/ethereum/go-ethereum/core/vm.(*EVM).Call"),
+	// receiver- and signature-aware, used for exact resolution. QualifiedName
+	// stays the short, suffix-searchable display form. Empty when type info is
+	// unavailable (AST-only mode) or for node kinds not yet wired. See
+	// code-knowledge-system docs/symbol-identity-design.md.
+	CanonicalID   string     `json:"canonical_id,omitempty"`
 	FilePath      string     `json:"file_path"      validate:"required"`
 	StartLine     int        `json:"start_line"     validate:"min=1"`
 	EndLine       int        `json:"end_line"       validate:"min=1"`

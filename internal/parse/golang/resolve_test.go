@@ -7,6 +7,36 @@ import (
 	"github.com/0xmhha/code-knowledge-graph/pkg/types"
 )
 
+// TestCanonicalID_DistinguishesSameNameAcrossPackages guards Phase 1 of the
+// symbol-identity design: the same method name in two different packages must
+// get distinct, import-path-qualified canonical ids, even though their short
+// qualified_name leaves (coll1.Set.Size / coll2.Other.Size) only differ by the
+// leaf package — and leaf packages themselves collide on real codebases.
+func TestCanonicalID_DistinguishesSameNameAcrossPackages(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var c1, c2 string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.Set.Size":
+			c1 = n.CanonicalID
+		case "coll2.Other.Size":
+			c2 = n.CanonicalID
+		}
+	}
+	if c1 == "" || c2 == "" {
+		t.Fatalf("missing canonical ids: coll1.Set.Size=%q coll2.Other.Size=%q", c1, c2)
+	}
+	if c1 == c2 {
+		t.Errorf("same-name methods in different packages share canonical id %q", c1)
+	}
+	if want := "ckgresolve.test/coll1.(*Set).Size"; c1 != want {
+		t.Errorf("coll1.Set.Size canonical id = %q, want %q", c1, want)
+	}
+}
+
 // TestResolveSameNameMethodPrefersReceiverType guards the name-collision fix:
 // coll1.Set.Quorum calls its own receiver's Size(), while coll2.Other.Size is a
 // same-named decoy in another package. The typed resolver must bind the call to

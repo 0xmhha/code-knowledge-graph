@@ -8,6 +8,11 @@ CREATE TABLE IF NOT EXISTS nodes (
   type           TEXT NOT NULL,
   name           TEXT NOT NULL,
   qualified_name TEXT NOT NULL,
+  -- canonical_id (schema 1.16): globally-unique import-path-qualified symbol
+  -- identity used for exact resolution (qualified_name stays the short display
+  -- form). Nullable; empty for AST-only builds and not-yet-wired node kinds.
+  -- Pre-1.16 DBs are migrated by ensureCanonicalIDColumn at Open().
+  canonical_id   TEXT,
   file_path      TEXT NOT NULL,
   start_line     INTEGER NOT NULL,
   end_line       INTEGER NOT NULL,
