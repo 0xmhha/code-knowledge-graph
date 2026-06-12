@@ -1,0 +1,31 @@
+{
+  "_comment": "CKG functional verification ground truth (general, post-remediation). Built on the CLEAN dev graph (src_commit 9978930ba). C1 = keyword->code definition, validated against on-disk go-stablenet source. C2 = keyword->change history, validated against `git log -L:<symbol>:<file>` (symbol-precise history) on dev. Dataset is Go-only (--lang go): Solidity/TS are not parsed into definition symbols (only git-history hunks for .sol), so C1 is Go-only by necessity (reported as a coverage finding). No test/throwaway symbols.",
+  "dataset": "go-stablenet @ dev (9978930ba)",
+  "db_rel": "../../../../code-knowledge-system/data/ckg-stablenet/graph.db",
+  "c1_keywords": [
+    { "keyword": "SetGasTip",            "module": "txpool/miner" },
+    { "keyword": "RemotesBelowTip",      "module": "core/txpool/legacypool" },
+    { "keyword": "EffectiveGasTipValue", "module": "core/types" },
+    { "keyword": "gasTipChanged",        "module": "eth/gasprice" },
+    { "keyword": "NewBlockChain",        "module": "core" },
+    { "keyword": "StateAt",              "module": "core" },
+    { "keyword": "Finalize",             "module": "consensus" },
+    { "keyword": "Seal",                 "module": "consensus" },
+    { "keyword": "VerifyHeader",         "module": "consensus" },
+    { "keyword": "ProposerPolicy",       "module": "consensus/wbft" },
+    { "keyword": "Validators",           "module": "consensus/wbft", "query_term": "WBFTInit.Validators" },
+    { "keyword": "Authorize",            "module": "consensus/clique" },
+    { "keyword": "GetState",             "module": "systemcontracts" },
+    { "keyword": "Snapshot",             "module": "ethdb/core" }
+  ],
+  "_c2_note": "C2 symbols must have a real function/method BODY (not an interface declaration), else `git log -L` yields no symbol-precise history. Each below confirmed to resolve to a concrete body on dev.",
+  "c2_history_facts": [
+    { "name": "RemotesBelowTip",  "file_glob": "core/txpool/legacypool/%" },
+    { "name": "NewBlockChain",    "file_glob": "core/blockchain.go" },
+    { "name": "SetGasTip",        "file_glob": "miner/%" },
+    { "name": "reset",            "file_glob": "core/txpool/legacypool/%" },
+    { "name": "Pending",          "file_glob": "core/txpool/legacypool/%" },
+    { "name": "applyTransaction", "file_glob": "core/state_processor.go" },
+    { "name": "Seal",             "file_glob": "consensus/wbft/backend/%" }
+  ]
+}
