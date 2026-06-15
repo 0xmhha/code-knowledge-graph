@@ -1,0 +1,17 @@
+id: PR77-01-find-symbol-gate
+description: |
+  REGRESSION GUARD (passes today). The primary PR#77 fix site is the stale-cache
+  gate in AnzeonTipEnv.SetCurrentBlock (eth/gasprice/anzeon.go). ckg must surface
+  the gasprice impl by name. Locks the retrieval win the blind run relied on.
+  Substrate: bug-parent graph .ckg-stablenet-pr77 (go-stablenet @ 0bf2f4d1b).
+probe:
+  tool: find_symbol
+  args:
+    name: "SetCurrentBlock"
+    exact: false
+expected:
+  symbols:
+    - "gasprice.AnzeonTipEnv.SetCurrentBlock"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.0

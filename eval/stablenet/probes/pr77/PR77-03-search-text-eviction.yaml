@@ -1,0 +1,20 @@
+id: PR77-03-search-text-eviction
+description: |
+  GAP G3/G5 measurement. The SECOND fix site, legacypool.lookup.RemotesBelowTip,
+  is the below-tip eviction path that (at bug-parent) compares the raw tx tip cap
+  instead of the Anzeon effective tip. A concept/text search for the eviction path
+  should surface it; the blind analyst never reached it. Failing = G3/G5 (consumer
+  call-site discovery / omission-site blindness).
+probe:
+  tool: search_text
+  args:
+    query: "remote transactions below tip threshold"
+    mode: "or"
+    language: "go"
+    top_k: 20
+expected:
+  symbols:
+    - "legacypool.lookup.RemotesBelowTip"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.0

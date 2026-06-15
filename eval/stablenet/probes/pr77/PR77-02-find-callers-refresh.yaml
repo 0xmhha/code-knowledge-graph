@@ -1,0 +1,17 @@
+id: PR77-02-find-callers-refresh
+description: |
+  GAP G1 measurement. The refresh IS wired: legacypool reset() calls
+  SetCurrentBlock(newHead) on every head. The blind run's `ckg path` mis-resolved
+  the ambiguous name 'reset'; find_callers on the qualified gate method should
+  recover the real refresh caller. Failing = G1 (caller/interface-dispatch gap).
+probe:
+  tool: find_callers
+  args:
+    qname: "gasprice.AnzeonTipEnv.SetCurrentBlock"
+    depth: 2
+expected:
+  symbols:
+    - "legacypool.LegacyPool.reset"
+scoring:
+  recall_min: 1.0
+  precision_min: 0.0
