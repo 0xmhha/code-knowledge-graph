@@ -32,6 +32,7 @@ import (
 func newQueryCmd() *cobra.Command {
 	var graph string
 	var budget, depth, seeds int
+	var excludeTests bool
 	cmd := &cobra.Command{
 		Use:   "query <question>",
 		Short: "Answer a free-form question with graph-cited symbols (LLM-free)",
@@ -72,14 +73,14 @@ names, package fragments) for best results.`,
 			if len(tokens) == 0 {
 				return fmt.Errorf("question has no usable tokens (after stop-word strip)")
 			}
-			seedNodes := scoreAndPickSeeds(nodes, tokens, seeds)
+			seedNodes := scoreAndPickSeeds(nodes, tokens, seeds, excludeTests)
 			if len(seedNodes) == 0 {
 				fmt.Println("No matching symbols found. Try rephrasing with literal type/function names.")
 				return nil
 			}
 			adj := buildAdjacency(edges)
 			edgeIdx := buildEdgeIndex(edges)
-			renderQueryAnswer(os.Stdout, question, seedNodes, nodes, adj, edgeIdx, depth, budget)
+			renderQueryAnswer(os.Stdout, question, seedNodes, nodes, adj, edgeIdx, depth, budget, excludeTests)
 			return nil
 		},
 	}
@@ -88,6 +89,8 @@ names, package fragments) for best results.`,
 		"approximate token budget for the rendered answer (graphify default; chars/4)")
 	cmd.Flags().IntVar(&depth, "depth", 2, "BFS hop depth from each seed (2 covers most call/define hubs without fan-out)")
 	cmd.Flags().IntVar(&seeds, "seeds", 5, "number of top-scoring seed nodes to expand from")
+	cmd.Flags().BoolVar(&excludeTests, "exclude-tests", true,
+		"omit test files (*_test.go, testdata/, ...) from seeds and neighbourhood (parity with the MCP find_* tools; --exclude-tests=false to include)")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
 }
@@ -170,10 +173,40 @@ func noisyEdgeForQuery(t types.EdgeType) bool {
 	return false
 }
 
+// isTestPath reports whether a file path is test-only. Mirrors the spirit of
+// the MCP find_* tools' exclude_tests filter and the build --files-from
+// `**/*_test.go` / `**/testdata/**` conventions, so the CLI query/path
+// commands hide the same files an exclude_tests consumer would never see.
+func isTestPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	p = filepath.ToSlash(p)
+	base := p
+	if i := strings.LastIndexByte(p, '/'); i >= 0 {
+		base = p[i+1:]
+	}
+	if strings.HasSuffix(base, "_test.go") {
+		return true
+	}
+	for _, suf := range []string{".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", ".test.js", ".spec.js"} {
+		if strings.HasSuffix(base, suf) {
+			return true
+		}
+	}
+	for _, seg := range strings.Split(p, "/") {
+		switch seg {
+		case "testdata", "testutil", "testutils", "testhelpers", "__tests__", "__mocks__":
+			return true
+		}
+	}
+	return false
+}
+
 // scoreAndPickSeeds ranks nodes by keyword-overlap on Name +
 // QualifiedName, then returns the top-N. Filters via seedNodeFilter so
 // the seed surface is symbol-level, not statement-level.
-func scoreAndPickSeeds(nodes []types.Node, tokens []string, n int) []types.Node {
+func scoreAndPickSeeds(nodes []types.Node, tokens []string, n int, excludeTests bool) []types.Node {
 	type scored struct {
 		node  types.Node
 		score int
@@ -181,6 +214,9 @@ func scoreAndPickSeeds(nodes []types.Node, tokens []string, n int) []types.Node 
 	matches := []scored{}
 	for _, nd := range nodes {
 		if seedNodeFilter(nd.Type, nd.FilePath) {
+			continue
+		}
+		if excludeTests && isTestPath(nd.FilePath) {
 			continue
 		}
 		score := 0
@@ -233,7 +269,7 @@ func buildEdgeIndex(edges []types.Edge) edgeIndex {
 func renderQueryAnswer(w *os.File, question string,
 	seeds []types.Node, allNodes []types.Node,
 	adj map[string][]string, eidx edgeIndex,
-	depth, tokenBudget int) {
+	depth, tokenBudget int, excludeTests bool) {
 	idx := make(map[string]types.Node, len(allNodes))
 	for _, n := range allNodes {
 		idx[n.ID] = n
@@ -273,6 +309,9 @@ bfs:
 				visited[nb] = true
 				other := idx[nb]
 				if other.ID == "" {
+					continue
+				}
+				if excludeTests && isTestPath(other.FilePath) {
 					continue
 				}
 				line := fmt.Sprintf("- `%s` —[%s]→ `%s` · %s:%d\n",

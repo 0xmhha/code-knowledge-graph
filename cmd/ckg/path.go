@@ -32,6 +32,7 @@ import (
 func newPathCmd() *cobra.Command {
 	var graph string
 	var maxDepth int
+	var includeHistory, excludeTests bool
 	cmd := &cobra.Command{
 		Use:   "path <from> <to>",
 		Short: "Find the shortest path between two nodes (qualified_name / name / ID prefix)",
@@ -60,8 +61,8 @@ pair, plus a summary line showing the hop count.`,
 				return fmt.Errorf("load edges: %w", err)
 			}
 
-			fromID, fromHits := resolveNodeQuery(nodes, args[0])
-			toID, toHits := resolveNodeQuery(nodes, args[1])
+			fromID, fromHits := resolveNodeQuery(nodes, args[0], excludeTests)
+			toID, toHits := resolveNodeQuery(nodes, args[1], excludeTests)
 			if fromID == "" {
 				return fmt.Errorf("could not resolve %q to any node", args[0])
 			}
@@ -81,7 +82,7 @@ pair, plus a summary line showing the hop count.`,
 					args[1], toHits)
 			}
 
-			path, edgeTypes := bfsShortestPath(nodes, edges, fromID, toID, maxDepth)
+			path, edgeTypes := bfsShortestPath(nodes, edges, fromID, toID, maxDepth, includeHistory, excludeTests)
 			if len(path) == 0 {
 				fmt.Printf("(no path of length ≤ %d between the two endpoints)\n", maxDepth)
 				return nil
@@ -93,16 +94,28 @@ pair, plus a summary line showing the hop count.`,
 	cmd.Flags().StringVar(&graph, "graph", "", "graph directory (required)")
 	cmd.Flags().IntVar(&maxDepth, "max-depth", 12,
 		"BFS hop cap; raise for sparse graphs, lower for faster fail")
+	cmd.Flags().BoolVar(&includeHistory, "include-history", false,
+		"allow traversal through temporal/history edges (changed_in/blame/has_hunk/adjacent) and Commit/Hunk nodes; off by default so a path follows code structure, not git history")
+	cmd.Flags().BoolVar(&excludeTests, "exclude-tests", true,
+		"skip test symbols (*_test.go, testdata/, ...) during resolution and traversal (--exclude-tests=false to include)")
 	_ = cmd.MarkFlagRequired("graph")
 	return cmd
 }
 
 // resolveNodeQuery resolves a free-form query to a node ID. Returns the
 // best match and the total count of candidates so the caller can warn
-// when a bare name was ambiguous.
-func resolveNodeQuery(nodes []types.Node, q string) (string, int) {
+// when a bare name was ambiguous. When excludeTests is set, test symbols
+// are never resolution candidates (so a bare `reset` cannot land on a
+// `_test.go` fixture). Tier 3 adds dotted-suffix matching so a partially
+// qualified `LegacyPool.reset` resolves precisely without the full package
+// path — the disambiguation the bare-name PageRank tie-break cannot give.
+func resolveNodeQuery(nodes []types.Node, q string, excludeTests bool) (string, int) {
+	skip := func(n types.Node) bool { return excludeTests && isTestPath(n.FilePath) }
 	// 1. Exact qualified_name.
 	for _, n := range nodes {
+		if skip(n) {
+			continue
+		}
 		if n.QualifiedName == q {
 			return n.ID, 1
 		}
@@ -112,6 +125,9 @@ func resolveNodeQuery(nodes []types.Node, q string) (string, int) {
 	bestPR := -1.0
 	hits := 0
 	for _, n := range nodes {
+		if skip(n) {
+			continue
+		}
 		if n.Name == q {
 			hits++
 			if n.PageRank > bestPR {
@@ -123,13 +139,52 @@ func resolveNodeQuery(nodes []types.Node, q string) (string, int) {
 	if hits > 0 {
 		return best.ID, hits
 	}
-	// 3. ID prefix.
+	// 3. Dotted-suffix on qualified_name ("LegacyPool.reset" →
+	//    "...legacypool.LegacyPool.reset"). Only when the query itself is
+	//    dotted, else this would re-match every bare name handled in tier 2.
+	if strings.Contains(q, ".") {
+		bestPR = -1.0
+		hits = 0
+		suffix := "." + q
+		for _, n := range nodes {
+			if skip(n) {
+				continue
+			}
+			if strings.HasSuffix(n.QualifiedName, suffix) {
+				hits++
+				if n.PageRank > bestPR {
+					best = n
+					bestPR = n.PageRank
+				}
+			}
+		}
+		if hits > 0 {
+			return best.ID, hits
+		}
+	}
+	// 4. ID prefix.
 	for _, n := range nodes {
+		if skip(n) {
+			continue
+		}
 		if strings.HasPrefix(n.ID, q) {
 			return n.ID, 1
 		}
 	}
 	return "", 0
+}
+
+// historyEdgeForPath reports whether an edge is a G6 temporal/history edge
+// that links code to Commit/Hunk nodes. These are excluded from `path`
+// traversal by default: a "shortest path between two symbols" routed through
+// a Commit node (two code symbols touched by the same commit) is a false
+// structural relationship. Opt back in with --include-history.
+func historyEdgeForPath(t types.EdgeType) bool {
+	switch t {
+	case types.EdgeChangedIn, types.EdgeBlame, types.EdgeHasHunk, types.EdgeAdjacent:
+		return true
+	}
+	return false
 }
 
 // bfsShortestPath returns the shortest undirected node sequence from src
@@ -141,10 +196,23 @@ func resolveNodeQuery(nodes []types.Node, q string) (string, int) {
 // the caller could cache it, but the typical interactive use is one
 // query per invocation so the simplicity wins.
 func bfsShortestPath(nodes []types.Node, edges []types.Edge,
-	src, dst string, maxDepth int) ([]string, []string) {
+	src, dst string, maxDepth int, includeHistory, excludeTests bool) ([]string, []string) {
+	// Test nodes to avoid stepping into (src/dst are already non-test when
+	// excludeTests resolved them, so this only filters intermediates).
+	isTest := make(map[string]bool)
+	if excludeTests {
+		for _, n := range nodes {
+			if isTestPath(n.FilePath) {
+				isTest[n.ID] = true
+			}
+		}
+	}
 	type out struct{ id, etype string }
 	adj := make(map[string][]out, len(nodes))
 	for _, e := range edges {
+		if !includeHistory && historyEdgeForPath(e.Type) {
+			continue // never route a structural path through Commit/Hunk nodes
+		}
 		adj[e.Src] = append(adj[e.Src], out{e.Dst, string(e.Type)})
 		adj[e.Dst] = append(adj[e.Dst], out{e.Src, string(e.Type)})
 	}
@@ -160,6 +228,9 @@ func bfsShortestPath(nodes []types.Node, edges []types.Edge,
 			for _, o := range adj[v] {
 				if _, seen := parent[o.id]; seen {
 					continue
+				}
+				if isTest[o.id] {
+					continue // don't route through test symbols
 				}
 				parent[o.id] = v
 				parentEdge[o.id] = o.etype
