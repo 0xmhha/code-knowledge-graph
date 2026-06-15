@@ -13,10 +13,10 @@
 | Field | Value |
 |---|---|
 | Name | **CKG (Code Knowledge Graph)** |
-| Version | v0.2.x, schema **1.10** (W-B/W-C slot reservations only) |
+| Version | v0.2.x, schema **1.15** (authoritative: docs/SCHEMA.md) |
 | Language | Go 1.25.5, single binary, CGO-free by default |
 | Input | Go / TypeScript / Solidity source trees |
-| Output | Graph DB (SQLite default, PostgreSQL `--db` opt-in) — **35 NodeTypes × 40 EdgeTypes** |
+| Output | Graph DB (SQLite default, PostgreSQL `--db` opt-in) — **37 NodeTypes × 43 EdgeTypes** (authoritative: docs/SCHEMA.md) |
 | Validated corpus | go-stablenet 2,142 files → 214K nodes / 652K edges (audit PARITY); stablenet 313 MB graph 210K/708K (cycle 9 baseline) |
 
 CKG is *one* of three sister projects designed to compose:
@@ -37,7 +37,7 @@ graph DB, return precisely the code the coding agent needs.** That makes
 
 ## 2. The five surfaces
 
-`ckg` is a cobra root command with 25 subcommands. Five are user-facing
+`ckg` is a cobra root command with ~20 subcommands. Five are user-facing
 production surfaces; the rest are utilities (`bench-*`, `validate`,
 `benchmark`, `query`, `report`, `quickstart`, `export-*`).
 
@@ -45,7 +45,7 @@ production surfaces; the rest are utilities (`bench-*`, `validate`,
 |---|---|---|
 | `build` | 7-pass pipeline: detect → parse → resolve → graph → xlang → temporal → cluster → score → persist. Incremental cache. `--files-from` restricts to a user-supplied file list. | `internal/buildpipe` |
 | `serve` | HTTP API + embedded Next.js viewer (3D force-graph). 13+ `/api/*` routes. | `internal/server` |
-| `mcp` | stdio MCP server. **8 tools**: find_symbol, find_callers, find_callees, get_subgraph, search_text, evidence_for_intent, impact_of_change, get_context_for_task. | `internal/mcp` |
+| `mcp` | stdio MCP server. **9 tools**: find_symbol, find_callers, find_callees, get_subgraph, search_text, get_context_for_task, impact_of_change, concurrency_impact, evidence_for_intent. | `internal/mcp` |
 | `eval` | 4-baseline LLM comparison (α raw / β whole-graph / γ tools / δ smartContext). Hallucination validator. Retrieval gold-set. | `internal/eval`, `internal/eval/retrieval` |
 | `audit` | `go/packages.Load` vs DB parity check; exit 0/1/2 for CI gating. | `internal/audit` |
 
@@ -99,7 +99,7 @@ public packages, all under `pkg/`:
 | `pkg/impact` | `impact_of_change` MCP backend | Stable |
 
 **Key gap**: MCP tools (`internal/mcp/`) are not yet exposed under
-`pkg/mcphandlers/` — cks cannot reuse the 8-tool registration code. This
+`pkg/mcphandlers/` — cks cannot reuse the 9-tool registration code. This
 is the *load-bearing T-14 P0 blocker* for cks S1 entry.
 
 ## 5. Active streams (where work flows)
@@ -136,7 +136,7 @@ the AwaitPoint node + awaits/overrides edges. Detectors not yet implemented.
 | W-B | TypeScript async/await + heritage (interface/extends/implements) | ~700 LOC | Slot reserved, detector pending |
 | W-C | Solidity inheritance + interface dispatch + `using For` | ~1100-1200 LOC | Slot reserved, detector pending |
 
-Source: `docs/NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md`, `docs/design/*.md`.
+Source: `docs/archive/NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md`, `docs/design/*.md`.
 
 ### 5.3 Stream C — cks/ckv/ckg cross-repo integration (current north star)
 
@@ -149,7 +149,7 @@ with the cks orchestrator pattern.
 
 | ID | Work | LOC |
 |---|---|---|
-| T-14 | `pkg/mcphandlers/` surface (cks needs to import the 8-tool registrations) | ~moderate (move + thin wrapper) |
+| T-14 | `pkg/mcphandlers/` surface (cks needs to import the 9-tool registrations) | ~moderate (move + thin wrapper) |
 | ckg-NEW-2 | `pkg/types.Node.RecentPRs` + `PRRef` (R12 PR-aware retrieval) | ~120 |
 | ckg-NEW-3 | Temporal slicing (`RecentPRsBefore(cutoff)`) — leakage prevention | ~50 |
 | ckg-NEW-4 | `pkg/store.Reader.GetNodePRs` accessor | ~50 |
@@ -197,13 +197,13 @@ goal into concrete gaps.
 |---|---|
 | Architecture (1 page) | `docs/ARCHITECTURE.md` |
 | Architecture (deep, 994 lines) | `docs/ARCHITECTURE-DETAILED.md` |
-| Schema (35 nodes × 40 edges, version history) | `docs/SCHEMA.md` |
+| Schema (node/edge types, version history) | `docs/SCHEMA.md` |
 | Code structure (visual index, doc map) | `docs/CODE-STRUCTURE.md` |
 | Foundation spec (v0.2 parser/cache/PG) | `docs/spec-ckg-v0.2.md` |
 | Eval CLI usage + baselines | `docs/EVAL.md` |
 | Eval 11-cycle trajectory (C18-C37) | `docs/eval-trajectory.md` |
 | Cross-session entry / current snapshot | `docs/CONTINUITY.md` |
-| Stream B (within-lang) | `docs/NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md` + `docs/design/*` |
+| Stream B (within-lang) | `docs/archive/NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md` + `docs/design/*` |
 | Stream C P0 task tracker | `eval/stablenet/HANDOFF.md` |
 | Stream C cks integration plan | `eval/stablenet/CKS-INTEGRATION-2026-05-23.md` |
 | Stream C todo (cks dogfood follow-ups) | `docs/todo-cks-dogfood-followups-2026-05-20.md` |

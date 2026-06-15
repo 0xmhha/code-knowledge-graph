@@ -1,3 +1,7 @@
+> **ARCHIVED 2026-06-15.** The W-A/W-B/W-C implementation it dispatched is
+> complete (landed by 2026-05-18). Historical execution record; design intent
+> lives in `docs/design/*.md`. Kept for provenance.
+
 # Dispatch — Within-Language Semantics Implementation
 
 > 다음 작업을 시작할 때 **이 문서 하나만 읽으면** 어디서 시작해서 어디로

@@ -1,26 +1,28 @@
 # Continuity — cross-session / cross-machine entry point
 
-> 2026-05-26. *Single entry point* for a new session or new machine picking
-> up the ckg dogfood / eval / cks-integration work. Everything below is
-> deliberately short — every section links to the authoritative source.
+> Updated 2026-06-15. *Single entry point* for a new session or new machine
+> picking up the ckg work. Deliberately short — every section links to the
+> authoritative source. **For project purpose read `docs/VISION.md`; for the
+> doc map read `docs/DOC-MAP.md`; "what is true now" = code + git.**
 
 ## 1. Snapshot (where the project is)
 
 - **Branch**: `main`
-- **Local commits ahead of origin**: 0 pushed; **uncommitted Lane X work in tree** (see §9 for the file list and recommended commit split)
-- **Latest pushed commits** (top 5):
-  - `d4aed40` docs(viewer): README — make build + ckg serve as the prod path
-  - `ac01132` docs(handoff): note viewer-session uncommitted files in CONTINUITY §7
-  - `98260a8` docs(handoff): cross-session continuity (CONTINUITY + eval-trajectory + HANDOFF close)
-  - `c7de329` docs(viewer): handoff doc — environment setup + Claude collab rules
-  - `563dc63` docs(eval/stablenet): cks integration cross-machine handoff
-- **Lane X (2026-05-25 → 26)**: complete, in-tree only, awaiting commit
-  - search_text + pkg/store now expose AND/OR mode (`SearchFTSOptions.Mode`, `Reader.SearchWithOpts`)
-  - retrieval gold-set: 5 → **12 fixtures**, aggregate **R=1.00 P=1.00 F1=1.00**
-  - B1 Stage 1 concurrency emit (Mutex / acquires_lock / releases_lock / accessed_under_lock) was already live in `internal/parse/golang/concurrency*.go` — docs drift fixed, R11/R12 fixtures lock against future regression
-  - User north-star ("6-axis graph DB + keyword query at 100%") first lock achieved
-- **Eval framework (LLM-driven)**: production-ready, T-04/T-05 closed
-- **Last smoke run**: 2026-05-22 (cycle 9), 12/12 LLM calls, all four baselines clean
+- **Latest pushed commits** (top 6):
+  - `358f227` docs: establish 3-tier doc governance (CLAUDE.md, VISION, DOC-MAP, ADR) (#22)
+  - `1a9698c` Feat/canonical symbol (#21) — `canonical_id` Phase 1 foundation (Go func/method)
+  - `af2bda8` test(eval/stablenet): ckg func-verify harness + ground truth (#20)
+  - `c8c8393` feat(build): `--temporal-depth` flag for per-file commit cap (#19)
+  - `7ef33e2` feat(pr_history): definition-node PR history via `git -L` (#18)
+  - `a3260e6` fix(parse/golang): qualify static call targets vs bare-name collisions (#17)
+- **Doc governance (PR #22)**: 3-tier model live — VISION (Tier 1), ADR
+  (`docs/adr/`, Tier 2), status (Tier 3); `docs/DOC-MAP.md` is the index.
+- **Symbol identity (PR #21)**: `canonical_id` foundation merged; remaining work
+  (other node kinds, other langs, exact resolution, schema bump, reindex) tracked
+  in `docs/symbol-identity-remaining-work.md` + decision in `docs/adr/0001-*`.
+- **Eval framework (LLM-driven)**: production-ready, T-04/T-05 closed. Metrics
+  history: `docs/eval-trajectory.md`.
+- **Schema**: 1.15 (authoritative: `docs/SCHEMA.md` → `pkg/types/enums.go`).
 
 ## 2. Where to read next
 
@@ -29,7 +31,7 @@
 | Understand the eval-framework series (11 cycles, metrics) | `docs/eval-trajectory.md` |
 | Cross-project cks integration plan (R9-R13, ckg-NEW-1..9) | `eval/stablenet/CKS-INTEGRATION-2026-05-23.md` |
 | Current P0 task status (closed + open) | `eval/stablenet/HANDOFF.md` |
-| Phase-by-phase dogfood follow-up tracker | `docs/todo-cks-dogfood-followups-2026-05-20.md` |
+| Phase-by-phase dogfood follow-up tracker (archived) | `docs/archive/todo-cks-dogfood-followups-2026-05-20.md` |
 | Walker symmetry matrix (parse-sol lockdown work) | `internal/parse/solidity/WALKER_SYMMETRY.md` |
 | Why the FTS5 bug was important | `internal/persist/sqlite.go::rewriteFTSQuery` + commit `2a4db90`/`8e8bf9b` |
 
@@ -111,93 +113,15 @@ Direct quote of the surprising finding:
 This was the explicit reason to write the docs you're reading now: the
 finding lived only in the conversation context until this commit.
 
-## 7. Pending handoff — other-session uncommitted changes
+## 7. Conventions in this repo
 
-As of 2026-05-23 commit `98260a8`, two files in the working tree are
-modified/untracked but belong to a different working session
-(viewer / web/viewer-next). They are left for the *viewer session*
-owner to commit so attribution stays with the original author.
-
-| File | State | Owner |
-|---|---|---|
-| `internal/server/web_assets/index.html` | modified (−20/+8) | viewer session |
-| `web/viewer-next/README.md` | untracked (6.9 KB, created 2026-05-21) | viewer session (likely missed by commit `c7de329`) |
-
-This session (eval/cks/T-04 series) deliberately did NOT stage or
-modify either file. If you are the viewer-session owner picking up
-the work, both changes appear to be ready-to-commit handoff items
-— review and commit under your authorship.
-
-## 9. Lane X uncommitted file list + recommended commit split
-
-The 2026-05-25 → 26 Lane X work touches 27 files in three logical groups.
-The split below pairs *behaviour change* with *its own tests* and isolates
-the *data-only* and *docs-only* moves so each commit has a single review
-concern.
-
-### Commit A — capability: search_text AND/OR mode + SearchWithOpts surface
-
-```
-internal/persist/search_hit.go         (SearchFTSOptions.Mode field)
-internal/persist/sqlite.go             (SearchFTS mode branch + helpers + SearchWithOpts)
-internal/persist/postgres_store.go     (PG parity)
-internal/persist/store_interface.go    (SearchWithOpts interface method)
-internal/persist/search_mode_test.go   (NEW: 5 integration tests)
-internal/persist/postgres_exporter_test.go  (mockStoreReader.SearchWithOpts)
-internal/mcp/h3_filter.go              (llmSafeStoreReader.SearchWithOpts forwarder)
-internal/mcp/h3_filter_test.go         (fakeStore.SearchWithOpts + leak-guard table row)
-internal/mcp/tools.go                  (registerSearchText mode/language args)
-internal/eval/hallucination_check_test.go  (fakeStore.SearchWithOpts)
-internal/eval/retrieval/runner.go      (runSearchText mode/language args)
-```
-
-Subject suggestion:
-`feat(search): AND/OR mode in search_text + pkg/store.SearchWithOpts`
-
-### Commit B — measurement: fixture corpus + B1 synthetic + baseline
-
-```
-eval/retrieval/R01-find-callers-vault-deposit.yaml  (M: + service.SafeVault.SafeDeposit)
-eval/retrieval/R03-find-callers-service-new.yaml    (M: + service.NewSafeVault, P=1.0)
-eval/retrieval/R04-find-symbol-vault.yaml           (M: + TS Vault + SafeVault.vault)
-eval/retrieval/R05-search-text-deposit.yaml         (M: AND mode disposition)
-eval/retrieval/R06-...yaml                          (NEW: OR multi-keyword Go)
-eval/retrieval/R07-...yaml                          (NEW: 3-token AND)
-eval/retrieval/R08-...yaml                          (NEW: TS language filter)
-eval/retrieval/R09-...yaml                          (NEW: Sol language filter)
-eval/retrieval/R10-...yaml                          (NEW: single-keyword strict Go)
-eval/retrieval/R11-find-symbol-mutex.yaml           (NEW: B1 Mutex node lock)
-eval/retrieval/R12-find-callees-safedeposit.yaml    (NEW: B1 lock-protected delegation lock)
-eval/baseline/retrieval.json                        (M: 5 → 12 fixtures, R=1.00 P=1.00 F1=1.00)
-testdata/synthetic/go-backend/service/concurrent.go (NEW: SafeVault Mutex fixture)
-```
-
-Subject suggestion:
-`test(retrieval): 12-fixture multi-keyword + B1 concurrency gold-set lock`
-
-### Commit C — docs: drift correction + overview/audit
-
-```
-docs/SCHEMA.md           (M: Mutex + acquires/releases/accessed_under_lock no longer slot-reserved)
-docs/PROJECT-OVERVIEW.md (NEW: 3-stream index, 5-surface map, cross-link doc map)
-docs/CAPABILITY-AUDIT.md (NEW: R-Build/R-Query/R-Accuracy gap matrix, Lane X/Y plan)
-docs/CONTINUITY.md       (M: §1 snapshot + §5 next-action queue + §9 commit split — this section)
-```
-
-Subject suggestion:
-`docs: PROJECT-OVERVIEW + CAPABILITY-AUDIT + B1 drift fix in SCHEMA`
-
-The three commits are independent (A's tests pass with stock fixtures; B
-recalibrates the fixtures against the new SearchFTS behaviour A introduced;
-C is text-only). Land in A → B → C order if pre-commit hooks gate by
-behaviour change; otherwise any order works.
-
-## 8. Conventions in this repo
-
+- See `CLAUDE.md` for the working agreement (build/test/lint, conventions,
+  doc discipline) and `docs/DOC-MAP.md` for the documentation tier map.
 - Commit messages reference cycle IDs (C18-C37) for the eval series and
   W-C V## for the parse-sol lockdown series. Both numbering systems are
   chronological, not topic-organised.
-- `docs/` carries living planning docs (the TODO tracker, the analyses).
+- `docs/` carries the living docs (tier map, VISION, ADRs, status); dated
+  snapshots and superseded designs live in `docs/archive/`.
   `eval/stablenet/` carries the HANDOFF and the cross-machine integration
   doc. `internal/parse/solidity/WALKER_SYMMETRY.md` carries the parse-sol
   lockdown matrix.

@@ -10,7 +10,7 @@ detect → parse → link → graph → cluster → score → persist
 - **Cluster**: package-tree (deterministic) + Leiden topic overlay (3 resolutions)
 - **Storage**: `modernc.org/sqlite` (CGO-free), embedded schema, blobs in DB
 - **Viewer**: vanilla JS + lit-html + 3d-force-graph, embed.FS
-- **MCP**: stdio, six tools, in-process Store reads
+- **MCP**: stdio, nine tools, in-process Store reads
 - **Eval**: 4 baselines × N tasks → CSV + report.md
 
 

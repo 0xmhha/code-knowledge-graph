@@ -38,10 +38,7 @@ Tier 1 wins.
 | [SCHEMA.md](SCHEMA.md) | **Authoritative** node/edge enumeration + schema version history |
 | [CODE-STRUCTURE.md](CODE-STRUCTURE.md) | Visual index: package structure, pipeline, six-graph axis, cache routing |
 | [INCREMENTAL.md](INCREMENTAL.md) | Incremental build cache: cache key, manifest v2, invalidation rules |
-| [DISPATCH-WITHIN-LANG-SEMANTICS.md](DISPATCH-WITHIN-LANG-SEMANTICS.md) | Within-language semantics dispatch (W-A/W-B/W-C ordering) |
 | [EVAL.md](EVAL.md) | Eval CLI: 4 baselines (α/β/γ/δ), backends, output schema |
-| [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | Gap → work mapping with size/priority |
-| [VERIFICATION-CHECKLIST.md](VERIFICATION-CHECKLIST.md) | PR-ready surface fan-out checklist |
 | [design/hunk-graph.md](design/hunk-graph.md) | Temporal hunk-graph design (H1–H4) |
 | [design/go-cross-function-lock-propagation.md](design/go-cross-function-lock-propagation.md) | Lock propagation spec (W-A) |
 | [design/ts-async-await-and-interface.md](design/ts-async-await-and-interface.md) | TypeScript semantics spec (W-B) |
@@ -55,16 +52,14 @@ Tier 1 wins.
 
 | Doc | Covers |
 |---|---|
-| [CONTINUITY.md](CONTINUITY.md) | Cross-session entry point: snapshot + next-action queue |
-| [REMAINING-WORK.md](REMAINING-WORK.md) | Priority queue across tiers/repos |
-| [symbol-identity-remaining-work.md](symbol-identity-remaining-work.md) | Canonical-id (symbol identity) status + remaining work |
-| [NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md](NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md) | Within-language semantic gaps / decision log |
-| [HANDOFF-2026-05-29.md](HANDOFF-2026-05-29.md) | Session handoff (2026-05-29) |
+| [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
+| [symbol-identity-remaining-work.md](symbol-identity-remaining-work.md) | Canonical-id (symbol identity) status + remaining work (decision: [ADR-0001](adr/0001-canonical-symbol-id.md)) |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
+| [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | North-star → capability gap mapping (requirements reference) |
+| [VERIFICATION-CHECKLIST.md](VERIFICATION-CHECKLIST.md) | PR-ready surface fan-out checklist |
 | [STUDY-GUIDE.md](STUDY-GUIDE.md) | External concept primer (Leiden, MCP, tree-sitter, …) |
 | [HYDRATION-PATTERN.md](HYDRATION-PATTERN.md) | Viewer hydration pattern (React) |
-| [analysis/](analysis/) | Dated measurements & flow analyses (self-graph baselines, CKS spec compliance, build/query flows) |
 
 ## ADR — Architecture Decision Records
 
@@ -76,4 +71,9 @@ Tier 1 wins.
 ## Archive
 
 `docs/archive/` — historical/superseded snapshots and handoffs (dated). Kept for
-provenance; never the authoritative answer.
+provenance; never the authoritative answer. Archived in the 2026-06-15 cleanup:
+
+- `REMAINING-WORK.md` — superseded by CONTINUITY + CAPABILITY-AUDIT (work landed PR #12–#22)
+- `HANDOFF-2026-05-29.md` — superseded by CONTINUITY as cold-start entry
+- `NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md`, `DISPATCH-WITHIN-LANG-SEMANTICS.md` — W-A/W-B/W-C work complete; design intent lives in `design/*.md`
+- `analysis/` — dated point-in-time measurements & flow walkthroughs (see `archive/analysis/README.md`)

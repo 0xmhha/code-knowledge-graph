@@ -1,3 +1,8 @@
+> **ARCHIVED 2026-06-15.** Dated Tier-3 snapshot, superseded — most Tier A/B
+> items landed in PR #12–#22 (concurrency_impact, lint sweep, temporal-depth,
+> canonical symbol). Live work tracking: `docs/CONTINUITY.md` +
+> `docs/CAPABILITY-AUDIT.md`. Kept for provenance; not authoritative.
+
 # Remaining Work — 2026-06-02
 
 > Priority queue for the next session. 완료 항목은 제거하되 어떤 작업이

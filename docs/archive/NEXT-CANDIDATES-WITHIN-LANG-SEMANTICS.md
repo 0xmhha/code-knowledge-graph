@@ -1,3 +1,8 @@
+> **ARCHIVED 2026-06-15.** Within-language semantics (W-A/W-B/W-C) work is
+> complete (landed 2026-05-11 → 2026-05-18). This index is now a historical
+> decision record; the detailed specs live in `docs/design/*.md`. Kept for
+> provenance.
+
 # Next Candidates — Within-Language Semantic Gaps
 
 > 다른 후보 인덱스(`docs/NEXT-CANDIDATES-2026-05-10.md`, schema 1.9 W 시리즈)와

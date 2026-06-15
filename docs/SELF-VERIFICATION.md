@@ -2,7 +2,7 @@
 
 > **목적**: ckg 프로젝트가 자기 자신의 코드를 분석한 결과(self-graph)로 7가지 사용자 검토항목이 충족되는지 수동으로 확인하기 위한 명령 모음.
 > **대상 corpus**: CKG repo 루트 (`$REPO_ROOT`) — CKG 자기 자신.
-> **선행 문서**: `docs/analysis/SELF-GRAPH-COMPARISON.md` (변경 이력) / `docs/analysis/CKS-SPEC-COMPLIANCE.md` (spec 충실도).
+> **선행 문서**: `docs/archive/analysis/SELF-GRAPH-COMPARISON.md` (변경 이력) / `docs/archive/analysis/CKS-SPEC-COMPLIANCE.md` (spec 충실도).
 
 각 절은 단계별로 실행하며, 기대 출력과 함께 정리되어 있습니다. 빠른 한 번 체크는 [§ 9 자동 검증 스크립트](#9-자동-검증-스크립트)로 끝납니다.
 
@@ -683,11 +683,11 @@ qdb "SELECT key, value FROM manifest WHERE key='src_commit'"
 
 ## 12. 참고 문서
 
-- 7가지 검토항목 spec과 현 구현의 정합성 매트릭스: `docs/analysis/CKS-SPEC-COMPLIANCE.md`
-- 현 baseline + 변경 이력: `docs/analysis/SELF-GRAPH-BASELINE.md`, `docs/analysis/SELF-GRAPH-COMPARISON.md`
-- 빌드 파이프라인 상세: `docs/analysis/GO-PROJECT-BUILD-FLOW.md`, `docs/analysis/TS-SOL-BUILD-FLOW.md`
-- MCP query flow + 알고리즘: `docs/analysis/MCP-QUERY-FLOW.md`
-- Eval framework: `docs/analysis/EVAL-FLOW.md`
+- 7가지 검토항목 spec과 현 구현의 정합성 매트릭스: `docs/archive/analysis/CKS-SPEC-COMPLIANCE.md`
+- 현 baseline + 변경 이력: `docs/archive/analysis/SELF-GRAPH-BASELINE.md`, `docs/archive/analysis/SELF-GRAPH-COMPARISON.md`
+- 빌드 파이프라인 상세: `docs/archive/analysis/GO-PROJECT-BUILD-FLOW.md`, `docs/archive/analysis/TS-SOL-BUILD-FLOW.md`
+- MCP query flow + 알고리즘: `docs/archive/analysis/MCP-QUERY-FLOW.md`
+- Eval framework: `docs/archive/analysis/EVAL-FLOW.md`
 - 전체 schema (33 NodeType × 32 EdgeType, schema 1.6): `docs/SCHEMA.md`
 
 **End of self-verification manual.**

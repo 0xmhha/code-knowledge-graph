@@ -1,10 +1,16 @@
 # CKG Schema (V0)
 
-Schema version: **1.10** (within-language semantics Phase 4 — slot
-reservation for `NodeAwaitPoint` (W-B, TS async/await suspension), and
-edges `awaits` (W-B) + `overrides` (W-C, Solidity virtual/override).
-Detectors land in Phase 5; this bump is enum slots + cache-key only,
-no DDL. See `docs/DISPATCH-WITHIN-LANG-SEMANTICS.md` §2 Phase 4.)
+Schema version: **1.15**.
+
+> **Authoritative source of truth (single source).** The machine-readable
+> node/edge type lists and their exact counts live in `pkg/types/enums.go`
+> (`AllNodeTypes()` / `AllEdgeTypes()`); the live build's version constant is
+> `internal/buildpipe/cache.go` `const SchemaVersion` (also written into each
+> graph's manifest `schema_version`). This doc *describes* them — **when they
+> disagree, code wins.** Other docs must link here (and to `enums.go`) instead
+> of restating counts, so a schema bump updates exactly one place.
+
+Version history (each bump invalidates the file-level cache by design):
 
 A5 (1.0 → 1.1) reserved concurrency lock slots; A3 (1.1 → 1.2) added
 incremental cache infrastructure (FK ON DELETE CASCADE on
@@ -20,10 +26,20 @@ server detection (no new enum literals), W2 appended `http_calls` (TS+Go
 HTTP client call sites), W3b appended `grpc_listens_on` + `grpc_calls`
 (Go gRPC server/client detection); within-language semantics Phase 4
 (1.9 → 1.10) appended `NodeAwaitPoint` + edges `awaits` (W-B) and
-`overrides` (W-C) as slot reservations ahead of the Phase 5 detectors.
-All bumps invalidate the file-level cache by design.
+`overrides` (W-C) as slot reservations ahead of the Phase 5 detectors;
+W-C W11 V7 (1.10 → 1.11) added the `nodes.attrs` JSON-blob column
+(`internal/persist/node_attrs.go`) carrying per-node markers; 1.11 → 1.13
+internal bumps; P1 #4 (1.13 → 1.14) added `NodePolicy` + edge `governed_by`
+(`pkg/policy`, opt-in `--policy-file`); P1 #5 (1.14 → 1.15) added
+`NodeSecurityPattern` + edge `has_security_pattern` (`pkg/security`, opt-in
+`--security-pattern-file`). `uses_for` (Solidity using-for, W-C) is also
+present in the current edge set. Full per-bump rationale:
+`internal/buildpipe/cache.go`.
 
-## Node types (35)
+## Node types (37)
+
+*(Authoritative list: `pkg/types/enums.go` `AllNodeTypes()`. Count below is
+kept in sync with that function — if you add a NodeType, update both.)*
 
 `Package, File, Struct, Interface, Class, TypeAlias, Enum, Contract,
 Mapping, Event, Function, Method, Modifier, Constructor, Constant,
@@ -31,7 +47,7 @@ Variable, Field, Parameter, LocalVariable, Import, Export, Decorator,
 Goroutine, Channel, Mutex, IfStmt, LoopStmt, CallSite, ReturnStmt, SwitchStmt,
 Endpoint, MessageType,
 Commit, Hunk,
-AwaitPoint`
+AwaitPoint, Policy, SecurityPattern`
 
 LoopStmt uses `sub_kind ∈ {for, while, range, for_in, for_of}`.
 
@@ -99,9 +115,20 @@ AsyncCallSite?". The Phase 4 bump (2026-05-11) only reserves the enum
 slot — the TS parser does not emit AwaitPoint nodes yet; the detector
 lands in Phase 5 (W-B W2). See
 `docs/design/ts-async-await-and-interface.md §2.1 + §3.2` and
-`docs/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4`.
+`docs/archive/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4`.
 
-## Edge types (40)
+`Policy` (P1 #4, schema 1.14): a governance/policy node loaded from an
+opt-in `--policy-file` YAML (`pkg/policy`), linked to governed symbols via
+`governed_by`. Empty policy file is the no-op default.
+
+`SecurityPattern` (P1 #5, schema 1.15): a security-pattern node loaded from
+an opt-in `--security-pattern-file` YAML (`pkg/security`), linked to matched
+symbols via `has_security_pattern`. Additive, cold-only re-ingest.
+
+## Edge types (43)
+
+*(Authoritative list: `pkg/types/enums.go` `AllEdgeTypes()`. Count below is
+kept in sync with that function — if you add an EdgeType, update both.)*
 
 `contains, defines, calls, invokes, uses_type, instantiates, references,
 reads_field, writes_field, imports, exports, implements, extends,
@@ -114,7 +141,7 @@ timeout_path, cancellation_path,
 has_hunk, adjacent, modifies,
 http_calls,
 grpc_listens_on, grpc_calls,
-awaits, overrides`
+awaits, overrides, uses_for, governed_by, has_security_pattern`
 
 `acquires_lock` / `releases_lock` (B1 Stage 1): `Function`/`Method` →
 `Mutex` for `mu.Lock()` / `mu.Unlock()` / `mu.RLock()` / `mu.RUnlock()`

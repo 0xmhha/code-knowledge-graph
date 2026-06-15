@@ -45,6 +45,18 @@ Concretely, for a keyword (e.g. `"GovStaking deposit"`) CKG returns:
 > set. (The *current* score is a Tier 3 status fact, tracked in
 > `docs/eval-trajectory.md` and `eval/baseline/`, not here.)
 
+## Core values
+
+Three user-articulated values shape every design trade-off (moved here from
+`PROJECT-BLUEPRINT-ALIGNMENT.md` §1.2 so they are not lost in cleanups):
+
+1. **Accuracy** — return precisely the right code; wrong-answer is worse than
+   no-answer (this is why retrieval accuracy is the first-class metric).
+2. **Token economy** — supply dense, pre-computed knowledge so the LLM is
+   called less often and with smaller, sharper context.
+3. **Extensibility** — additive schema, language-pluggable parsers, stable
+   `pkg/` contract; growth must not break existing graphs or consumers.
+
 ## Why CKG exists — the problem it removes
 
 A plain `grep` / `glob` / `read` pipeline only finds *what literally exists* and

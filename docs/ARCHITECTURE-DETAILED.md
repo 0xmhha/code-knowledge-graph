@@ -2,8 +2,8 @@
 
 **Document Date**: 2026-05-04  
 **Status**: Current (post-Wave 7, G6 v3 D4 escape hatch executed)  
-**Schema Version**: 1.5 (pending_refs persistence)  
-**Scope**: Single-binary `ckg` CLI, 5 subcommands, 33 node types, 30 edge types, 6 graph axes
+**Schema Version**: 1.15 (authoritative: docs/SCHEMA.md)  
+**Scope**: Single-binary `ckg` CLI, 5 subcommands, 37 node types (authoritative: docs/SCHEMA.md), 43 edge types (authoritative: docs/SCHEMA.md), 6 graph axes
 
 ---
 
@@ -14,7 +14,7 @@ CKG is a single-binary, self-contained code knowledge graph builder and server:
 ```
 Input (source code) → CLI build pipeline → SQLite graph.db → Multiple query surfaces
                            ↓ (build)              ↓          ├─ HTTP API + viewer
-                      3 language parsers      Persist layer  ├─ MCP server (6 tools)
+                      3 language parsers      Persist layer  ├─ MCP server (9 tools)
                       (Go/TS/Sol)             (SQLite)       ├─ Audit (verify parity)
                                                               └─ Export (static JSON)
 ```
@@ -27,7 +27,7 @@ Input (source code) → CLI build pipeline → SQLite graph.db → Multiple quer
 |---|---|---|---|
 | `build` | Parse all files → graph.db | SQLite database + manifest.json | `internal/buildpipe` |
 | `serve` | HTTP server + embedded viewer | localhost:8080 (default) | `internal/server` |
-| `mcp` | Model Context Protocol stdio server | 6 MCP tools | `internal/mcp` |
+| `mcp` | Model Context Protocol stdio server | 9 MCP tools | `internal/mcp` |
 | `export-static` | Chunked JSON export for static hosting | /out/*.json + viewer assets | `internal/persist` |
 | `eval` | Run baseline comparisons on task YAML | CSV + report.md | `internal/eval` |
 | `audit` | Verify graph completeness vs. source | exit 0/1/2 | `internal/audit` |
@@ -76,8 +76,8 @@ Run(Options) called
 ```
 
 **Key Constants** (cache.go):
-- `SchemaVersion = "1.5"` — bumped by A3 (CASCADE), E3 (Endpoint/MessageType), E4 (Commit), G6 v3 (pending_refs)
-- Cache key = SHA256(file_content + "|ckg:VERSION|parser:VERSION|schema:1.5")
+- `SchemaVersion = "1.15"` (authoritative: docs/SCHEMA.md) — bumped by A3 (CASCADE), E3 (Endpoint/MessageType), E4 (Commit), G6 v3 (pending_refs)
+- Cache key = SHA256(file_content + "|ckg:VERSION|parser:VERSION|schema:1.15")
 - Parser version: Go ties to `runtime.Version()`; TS/Sol ties to tree-sitter binding version
 
 ### 2.2 runCold Path (Full Rebuild)
@@ -99,7 +99,7 @@ Run(Options) called
 6. **Persist** (cold wipes DB first):
    - `openColdStore()` → `os.Remove(graph.db)` + reopen + migrate
    - `persistColdArtifacts()` → InsertNodes/Edges/PkgTree/TopicTree/Blobs
-   - `InsertPendingRefs()` (G6 v3, schema 1.5) → per-file unresolved refs for next partial build
+   - `InsertPendingRefs()` (G6 v3, schema 1.15 — authoritative: docs/SCHEMA.md) → per-file unresolved refs for next partial build
    - `SetManifest()` → compute FileEntry[] (SHA256 + cache key per file)
 
 ### 2.3 runShortCircuit Path (Cache Hit, No Changes)
@@ -184,9 +184,9 @@ internal/
   │   └─ web_assets/     (embedded Next.js viewer)
   │
   ├─ mcp/                ← Model Context Protocol
-  │   ├─ server.go       (Run: stdio MCP server, 6 tool registration)
-  │   ├─ tools.go        (5 granular tools: find_symbol/callers/callees/get_subgraph/search_text)
-  │   └─ get_context.go  (1 smart tool: get_context_for_task)
+  │   ├─ server.go       (Run: stdio MCP server, 9 tool registration; authoritative tool list: pkg/mcphandlers/registerall.go)
+  │   ├─ tools.go        (granular tools: find_symbol/callers/callees/get_subgraph/search_text)
+  │   └─ get_context.go  (smart tools: get_context_for_task, impact_of_change, concurrency_impact, evidence_for_intent)
   │
   ├─ eval/               ← Evaluation framework
   │   ├─ eval.go         (baseline runner)
@@ -196,7 +196,7 @@ internal/
       └─ audit.go        (compare go/packages.Load vs DB)
 
 pkg/types/
-  ├─ enums.go            (33 NodeTypes + 30 EdgeTypes + Confidence)
+  ├─ enums.go            (37 NodeTypes + 43 EdgeTypes + Confidence; authoritative: docs/SCHEMA.md)
   ├─ node.go             (Node struct)
   └─ edge.go             (Edge struct)
 ```
@@ -266,7 +266,7 @@ manifest (key, value)
   └─ Stores: schemaVersion, ckgVersion, buildTime, statistics, Files[] (with SHA256/cacheKey)
 
 pending_refs (file_path, src_id, target_qname, edge_type, line, hint_file)
-  ├─ Schema 1.5 (G6 v3): per-file unresolved cross-file refs
+  ├─ Schema 1.15 (G6 v3; authoritative: docs/SCHEMA.md): per-file unresolved cross-file refs
   ├─ FK: src_id → nodes(id) ON DELETE CASCADE
   └─ PK: (file_path, src_id, target_qname, edge_type, line)
 ```
@@ -316,12 +316,17 @@ cmd/ckg/mcp.go → internal/mcp/server.go
       ├─→ registerFindCallees(s, store)        [Tool 3]
       ├─→ registerGetSubgraph(s, store)        [Tool 4]
       ├─→ registerSearchText(s, store)         [Tool 5]
-      └─→ registerGetContextForTask(s, store)  [Tool 6 — smart]
+      ├─→ registerGetContextForTask(s, store)  [Tool 6 — smart]
+      ├─→ registerImpactOfChange(s, store)     [Tool 7 — smart]
+      ├─→ registerConcurrencyImpact(s, store)  [Tool 8 — smart]
+      └─→ registerEvidenceForIntent(s, store)  [Tool 9 — smart]
           │
           └─→ server.ServeStdio() (stdio MCP protocol)
 ```
 
-### 5.2 Six MCP Tools
+Authoritative tool list: `pkg/mcphandlers/registerall.go`.
+
+### 5.2 Nine MCP Tools
 
 | # | Tool | Input | Output | Graph Axes Used | Algorithm |
 |---|---|---|---|---|---|
@@ -331,8 +336,11 @@ cmd/ckg/mcp.go → internal/mcp/server.go
 | 4 | `get_subgraph` | seed_qname (str), depth (int=2), include_blobs (bool) | nodes[] + edges[] + blobs (opt) | All (bidirectional) | Bidirectional BFS from seed, both directions, 1-hop neighbors |
 | 5 | `search_text` | query (str), top_k (int=10), language (opt), include_blobs (bool) | nodes[] + blobs (opt) | G1 (FTS) | FTS5 BM25 (auto-prefix ASCII / LIKE CJK) → top-K |
 | 6 | `get_context_for_task` | task_description (str), budget_tokens (int=8000), language (opt), include_blobs (bool), max_bodies (int=5) | {subgraph, bodies[], summaries[], tokens_estimated, trimmed, not_found} | All (multi-strategy) | BM25 retrieve (30) → 1-hop expand → score-fuse (0.5 BM25 + 0.3 PR + 0.2 usage) → diversify → pack within token budget |
+| 7 | `impact_of_change` | qname (str) + options | impacted nodes/edges + blast radius | G2/G3 (reverse deps) | Reverse-dependency traversal to estimate change blast radius |
+| 8 | `concurrency_impact` | qname (str) + options | concurrency-related nodes/edges | G4 (concurrency) | Concurrency-axis traversal (goroutine/channel/mutex relations) |
+| 9 | `evidence_for_intent` | intent/task (str) + options | evidence-ranked nodes/snippets | All (evidence) | Evidence collection + ranking for a stated intent |
 
-**Note**: Tools 1-5 are "granular" (single-axis). Tool 6 is "smart" (multi-axis retrieval orchestration).
+**Note**: Tools 1-5 are "granular" (single-axis). Tools 6-9 are "smart" (multi-axis retrieval/analysis orchestration). Authoritative tool list: `pkg/mcphandlers/registerall.go`.
 
 ### 5.3 get_context_for_task Algorithm (Tool 6)
 
@@ -482,7 +490,7 @@ User-defined success conditions (from session context):
 **Status**: **FULL**
 
 - **Input**: `ckg build --src=<path>` scans all source files
-- **Output**: SQLite graph.db with 33 node types, 30 edge types
+- **Output**: SQLite graph.db with 37 node types, 43 edge types (authoritative: docs/SCHEMA.md)
 - **Verification**: `ckg audit --src=<path> --graph=<path>` compares go/packages.Load set vs DB (exit 0 = parity)
 
 **Metric** (go-stablenet, 2142 files):
@@ -497,8 +505,8 @@ User-defined success conditions (from session context):
 
 | Graph | Edge Emission | Node Types | Freshness |
 |---|---|---|---|
-| G1 Structural | contains, defines, imports, exports ✅ | 33/33 ✅ | Cold + partial-cache |
-| G2 Semantic | references, uses_type, instantiates, reads_field, writes_field ✅ | 33/33 ✅ | Cold + partial-cache |
+| G1 Structural | contains, defines, imports, exports ✅ | 37/37 ✅ (authoritative: docs/SCHEMA.md) | Cold + partial-cache |
+| G2 Semantic | references, uses_type, instantiates, reads_field, writes_field ✅ | 37/37 ✅ (authoritative: docs/SCHEMA.md) | Cold + partial-cache |
 | G3 Execution | calls, invokes ✅ | NodeIfStmt, LoopStmt, CallSite, ReturnStmt, SwitchStmt ✅ | Cold + partial-cache |
 | G4 Concurrency | spawns, sends_to, recvs_from, acquires_lock, releases_lock, accessed_under_lock ✅ | Goroutine, Channel, Mutex ✅ | Cold + partial-cache |
 | G5 Distributed | listens_on, handles_message, rpc_calls, binds_to ✅ | Endpoint, MessageType ✅ | Cold only (Sol parser retained) |
@@ -562,7 +570,7 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
 **G6 v3 Partial-Cache** (DEAD CODE, routing reverted to cold fallback):
 - Root cause: H3 (NodesByFilePath order ≠ AST declaration order) → +2675 phantom edges on go-stablenet
 - Fix direction (v4): Sort `NodesByFilePath` by `start_line ASC`
-- Preserved: incremental.go, pending_refs schema (1.5), cache diffing logic
+- Preserved: incremental.go, pending_refs schema (1.15 — authoritative: docs/SCHEMA.md), cache diffing logic
 
 **Until fixed**: Partial hits fall back to cold rebuild for correctness. No performance gain on mixed dirty/cached.
 
@@ -684,7 +692,7 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
      - InsertPkgTreeFromCluster(pkgTree.edges)
      - InsertTopicTree(topicTree)
      - RebuildFTS() → index nodes_fts for search
-   - InsertPendingRefs(allPending) (G6 v3, schema 1.5)
+   - InsertPendingRefs(allPending) (G6 v3, schema 1.15 — authoritative: docs/SCHEMA.md)
    - Manifest:
      - computeColdFileEntries(srcRoot, discovery, nodes, edges) → FileEntry[] (SHA256, CacheKey per file)
      - setStaleness(&manifest, log) → compute DB timestamp, source mtime max
@@ -901,7 +909,7 @@ ckg serve --graph=/path/to/graph.db --port=8080 --no-viewer
 claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 ```
 
-**Result**: 6 MCP tools available in Claude Code for code-aware assistance.
+**Result**: 9 MCP tools available in Claude Code for code-aware assistance.
 
 ---
 
@@ -978,7 +986,7 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 | **Node ID** | Deterministic hash(file:name:startLine:startByte) |
 | **Edge key** | (Type, Src, Dst, Line) — semantic identity for dedup |
 | **Pending ref** | Unresolved cross-file reference from Pass 1, resolved/marked AMBIGUOUS in Pass 2 |
-| **PendingRefRow** | Schema 1.5 table: per-file cross-file refs persisted for partial-cache rebuild |
+| **PendingRefRow** | Schema 1.15 table (authoritative: docs/SCHEMA.md): per-file cross-file refs persisted for partial-cache rebuild |
 | **G1–G6** | CKS 6-graph axes: Structural, Semantic, Execution, Concurrency, Distributed, Temporal |
 | **FTS5** | SQLite full-text search (Okapi BM25 + auto-prefix) |
 | **PageRank** | Iterative scoring: importance proxy (used in tool 6) |

@@ -16,13 +16,13 @@
 4. [패키지 구조 (Source Layout)](#4-패키지-구조-source-layout)
 5. [7-Pass Build Pipeline](#5-7-pass-build-pipeline-cold-path)
 6. [6-Graph Axis (CKS Deep-Dive Mapping)](#6-6-graph-axis-cks-deep-dive-mapping)
-7. [Storage Schema](#7-storage-schema-sqlite-schema-15)
+7. [Storage Schema](#7-storage-schema-sqlite-schema-115)
 8. [MCP Tool Surface](#8-mcp-tool-surface-6-tools)
 9. [HTTP Server API + Viewer](#9-http-server-api--viewer)
 10. [Cache Routing (A3 Phase 1 + G6 v4)](#10-cache-routing-a3-phase-1--g6-v4)
 11. [Cache Key & 무효화](#11-cache-key--무효화)
 12. [의존 그래프 (Dependency Flow)](#12-의존-그래프-dependency-flow)
-13. [Subcommand 요약](#13-7개-subcommand-요약)
+13. [Subcommand 요약](#13-subcommand-요약-5-production-surfaces--cobra-root-약-20개-등록)
 14. [검증된 동작 (Capability)](#14-검증된-동작-capability)
 15. [다음 작업 (Wave 9)](#15-다음-작업-wave-9-진입-가능)
 16. [운영 함정](#16-운영-함정-handoffmd--5에서-누적)
@@ -35,9 +35,9 @@
 | Field | Value |
 |---|---|
 | **이름** | CKG (Code Knowledge Graph) |
-| **버전** | v0.2.x (schema 1.5) |
+| **버전** | v0.2.x (schema 1.15, authoritative: docs/SCHEMA.md) |
 | **언어** | Go 1.25.5 (single binary, CGO-free default) |
-| **목적** | Go/TypeScript/Solidity 소스 → 코드 지식 그래프 (34 NodeType × 35 EdgeType, schema 1.8) |
+| **목적** | Go/TypeScript/Solidity 소스 → 코드 지식 그래프 (37 NodeType × 43 EdgeType, schema 1.15, authoritative: docs/SCHEMA.md) |
 | **활용** | 3D viewer + MCP server + Eval framework + audit |
 | **검증 corpus** | go-stablenet-latest 2,142 files → 217K nodes / 669K edges, audit PARITY ✅ |
 | **저장소** | SQLite (default, modernc) / PostgreSQL (`--db postgres://...`, pgxpool) |
@@ -57,7 +57,7 @@
 | **ARCHITECTURE.md** | 1-page overview | 7-pass 파이프라인 한 줄 요약 | 안정 |
 | **ARCHITECTURE-DETAILED.md** | 전체 설계서 (994줄) | 17 sections — 패키지/스키마/MCP/CKS gap 분석 | 분기마다 |
 | **CODE-STRUCTURE.md** (본 문서) | 시각적·구조적 인덱스 | doc map + 패키지 layout + 다이어그램 모음 | 분기마다 |
-| **SCHEMA.md** | 노드/엣지 카탈로그 | 34 NodeTypes × 35 EdgeTypes, schema 버전 history (1.0~1.8) | schema bump마다 |
+| **SCHEMA.md** | 노드/엣지 카탈로그 (authoritative, → pkg/types/enums.go) | 37 NodeTypes × 43 EdgeTypes, schema 버전 history (1.0~1.15) | schema bump마다 |
 | **INCREMENTAL.md** | A3 캐시 가이드 | cache_key 공식, manifest v2, 무효화 규칙, partial-cache D4 fallback | A3/G6 변경시 |
 | **EVAL.md** | 평가 사용법 | 4 baseline (α/β/γ/δ), 가설 H1/H2 | 안정 |
 | **STUDY-GUIDE.md** | 외부 개념 학습 | Leiden, MCP, tree-sitter, 3D layout 학습 경로 | 안정 |
@@ -81,7 +81,7 @@ spec-ckg-v0.2.md (설계 원전)
 ARCHITECTURE.md ─────► ARCHITECTURE-DETAILED.md ─────► CODE-STRUCTURE.md (본 문서)
    (1-page)               (deep dive 994줄)               (visual + index)
         │
-        ├──► SCHEMA.md         (data model, schema 1.8)
+        ├──► SCHEMA.md         (data model, schema 1.15, authoritative: docs/SCHEMA.md)
         ├──► INCREMENTAL.md    (cache 운영)
         ├──► EVAL.md           (평가 사용)
         ├──► SELF-VERIFICATION.md (자기검증 매뉴얼)
@@ -166,7 +166,7 @@ code-knowledge-graph/
 │   └── logging.go          slog multiHandler (text+JSON)
 │
 ├── pkg/types/              ← public type system
-│   ├── enums.go            33 NodeTypes + 30 EdgeTypes + Confidence
+│   ├── enums.go            37 NodeTypes + 43 EdgeTypes + Confidence (authoritative: docs/SCHEMA.md)
 │   ├── node.go             Node struct
 │   └── edge.go             Edge struct
 │
@@ -174,7 +174,7 @@ code-knowledge-graph/
 │   ├── buildpipe/          ← 7-pass orchestrator
 │   │   ├── pipeline.go     Run / runCold / runShortCircuit
 │   │   ├── language_runners.go  per-lang dispatcher
-│   │   ├── cache.go        SchemaVersion="1.5", DiffManifest, cache_key
+│   │   ├── cache.go        SchemaVersion="1.15", DiffManifest, cache_key
 │   │   ├── incremental.go  D4 escape hatch (dead code preserved)
 │   │   ├── temporal.go     P6 git log emit
 │   │   └── staleness.go    DB timestamp vs source mtime
@@ -313,7 +313,7 @@ code-knowledge-graph/
 
 ---
 
-## 7. Storage Schema (SQLite, schema 1.5)
+## 7. Storage Schema (SQLite, schema 1.15, authoritative: docs/SCHEMA.md)
 
 ```
 ┌────────────────────────────┐         ┌──────────────────────────┐
@@ -347,7 +347,7 @@ code-knowledge-graph/
 manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
 ```
 
-**Schema bump 이력**: 1.0 → 1.1 (lock slots) → 1.2 (ON DELETE CASCADE) → 1.3 (Endpoint/MessageType) → 1.4 (Commit) → **1.5 (pending_refs persistence, partial-cache infra)**
+**Schema bump 이력**: 1.0 → 1.1 (lock slots) → 1.2 (ON DELETE CASCADE) → 1.3 (Endpoint/MessageType) → 1.4 (Commit) → 1.5 (pending_refs persistence, partial-cache infra) → … → **1.15 (current)**. 전체 이력 + 노드/엣지 카탈로그는 docs/SCHEMA.md가 authoritative (→ pkg/types/enums.go).
 
 ---
 
@@ -438,7 +438,7 @@ manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
                                               │                 │
                                               └─ runIncremental │
                                                   (DEAD CODE,   │
-                                                   schema 1.5   │
+                                                   schema 1.15  │
                                                    preserved    │
                                                    for v4 reuse)│
 ```
@@ -454,7 +454,7 @@ cache_key = sha256(
     file_content
     + "|ckg:"     + ckg_version       // cmd/ckg/root.go 0.1.0
     + "|parser:"  + parser_version    // Go: runtime.Version() / TS,Sol: TS module
-    + "|schema:"  + schema_version    // internal/buildpipe/cache.go "1.5"
+    + "|schema:"  + schema_version    // internal/buildpipe/cache.go "1.15"
 )
 ```
 
@@ -499,7 +499,9 @@ pkg/types  ←  공통 enum/struct (NodeType, EdgeType, Confidence, Node, Edge)
 
 ---
 
-## 13. 7개 subcommand 요약
+## 13. Subcommand 요약 (5 production surfaces · cobra root 약 20개 등록)
+
+cobra root는 약 20개 subcommand를 등록한다 (`cmd/ckg/root.go`의 `AddCommand`). 그중 **5 production surfaces** (build/serve/mcp/eval/audit)가 1차 표면이고 나머지는 export/bench/report/query 등 유틸리티. 아래는 대표 surface 발췌.
 
 | Subcommand | 용도 | 입력 | 출력 |
 |---|---|---|---|
