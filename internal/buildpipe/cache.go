@@ -120,7 +120,11 @@ import (
 // method node (+ defines edge) for each method an in-module struct promotes
 // from an embedded type, so find_symbol("T.M") resolves promoted methods. New
 // rows → existing graphs are stale until reindexed.
-const SchemaVersion = "1.17"
+//
+// Bumped from "1.17" to "1.18" (defect E): EmitFieldWriteEdges emits
+// writes_field edges (function -> struct field it assigns) for Go, so an agent
+// can find who mutates a field. New edges → reindex required.
+const SchemaVersion = "1.18"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

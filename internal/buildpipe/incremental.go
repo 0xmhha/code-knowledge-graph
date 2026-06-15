@@ -615,6 +615,11 @@ func runGoPipelineIncremental(srcRoot string, dirtyFiles, cachedFiles []string,
 		rg.Nodes = append(rg.Nodes, promNodes...)
 		rg.Edges = append(rg.Edges, promEdges...)
 		log.Debug("promoted methods emitted (incremental)", "nodes", len(promNodes))
+
+		// Defect E: writes_field edges — same wiring as cold path.
+		wfEdges := gop.EmitFieldWriteEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, wfEdges...)
+		log.Debug("writes_field emitted (incremental)", "count", len(wfEdges))
 	}
 	return rg, dirtyPending, errs, err
 }

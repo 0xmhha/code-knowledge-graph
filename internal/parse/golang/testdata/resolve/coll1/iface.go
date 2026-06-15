@@ -39,3 +39,12 @@ func (b Base) Ping() string { return "pong" }
 type Derived struct {
 	Base
 }
+
+// --- field-write fixture (defect E) ---
+
+// Box has a field that setBox writes and getBox only reads.
+type Box struct{ Val int }
+
+func setBox(b *Box, n int) { b.Val = n } // writes coll1.Box.Val
+
+func getBox(b *Box) int { return b.Val } // reads only — no writes_field

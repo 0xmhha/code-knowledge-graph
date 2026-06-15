@@ -205,6 +205,49 @@ func TestPromotedMethodNode(t *testing.T) {
 	}
 }
 
+// TestFieldWriteEdge guards defect-E: a Go assignment `x.F = v` must emit a
+// writes_field edge from the enclosing function to the field node, so an agent
+// can find who mutates a field (e.g. who fills Receipt.EffectiveGasPrice). A
+// read-only accessor must NOT emit writes_field.
+func TestFieldWriteEdge(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var setID, getID, boxValID string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.setBox":
+			setID = n.ID
+		case "coll1.getBox":
+			getID = n.ID
+		case "coll1.Box.Val":
+			boxValID = n.ID
+		}
+	}
+	if setID == "" || getID == "" || boxValID == "" {
+		t.Fatalf("missing nodes: set=%q get=%q boxVal=%q", setID, getID, boxValID)
+	}
+	var writeFromSetter, writeFromGetter bool
+	for _, e := range g.Edges {
+		if e.Type != types.EdgeWritesField || e.Dst != boxValID {
+			continue
+		}
+		switch e.Src {
+		case setID:
+			writeFromSetter = true
+		case getID:
+			writeFromGetter = true
+		}
+	}
+	if !writeFromSetter {
+		t.Errorf("expected coll1.setBox -writes_field-> coll1.Box.Val")
+	}
+	if writeFromGetter {
+		t.Errorf("coll1.getBox only reads Box.Val; must not emit writes_field")
+	}
+}
+
 func TestResolveCrossFileCall(t *testing.T) {
 	root := "testdata/resolve"
 	g, err := gop.LoadAndResolve(root)

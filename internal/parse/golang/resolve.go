@@ -155,6 +155,8 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 	promNodes, promEdges := EmitPromotedMethods(p.Pkgs(), rg.Nodes)
 	rg.Nodes = append(rg.Nodes, promNodes...)
 	rg.Edges = append(rg.Edges, promEdges...)
+	// Defect E: writes_field edges (function -> struct field it assigns).
+	rg.Edges = append(rg.Edges, EmitFieldWriteEdges(p.Pkgs(), rg.Nodes)...)
 	return rg, nil
 }
 

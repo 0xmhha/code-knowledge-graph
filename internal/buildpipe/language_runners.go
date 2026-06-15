@@ -233,6 +233,11 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		rg.Nodes = append(rg.Nodes, promNodes...)
 		rg.Edges = append(rg.Edges, promEdges...)
 		log.Debug("promoted methods emitted", "nodes", len(promNodes))
+
+		// Defect E: writes_field edges (function -> struct field it assigns).
+		wfEdges := gop.EmitFieldWriteEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, wfEdges...)
+		log.Debug("writes_field emitted", "count", len(wfEdges))
 	}
 	return rg, pending, p.FuncFieldTouches(), errs, err
 }
