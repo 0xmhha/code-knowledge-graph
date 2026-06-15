@@ -154,6 +154,57 @@ func TestResolveBuiltinEmitsNoCallEdge(t *testing.T) {
 	}
 }
 
+// TestPromotedMethodNode guards defect-C: a type that embeds another in-module
+// type promotes its methods, so coll1.Derived must carry a Derived.Ping method
+// node pointing at Base.Ping's implementation — find_symbol("Derived.Ping")
+// would otherwise miss it (Go method promotion isn't a declared node).
+func TestPromotedMethodNode(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var promoted, base *types.Node
+	for i := range g.Nodes {
+		switch g.Nodes[i].QualifiedName {
+		case "coll1.Derived.Ping":
+			promoted = &g.Nodes[i]
+		case "coll1.Base.Ping":
+			base = &g.Nodes[i]
+		}
+	}
+	if base == nil {
+		t.Fatal("missing coll1.Base.Ping (declaring method)")
+	}
+	if promoted == nil {
+		t.Fatal("missing promoted node coll1.Derived.Ping")
+	}
+	if promoted.Type != types.NodeMethod {
+		t.Errorf("promoted node type = %v, want Method", promoted.Type)
+	}
+	// The promoted node points at the real implementation (Base.Ping's site).
+	if promoted.FilePath != base.FilePath || promoted.StartLine != base.StartLine {
+		t.Errorf("promoted node should point at Base.Ping (%s:%d), got %s:%d",
+			base.FilePath, base.StartLine, promoted.FilePath, promoted.StartLine)
+	}
+	// A defines edge links the embedding type to the promoted method.
+	var derivedID, promotedID string
+	for _, n := range g.Nodes {
+		if n.QualifiedName == "coll1.Derived" {
+			derivedID = n.ID
+		}
+	}
+	promotedID = promoted.ID
+	var linked bool
+	for _, e := range g.Edges {
+		if e.Type == types.EdgeDefines && e.Src == derivedID && e.Dst == promotedID {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("expected coll1.Derived -defines-> coll1.Derived.Ping")
+	}
+}
+
 func TestResolveCrossFileCall(t *testing.T) {
 	root := "testdata/resolve"
 	g, err := gop.LoadAndResolve(root)

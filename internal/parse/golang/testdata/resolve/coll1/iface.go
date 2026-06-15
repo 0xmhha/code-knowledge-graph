@@ -26,3 +26,16 @@ func (c counter) len() int { return len(c.items) }
 // CountBuiltin calls the builtin len(). It must NOT produce a call edge to the
 // coll1.counter.len method (builtins have no graph node).
 func CountBuiltin(xs []int) int { return len(xs) }
+
+// --- promoted-method fixture (defect C) ---
+
+// Base has a method that an embedding type should promote.
+type Base struct{}
+
+func (b Base) Ping() string { return "pong" }
+
+// Derived embeds Base and therefore promotes Ping; the graph should carry a
+// coll1.Derived.Ping method node pointing at Base.Ping's implementation.
+type Derived struct {
+	Base
+}

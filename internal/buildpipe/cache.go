@@ -115,7 +115,12 @@ import (
 //
 // Both repopulate stored rows, so existing graphs are stale until reindexed —
 // bump to force a cold re-extraction on first run with this binary.
-const SchemaVersion = "1.16"
+//
+// Bumped from "1.16" to "1.17" (defect C): EmitPromotedMethods materialises a
+// method node (+ defines edge) for each method an in-module struct promotes
+// from an embedded type, so find_symbol("T.M") resolves promoted methods. New
+// rows → existing graphs are stale until reindexed.
+const SchemaVersion = "1.17"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int
