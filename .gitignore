@@ -2,6 +2,9 @@
 /bin/
 *.exe
 
+# Local graph DBs (large; rebuilt from source via `ckg build`)
+.ckg-stablenet*
+
 # Test coverage
 coverage.out
 *.coverprofile

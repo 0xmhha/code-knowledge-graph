@@ -46,7 +46,7 @@ func RegisterFindSymbol(s *server.MCPServer, reader store.Reader) {
 // latency justification.
 func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
 	tool := mcp.NewTool("find_callers",
-		mcp.WithDescription("Functions that call the symbol (reverse call graph). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
+		mcp.WithDescription("Functions that call the symbol (reverse call graph). qname may be a full qualified_name (\"core.NewBlockChain\") or a bare short name (\"NewBlockChain\") — a bare name is resolved by suffix, and an ambiguous bare name returns its candidate qnames instead of an empty result. Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
 		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
@@ -55,13 +55,21 @@ func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
 		q := req.GetString("qname", "")
 		d := int(req.GetFloat("depth", 2))
 		incl := req.GetBool("include_blobs", false)
-		nodes, edges, err := reader.NeighborhoodByQname(q, d, true /*reverse*/, callEdgeTypes...)
+		resolved, cands, ambiguous, ok := resolveSeed(reader, q, "")
+		if ambiguous {
+			return textResult(seedAmbiguousResult(q, cands)), nil
+		}
+		if !ok {
+			return textResult(seedNotFoundResult(q)), nil
+		}
+		nodes, edges, err := reader.NeighborhoodByQname(resolved, d, true /*reverse*/, callEdgeTypes...)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(map[string]any{
-			"nodes": attachBlobs(reader, nodes, incl),
-			"edges": edges,
+			"seed_qname": resolved,
+			"nodes":      attachBlobs(reader, nodes, incl),
+			"edges":      edges,
 		}), nil
 	})
 }
@@ -70,7 +78,7 @@ func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
 // Same edge-type filter as RegisterFindCallers for symmetry.
 func RegisterFindCallees(s *server.MCPServer, reader store.Reader) {
 	tool := mcp.NewTool("find_callees",
-		mcp.WithDescription("Functions called by the symbol (forward call graph). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
+		mcp.WithDescription("Functions called by the symbol (forward call graph). qname may be a full qualified_name or a bare short name (resolved by suffix; an ambiguous bare name returns candidate qnames instead of an empty result). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
 		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
@@ -79,13 +87,21 @@ func RegisterFindCallees(s *server.MCPServer, reader store.Reader) {
 		q := req.GetString("qname", "")
 		d := int(req.GetFloat("depth", 2))
 		incl := req.GetBool("include_blobs", false)
-		nodes, edges, err := reader.NeighborhoodByQname(q, d, false, callEdgeTypes...)
+		resolved, cands, ambiguous, ok := resolveSeed(reader, q, "")
+		if ambiguous {
+			return textResult(seedAmbiguousResult(q, cands)), nil
+		}
+		if !ok {
+			return textResult(seedNotFoundResult(q)), nil
+		}
+		nodes, edges, err := reader.NeighborhoodByQname(resolved, d, false, callEdgeTypes...)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(map[string]any{
-			"nodes": attachBlobs(reader, nodes, incl),
-			"edges": edges,
+			"seed_qname": resolved,
+			"nodes":      attachBlobs(reader, nodes, incl),
+			"edges":      edges,
 		}), nil
 	})
 }
@@ -95,7 +111,7 @@ func RegisterFindCallees(s *server.MCPServer, reader store.Reader) {
 // edge type — the caller asked for a neighbourhood, not a call graph.
 func RegisterGetSubgraph(s *server.MCPServer, reader store.Reader) {
 	tool := mcp.NewTool("get_subgraph",
-		mcp.WithDescription("Subgraph rooted at qname, expanded by depth (both directions)."),
+		mcp.WithDescription("Subgraph rooted at qname, expanded by depth (both directions). seed_qname may be a full qualified_name or a bare short name (resolved by suffix; an ambiguous bare name returns candidate qnames instead of an empty result)."),
 		mcp.WithString("seed_qname", mcp.Required()),
 		mcp.WithNumber("depth", mcp.DefaultNumber(2)),
 		mcp.WithBoolean("include_blobs", mcp.DefaultBool(false)),
@@ -104,13 +120,21 @@ func RegisterGetSubgraph(s *server.MCPServer, reader store.Reader) {
 		q := req.GetString("seed_qname", "")
 		d := int(req.GetFloat("depth", 2))
 		incl := req.GetBool("include_blobs", false)
-		nodes, edges, err := reader.SubgraphByQname(q, d)
+		resolved, cands, ambiguous, ok := resolveSeed(reader, q, "")
+		if ambiguous {
+			return textResult(seedAmbiguousResult(q, cands)), nil
+		}
+		if !ok {
+			return textResult(seedNotFoundResult(q)), nil
+		}
+		nodes, edges, err := reader.SubgraphByQname(resolved, d)
 		if err != nil {
 			return nil, err
 		}
 		return textResult(map[string]any{
-			"nodes": attachBlobs(reader, nodes, incl),
-			"edges": edges,
+			"seed_qname": resolved,
+			"nodes":      attachBlobs(reader, nodes, incl),
+			"edges":      edges,
 		}), nil
 	})
 }

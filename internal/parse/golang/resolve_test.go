@@ -81,6 +81,173 @@ func TestResolveSameNameMethodPrefersReceiverType(t *testing.T) {
 	}
 }
 
+// TestResolveInterfaceMethodNotBareName guards defect-A fix #1: an interface
+// dispatch call (h.Hash() where h is the Hasher interface) must bind to
+// coll1.Hasher.Hash, never to the same-named decoy coll1.Thing.Hash. The bare
+// "interface_method" path used to keep the bare callee name, which the V0
+// resolver bound to whichever ".Hash" node was indexed last.
+func TestResolveInterfaceMethodNotBareName(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var srcID, wantDst, decoyDst string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.UseHasher":
+			srcID = n.ID
+		case "coll1.Hasher.Hash":
+			wantDst = n.ID
+		case "coll1.Thing.Hash":
+			decoyDst = n.ID
+		}
+	}
+	if srcID == "" || wantDst == "" || decoyDst == "" {
+		t.Fatalf("missing nodes: src=%q want=%q decoy=%q", srcID, wantDst, decoyDst)
+	}
+	var toWant, toDecoy bool
+	for _, e := range g.Edges {
+		if e.Src != srcID || (e.Type != types.EdgeCalls && e.Type != types.EdgeInvokes) {
+			continue
+		}
+		switch e.Dst {
+		case wantDst:
+			toWant = true
+		case decoyDst:
+			toDecoy = true
+		}
+	}
+	if !toWant {
+		t.Errorf("expected coll1.UseHasher -invokes-> coll1.Hasher.Hash (interface method)")
+	}
+	if toDecoy {
+		t.Errorf("coll1.UseHasher must NOT bind to coll1.Thing.Hash (bare-name collision)")
+	}
+}
+
+// TestResolveBuiltinEmitsNoCallEdge guards defect-A fix #2: a builtin call
+// (len(xs)) must not produce a call edge to a same-named method node
+// (coll1.counter.len). Builtins have no graph node, so guessing one is a
+// false edge — the kind of cross-subsystem noise that pollutes find_callees.
+func TestResolveBuiltinEmitsNoCallEdge(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var srcID, builtinDecoy string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.CountBuiltin":
+			srcID = n.ID
+		case "coll1.counter.len":
+			builtinDecoy = n.ID
+		}
+	}
+	if srcID == "" || builtinDecoy == "" {
+		t.Fatalf("missing nodes: src=%q decoy=%q", srcID, builtinDecoy)
+	}
+	for _, e := range g.Edges {
+		if e.Src == srcID && e.Dst == builtinDecoy &&
+			(e.Type == types.EdgeCalls || e.Type == types.EdgeInvokes) {
+			t.Errorf("builtin len() must NOT bind to coll1.counter.len")
+		}
+	}
+}
+
+// TestPromotedMethodNode guards defect-C: a type that embeds another in-module
+// type promotes its methods, so coll1.Derived must carry a Derived.Ping method
+// node pointing at Base.Ping's implementation — find_symbol("Derived.Ping")
+// would otherwise miss it (Go method promotion isn't a declared node).
+func TestPromotedMethodNode(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var promoted, base *types.Node
+	for i := range g.Nodes {
+		switch g.Nodes[i].QualifiedName {
+		case "coll1.Derived.Ping":
+			promoted = &g.Nodes[i]
+		case "coll1.Base.Ping":
+			base = &g.Nodes[i]
+		}
+	}
+	if base == nil {
+		t.Fatal("missing coll1.Base.Ping (declaring method)")
+	}
+	if promoted == nil {
+		t.Fatal("missing promoted node coll1.Derived.Ping")
+	}
+	if promoted.Type != types.NodeMethod {
+		t.Errorf("promoted node type = %v, want Method", promoted.Type)
+	}
+	// The promoted node points at the real implementation (Base.Ping's site).
+	if promoted.FilePath != base.FilePath || promoted.StartLine != base.StartLine {
+		t.Errorf("promoted node should point at Base.Ping (%s:%d), got %s:%d",
+			base.FilePath, base.StartLine, promoted.FilePath, promoted.StartLine)
+	}
+	// A defines edge links the embedding type to the promoted method.
+	var derivedID, promotedID string
+	for _, n := range g.Nodes {
+		if n.QualifiedName == "coll1.Derived" {
+			derivedID = n.ID
+		}
+	}
+	promotedID = promoted.ID
+	var linked bool
+	for _, e := range g.Edges {
+		if e.Type == types.EdgeDefines && e.Src == derivedID && e.Dst == promotedID {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Errorf("expected coll1.Derived -defines-> coll1.Derived.Ping")
+	}
+}
+
+// TestFieldWriteEdge guards defect-E: a Go assignment `x.F = v` must emit a
+// writes_field edge from the enclosing function to the field node, so an agent
+// can find who mutates a field (e.g. who fills Receipt.EffectiveGasPrice). A
+// read-only accessor must NOT emit writes_field.
+func TestFieldWriteEdge(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var setID, getID, boxValID string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.setBox":
+			setID = n.ID
+		case "coll1.getBox":
+			getID = n.ID
+		case "coll1.Box.Val":
+			boxValID = n.ID
+		}
+	}
+	if setID == "" || getID == "" || boxValID == "" {
+		t.Fatalf("missing nodes: set=%q get=%q boxVal=%q", setID, getID, boxValID)
+	}
+	var writeFromSetter, writeFromGetter bool
+	for _, e := range g.Edges {
+		if e.Type != types.EdgeWritesField || e.Dst != boxValID {
+			continue
+		}
+		switch e.Src {
+		case setID:
+			writeFromSetter = true
+		case getID:
+			writeFromGetter = true
+		}
+	}
+	if !writeFromSetter {
+		t.Errorf("expected coll1.setBox -writes_field-> coll1.Box.Val")
+	}
+	if writeFromGetter {
+		t.Errorf("coll1.getBox only reads Box.Val; must not emit writes_field")
+	}
+}
+
 func TestResolveCrossFileCall(t *testing.T) {
 	root := "testdata/resolve"
 	g, err := gop.LoadAndResolve(root)

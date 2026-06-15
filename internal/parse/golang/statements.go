@@ -227,15 +227,27 @@ func (v *declVisitor) parsePendingFromCall(srcID string, c *ast.CallExpr) parse.
 		HintFile:    pos.Filename,
 		Line:        pos.Line,
 	}
+	// Builtins (len/cap/make/append/new/delete/...) have no graph node.
+	// Leaving the bare name ("len") lets Pass 2's bare-name fallback bind it
+	// to an unrelated method that happens to share the name (e.g. a type with
+	// a method literally named len) — a false cross-subsystem call edge. Clear
+	// the target so Resolve drops it instead of guessing.
+	if v.isBuiltinCall(c.Fun) {
+		pr.TargetQName = ""
+		return pr
+	}
 	dispatchKind := v.classifyCallDispatch(c)
 	switch dispatchKind {
 	case "interface_method":
-		// Interface dispatch DOES resolve: the Method node for the
-		// interface declaration is in qIndex, so Pass 2 lifts this to
-		// CallSite → Method via the existing path. Mark it as invokes
-		// with the dispatch_kind tag.
+		// Interface dispatch resolves to the interface's Method node. Qualify
+		// it to "pkg.Interface.Method" (via go/types) so Pass 2 matches the
+		// exact interface method rather than bare-name binding to a same-named
+		// concrete method on an unrelated type.
 		pr.EdgeType = types.EdgeInvokes
 		pr.DispatchKind = dispatchKind
+		if q := v.qualifiedStaticTarget(c.Fun); q != "" {
+			pr.TargetQName = q
+		}
 	case "closure", "func_value", "method_value":
 		// Target is unresolvable (closure literal / runtime func value /
 		// stored callback). The direct self-loop emission in
@@ -257,6 +269,23 @@ func (v *declVisitor) parsePendingFromCall(srcID string, c *ast.CallExpr) parse.
 		}
 	}
 	return pr
+}
+
+// isBuiltinCall reports whether c.Fun is a Go builtin (len, cap, make, append,
+// new, delete, copy, close, panic, recover, print, println). Builtins are
+// called as a plain identifier that resolves to a *types.Builtin object.
+// Requires type info; without it we cannot distinguish a builtin from a
+// same-named user function, so we conservatively return false.
+func (v *declVisitor) isBuiltinCall(fun ast.Expr) bool {
+	if v.typesInfo == nil {
+		return false
+	}
+	id, ok := fun.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	_, isBuiltin := v.typesInfo.ObjectOf(id).(*gotypes.Builtin)
+	return isBuiltin
 }
 
 // qualifiedStaticTarget builds the fully-qualified callee qname for a

@@ -149,6 +149,14 @@ func LoadAndResolve(root string) (*parse.ResolvedGraph, error) {
 	// Track C P1c: instantiates edges (Function/Method → Type). Walks each
 	// function body for composite literals and `new(T)` calls.
 	rg.Edges = append(rg.Edges, EmitInstantiatesEdges(p.Pkgs(), rg.Nodes)...)
+	// Defect C: promoted-method nodes (embedding type -> embedded method).
+	// Runs after the per-file nodes are unioned so the declaring method nodes
+	// exist for the in-module bound. Emits method nodes + defines edges.
+	promNodes, promEdges := EmitPromotedMethods(p.Pkgs(), rg.Nodes)
+	rg.Nodes = append(rg.Nodes, promNodes...)
+	rg.Edges = append(rg.Edges, promEdges...)
+	// Defect E: writes_field edges (function -> struct field it assigns).
+	rg.Edges = append(rg.Edges, EmitFieldWriteEdges(p.Pkgs(), rg.Nodes)...)
 	return rg, nil
 }
 

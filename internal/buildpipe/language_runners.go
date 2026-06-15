@@ -227,6 +227,17 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 		instEdges := gop.EmitInstantiatesEdges(p.Pkgs(), rg.Nodes)
 		rg.Edges = append(rg.Edges, instEdges...)
 		log.Debug("instantiates emitted", "count", len(instEdges))
+
+		// Defect C: promoted-method nodes for embedded in-module types.
+		promNodes, promEdges := gop.EmitPromotedMethods(p.Pkgs(), rg.Nodes)
+		rg.Nodes = append(rg.Nodes, promNodes...)
+		rg.Edges = append(rg.Edges, promEdges...)
+		log.Debug("promoted methods emitted", "nodes", len(promNodes))
+
+		// Defect E: writes_field edges (function -> struct field it assigns).
+		wfEdges := gop.EmitFieldWriteEdges(p.Pkgs(), rg.Nodes)
+		rg.Edges = append(rg.Edges, wfEdges...)
+		log.Debug("writes_field emitted", "count", len(wfEdges))
 	}
 	return rg, pending, p.FuncFieldTouches(), errs, err
 }
