@@ -81,6 +81,79 @@ func TestResolveSameNameMethodPrefersReceiverType(t *testing.T) {
 	}
 }
 
+// TestResolveInterfaceMethodNotBareName guards defect-A fix #1: an interface
+// dispatch call (h.Hash() where h is the Hasher interface) must bind to
+// coll1.Hasher.Hash, never to the same-named decoy coll1.Thing.Hash. The bare
+// "interface_method" path used to keep the bare callee name, which the V0
+// resolver bound to whichever ".Hash" node was indexed last.
+func TestResolveInterfaceMethodNotBareName(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var srcID, wantDst, decoyDst string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.UseHasher":
+			srcID = n.ID
+		case "coll1.Hasher.Hash":
+			wantDst = n.ID
+		case "coll1.Thing.Hash":
+			decoyDst = n.ID
+		}
+	}
+	if srcID == "" || wantDst == "" || decoyDst == "" {
+		t.Fatalf("missing nodes: src=%q want=%q decoy=%q", srcID, wantDst, decoyDst)
+	}
+	var toWant, toDecoy bool
+	for _, e := range g.Edges {
+		if e.Src != srcID || (e.Type != types.EdgeCalls && e.Type != types.EdgeInvokes) {
+			continue
+		}
+		switch e.Dst {
+		case wantDst:
+			toWant = true
+		case decoyDst:
+			toDecoy = true
+		}
+	}
+	if !toWant {
+		t.Errorf("expected coll1.UseHasher -invokes-> coll1.Hasher.Hash (interface method)")
+	}
+	if toDecoy {
+		t.Errorf("coll1.UseHasher must NOT bind to coll1.Thing.Hash (bare-name collision)")
+	}
+}
+
+// TestResolveBuiltinEmitsNoCallEdge guards defect-A fix #2: a builtin call
+// (len(xs)) must not produce a call edge to a same-named method node
+// (coll1.counter.len). Builtins have no graph node, so guessing one is a
+// false edge — the kind of cross-subsystem noise that pollutes find_callees.
+func TestResolveBuiltinEmitsNoCallEdge(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	var srcID, builtinDecoy string
+	for _, n := range g.Nodes {
+		switch n.QualifiedName {
+		case "coll1.CountBuiltin":
+			srcID = n.ID
+		case "coll1.counter.len":
+			builtinDecoy = n.ID
+		}
+	}
+	if srcID == "" || builtinDecoy == "" {
+		t.Fatalf("missing nodes: src=%q decoy=%q", srcID, builtinDecoy)
+	}
+	for _, e := range g.Edges {
+		if e.Src == srcID && e.Dst == builtinDecoy &&
+			(e.Type == types.EdgeCalls || e.Type == types.EdgeInvokes) {
+			t.Errorf("builtin len() must NOT bind to coll1.counter.len")
+		}
+	}
+}
+
 func TestResolveCrossFileCall(t *testing.T) {
 	root := "testdata/resolve"
 	g, err := gop.LoadAndResolve(root)

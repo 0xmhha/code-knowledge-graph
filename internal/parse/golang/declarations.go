@@ -3,6 +3,7 @@ package golang
 import (
 	"fmt"
 	"go/ast"
+	"go/printer"
 	"go/token"
 	gotypes "go/types"
 	"strings"
@@ -268,7 +269,7 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 	startLine, startByte := v.pos(d.Pos())
 	endLine, endByte := v.pos(d.End())
 	id := MakeID(qname, "go", startByte)
-	sig := formatSignature(d)
+	sig := v.formatSignature(d)
 	v.appendNode(id, nt, d.Name.Name, qname, startLine, endLine, startByte, endByte,
 		exported(d.Name.Name), commentText(d.Doc), sig)
 	if v.typesInfo != nil {
@@ -367,16 +368,46 @@ func exprName(e ast.Expr) string {
 	return ""
 }
 
-func formatSignature(d *ast.FuncDecl) string {
+// formatSignature renders a one-line Go signature with the real parameter
+// and result lists, e.g. "func (Core) handle(x int) (bool, error)". The
+// parameter/result lists are printed from the AST via go/printer (accurate
+// for variadics, multi-name fields, qualified types) and then whitespace-
+// collapsed so a multi-line source signature still yields a single line.
+//
+// The signature is the highest-signal per-symbol field a retrieval consumer
+// reads to answer "what does this check"; the historical
+// "func name(...) ..." placeholder hid every parameter (e.g. isJustified's
+// targetView), which defeated that purpose.
+func (v *declVisitor) formatSignature(d *ast.FuncDecl) string {
 	var b strings.Builder
 	b.WriteString("func ")
 	if d.Recv != nil && len(d.Recv.List) > 0 {
 		_, _ = fmt.Fprintf(&b, "(%s) ", exprName(d.Recv.List[0].Type))
 	}
 	b.WriteString(d.Name.Name)
-	b.WriteString("(...)")
-	if d.Type.Results != nil {
-		b.WriteString(" ...")
+
+	var ft strings.Builder
+	if err := printer.Fprint(&ft, v.fset, d.Type); err != nil {
+		// Fall back to the old placeholder if the type fails to print
+		// (should not happen for a well-formed FuncDecl).
+		b.WriteString("(...)")
+		if d.Type.Results != nil {
+			b.WriteString(" ...")
+		}
+		return strings.Join(strings.Fields(b.String()), " ")
 	}
-	return b.String()
+	// printer renders the FuncType as "func(params) results" — drop the
+	// leading "func" so it joins onto the receiver+name we already wrote.
+	b.WriteString(strings.TrimPrefix(ft.String(), "func"))
+
+	// Collapse any newlines/tabs/runs of spaces (multi-line source
+	// signatures, gofmt alignment) into single spaces, then trim the
+	// artifacts a multi-line field list leaves behind: a space just inside
+	// the parens and the trailing comma the printer keeps before a
+	// newline-preceded close paren.
+	s := strings.Join(strings.Fields(b.String()), " ")
+	s = strings.ReplaceAll(s, "( ", "(")
+	s = strings.ReplaceAll(s, " )", ")")
+	s = strings.ReplaceAll(s, ",)", ")")
+	return s
 }

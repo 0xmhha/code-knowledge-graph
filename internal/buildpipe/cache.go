@@ -105,7 +105,17 @@ import (
 //
 // Kept here (not in pkg/types) because only the cache key needs it;
 // pkg/types schema version bumps already trigger rebuilds via this constant.
-const SchemaVersion = "1.15"
+//
+// Bumped from "1.15" to "1.16" for two Go-extraction accuracy changes:
+//  1. formatSignature now emits the full parameter and result lists (was the
+//     "func name(...) ..." placeholder) — a stored node column.
+//  2. call resolution no longer bare-name-binds builtin calls (len/cap/...) or
+//     interface-method dispatch to same-named decoys; both are now qualified or
+//     dropped — changes calls/invokes edges.
+//
+// Both repopulate stored rows, so existing graphs are stale until reindexed —
+// bump to force a cold re-extraction on first run with this binary.
+const SchemaVersion = "1.16"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int
