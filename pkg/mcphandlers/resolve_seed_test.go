@@ -42,6 +42,15 @@ func TestResolveSeed(t *testing.T) {
 		}
 	})
 
+	t.Run("canonical_id resolves precisely past a qname collision", func(t *testing.T) {
+		// the bare "Size" is ambiguous (above), but the globally-unique
+		// canonical id pins exactly coll1.Set.Size — the core of ADR-0001.
+		q, cands, ambiguous, ok := resolveSeed(store, "ckgresolve.test/coll1.(*Set).Size", "")
+		if !ok || ambiguous || cands != nil || q != "coll1.Set.Size" {
+			t.Fatalf("canonical: got q=%q cands=%v ambiguous=%v ok=%v", q, cands, ambiguous, ok)
+		}
+	})
+
 	t.Run("unknown name is not_found", func(t *testing.T) {
 		q, cands, ambiguous, ok := resolveSeed(store, "NoSuchSymbol", "")
 		if ok || ambiguous || q != "" || cands != nil {

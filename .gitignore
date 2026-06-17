@@ -82,3 +82,6 @@ eval/stablenet/func-verify/results-*.json
 
 # Per-session code audit reports — one-shot snapshots, not specs.
 docs/CODE-AUDIT-*.md
+
+# stray root build artifact — always use `make build` (outputs to bin/, ignored)
+/ckg

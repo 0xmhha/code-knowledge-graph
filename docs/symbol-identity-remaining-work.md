@@ -50,10 +50,11 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
 ### Phase 1 (ckg) — finish canonical id
 
 > **Progress (branch `feat/canonical-symbol-id-phase1`, 2026-06-17):** items 1,
-> 4 done; item 3 half done (reader path added; traversal multi-match=error still
-> pending); item 6 expanded. Schema baseline had moved to 1.18 (PR #23), so the
-> bump landed as **1.18 → 1.19** (not 1.16). New gap found: **Postgres has no
-> `canonical_id` column** (sqlite-only) — see item 7.
+> 3, 4 done; item 6 expanded. Remaining: item 2 (other languages), item 5
+> (reindex — now unblocked), item 7 (Postgres parity — deferred, status quo per
+> decision). Schema baseline had moved to 1.18 (PR #23), so the bump landed as
+> **1.18 → 1.19** (not 1.16). New gap found: **Postgres has no `canonical_id`
+> column** (sqlite-only) — see item 7.
 
 1. ✅ **Wire the remaining Go node kinds** in `declarations.go` — done. A shared
    `setLastCanonicalID` helper now sets `canonical_id` in `emitTypeSpec`
@@ -66,14 +67,18 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
    directory to separate v1/v2; see `internal/parse/solidity/`), TypeScript, and
    proto. They have no Go import path, so the file/package path is the qualifier.
    Verified: `CanonicalID` is set in **no** parser outside `golang/`.
-3. 🔶 **Canonical resolution:** `FindByCanonicalID(canonicalID) (Node, found, err)`
-   added to `StoreReader` + sqlite (`sqlite_reader.go`) + Postgres stub, covered
-   by `TestFindByCanonicalID`. **Still pending:** make the traversal family
-   (find_callers/get_subgraph/impact_analysis) resolve on the canonical id, and
-   make a short-name lookup that matches >1 node an **error** rather than the
-   silent pick it is today (`FindSymbol` does `qualified_name` LIKE matching and
-   returns up to `LIMIT 100` with no multi-match guard). Also align the Pass-2
-   call resolver (`resolve.go` / `qualifiedStaticTarget` in `statements.go`).
+3. ✅ **Canonical resolution** — done for ckg. `FindByCanonicalID` added to
+   `StoreReader` + sqlite (+ Postgres stub). The traversal family
+   (find_callers/find_callees/get_subgraph/change_history) now resolves a
+   canonical-id seed exactly via `resolveSeed` step 0 (`pkg/mcphandlers/helpers.go`),
+   and `canonical_id` is surfaced in tool output so agents can feed it back.
+   The multi-match=**error** guard was already in place from PR #23 (`resolveSeed`
+   returns `ambiguous`+candidates, never a silent pick — verified by
+   `TestResolveSeed`); forward call edges are already qualified by PR #23's typed
+   resolver, so no bare-name collisions there. Covered by the new canonical
+   subtest in `TestResolveSeed` + `TestFindByCanonicalID`.
+   *Optional future refinement:* traverse by node ID (not resolved qname) for
+   absolute precision when several nodes share one qualified_name.
 4. ✅ **Schema version bump** — done. `const SchemaVersion` in
    `internal/buildpipe/cache.go` bumped **1.18 → 1.19** (the cache-key
    contributor; invalidates the build cache so a reindex repopulates
