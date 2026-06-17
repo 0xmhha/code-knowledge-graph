@@ -125,12 +125,15 @@ import (
 // writes_field edges (function -> struct field it assigns) for Go, so an agent
 // can find who mutates a field. New edges → reindex required.
 //
-// Bumped from "1.18" to "1.19" by symbol-identity Phase 1 (ADR-0001): the Go
-// parser now populates nodes.canonical_id for types/structs/interfaces, fields,
-// package-level const/var, and interface methods (previously func/method only).
-// The column already exists (idempotent ALTER); pre-1.19 DBs carry it empty for
-// those node kinds, so the cache-key flip forces a cold rebuild to repopulate
-// canonical_id graph-wide. Additive — qualified_name, node IDs, edges unchanged.
+// Bumped from "1.18" to "1.19" by symbol-identity Phase 1 (ADR-0001): every
+// parser now populates nodes.canonical_id. Go covers types/structs/interfaces,
+// fields, package-level const/var, and interface methods (previously
+// func/method only); Solidity, TypeScript, and proto use the relative file path
+// as the qualifier (<relpath>:<qname>), with Solidity appending the
+// parameter-type signature to functions to separate overloads. The column
+// already exists (idempotent ALTER); pre-1.19 DBs carry it empty, so the
+// cache-key flip forces a cold rebuild to repopulate canonical_id graph-wide.
+// Additive — qualified_name, node IDs, edges unchanged.
 const SchemaVersion = "1.19"
 
 // fileClass classifies one source file against the previous manifest.

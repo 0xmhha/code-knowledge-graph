@@ -2,6 +2,7 @@ package solidity
 
 import (
 	"strconv"
+	"strings"
 
 	sitter "github.com/tree-sitter/go-tree-sitter"
 
@@ -139,7 +140,13 @@ func (v *declVisitor) runFunctionDecl() {
 
 		v.nodes = append(v.nodes, types.Node{
 			ID: id, Type: types.NodeFunction, Name: ident, QualifiedName: qname,
-			FilePath: v.rel, StartLine: int(nameNode.StartPosition().Row) + 1,
+			// canonical id (ADR-0001): no import path in Solidity, so the
+			// relative file path is the qualifier and the parameter-type
+			// signature separates overloads — <relpath>:<Contract>.<func>(<types>).
+			// The file path also separates same-named contracts across
+			// version dirs (e.g. contracts/v1 vs contracts/v2).
+			CanonicalID: v.rel + ":" + qname + funcParamSignature(declNode, v.src),
+			FilePath:    v.rel, StartLine: int(nameNode.StartPosition().Row) + 1,
 			EndLine:   int(nameNode.EndPosition().Row) + 1,
 			StartByte: startByte, EndByte: endByte,
 			Language: "sol", Confidence: types.ConfExtracted,
@@ -310,6 +317,33 @@ func (v *declVisitor) runModifierOverride() {
 // TargetQName encoding mirrors the state-var path: `paramName|typeName`.
 // SrcID = function's node ID so Pass 2 can resolve the meta refs against
 // the same funcID space used by containerIDByFuncID.
+// funcParamSignature returns the parenthesised parameter-type list of a
+// function_definition node, e.g. "(address,uint256)" or "()". It feeds the
+// canonical id (ADR-0001) so Solidity overloads — which differ only by
+// parameter types — get distinct ids. Parameter NAMES are intentionally
+// ignored (anonymous parameters still contribute their type), matching how the
+// Solidity ABI computes a function selector.
+func funcParamSignature(declNode *sitter.Node, src []byte) string {
+	if declNode == nil {
+		return "()"
+	}
+	var paramTypes []string
+	for i := uint(0); i < uint(declNode.NamedChildCount()); i++ {
+		child := declNode.NamedChild(i)
+		if child == nil || child.Kind() != "parameter" {
+			continue
+		}
+		typeNode := child.ChildByFieldName("type")
+		if typeNode == nil {
+			continue
+		}
+		if t := extractTypeNameText(typeNode, src); t != "" {
+			paramTypes = append(paramTypes, t)
+		}
+	}
+	return "(" + strings.Join(paramTypes, ",") + ")"
+}
+
 func emitParameterMetaPending(v *declVisitor, funcID string, declNode *sitter.Node) {
 	if declNode == nil {
 		return

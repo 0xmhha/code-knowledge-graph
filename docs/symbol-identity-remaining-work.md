@@ -50,11 +50,12 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
 ### Phase 1 (ckg) — finish canonical id
 
 > **Progress (branch `feat/canonical-symbol-id-phase1`, 2026-06-17):** items 1,
-> 3, 4 done; item 6 expanded. Remaining: item 2 (other languages), item 5
-> (reindex — now unblocked), item 7 (Postgres parity — deferred, status quo per
-> decision). Schema baseline had moved to 1.18 (PR #23), so the bump landed as
-> **1.18 → 1.19** (not 1.16). New gap found: **Postgres has no `canonical_id`
-> column** (sqlite-only) — see item 7.
+> 2, 3, 4, 6 done (Go + Solidity + TypeScript + proto canonical_id, exact
+> resolution, schema bump, tests). Remaining: item 5 (reindex — now unblocked),
+> item 7 (Postgres parity — deferred, status quo per decision). Schema baseline
+> had moved to 1.18 (PR #23), so the bump landed as **1.18 → 1.19** (not 1.16).
+> New gap found: **Postgres has no `canonical_id` column** (sqlite-only) — see
+> item 7.
 
 1. ✅ **Wire the remaining Go node kinds** in `declarations.go` — done. A shared
    `setLastCanonicalID` helper now sets `canonical_id` in `emitTypeSpec`
@@ -62,11 +63,14 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
    derived from the owning type's id), `emitInterfaceMethod`
    (`<importpath>.<Interface>.<Method>`, distinct from concrete impls), and
    `emitValueSpec` (package const/var). Covered by `TestCanonicalID_AllGoNodeKinds`.
-2. ❌ **Other languages:** Solidity (`<dir>/<Contract>.<func>(<paramTypes>)` — the
-   parameter-type signature is required to separate overloads, and the version
-   directory to separate v1/v2; see `internal/parse/solidity/`), TypeScript, and
-   proto. They have no Go import path, so the file/package path is the qualifier.
-   Verified: `CanonicalID` is set in **no** parser outside `golang/`.
+2. ✅ **Other languages** — done. All three tree-sitter/custom parsers now set
+   `canonical_id` with the relative file path as qualifier (no import path):
+   Solidity `<relpath>:<Contract>.<func>(<paramTypes>)` (param-type signature
+   separates overloads; file path separates v1/v2 dirs — `runFunctionDecl` +
+   `funcParamSignature`, post-pass for other kinds), TypeScript `<relpath>:<qname>`
+   (inline in `declarations.go`), proto `<relpath>:<qname>` (post-pass in
+   `visitor.go`). Covered by `TestCanonicalID_SolidityOverloads` + the refreshed
+   Solidity/TS golden snapshots (which now include canonical_id).
 3. ✅ **Canonical resolution** — done for ckg. `FindByCanonicalID` added to
    `StoreReader` + sqlite (+ Postgres stub). The traversal family
    (find_callers/find_callees/get_subgraph/change_history) now resolves a

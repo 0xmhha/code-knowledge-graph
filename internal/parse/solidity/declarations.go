@@ -265,6 +265,20 @@ func (v *declVisitor) visit() {
 	// address / address payable.
 	v.runChainedExternalCall()
 	v.collectABI()
+
+	// canonical id (ADR-0001): no import path in Solidity, so the relative file
+	// path is the qualifier — <relpath>:<qualified_name>. Functions already set
+	// their canonical id inline in runFunctionDecl (with the overload
+	// parameter-type signature), so this fills the remaining symbol nodes
+	// (contracts/interfaces/libraries/modifiers/events/structs/enums/fields/
+	// mappings) uniformly. File and import nodes are not symbols and are skipped.
+	for i := range v.nodes {
+		n := &v.nodes[i]
+		if n.CanonicalID != "" || n.Type == types.NodeFile || n.Type == types.NodeImport {
+			continue
+		}
+		n.CanonicalID = v.rel + ":" + n.QualifiedName
+	}
 }
 
 func (v *declVisitor) runDecl(q string, nt types.NodeType) {

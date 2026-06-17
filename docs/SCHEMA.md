@@ -36,8 +36,9 @@ internal bumps; P1 #4 (1.13 → 1.14) added `NodePolicy` + edge `governed_by`
 present in the current edge set. PR #23 (1.15 → 1.18) added full Go
 signatures + qualified call resolution (1.16), promoted-method nodes (1.17),
 and `writes_field` edges (1.18); symbol-identity Phase 1 (1.18 → 1.19)
-populates `canonical_id` for all Go node kinds (types/fields/const/var/
-interface methods, not just func/method). Full per-bump rationale:
+populates `canonical_id` across all parsers — all Go node kinds (types/fields/
+const/var/interface methods), and Solidity/TypeScript/proto using the relative
+file path as qualifier (Solidity adds a `(paramTypes)` signature for overloads). Full per-bump rationale:
 `internal/buildpipe/cache.go`.
 
 ## Node types (37)
