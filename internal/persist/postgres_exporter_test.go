@@ -29,6 +29,9 @@ func (m *mockStoreReader) LoadHierarchy(_ string) ([]HierarchyRow, error) { retu
 func (m *mockStoreReader) FindSymbol(_ string, _ bool, _ FindSymbolOptions) ([]types.Node, error) {
 	return nil, nil
 }
+func (m *mockStoreReader) FindByCanonicalID(_ string) (types.Node, bool, error) {
+	return types.Node{}, false, nil
+}
 func (m *mockStoreReader) NodesByIDs(_ []string) ([]types.Node, error) { return nil, nil }
 func (m *mockStoreReader) QueryNodes(_ string, _ int) ([]types.Node, error) {
 	return nil, nil

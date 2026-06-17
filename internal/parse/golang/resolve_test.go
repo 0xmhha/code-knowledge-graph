@@ -37,6 +37,47 @@ func TestCanonicalID_DistinguishesSameNameAcrossPackages(t *testing.T) {
 	}
 }
 
+// TestCanonicalID_AllGoNodeKinds guards symbol-identity Phase 1: canonical_id is
+// now emitted for types/structs/interfaces, fields, package-level const/var, and
+// interface methods — not just funcs/methods. Each id is import-path-qualified,
+// and an interface method's id is distinct from a same-named concrete method's.
+func TestCanonicalID_AllGoNodeKinds(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	cidByQname := map[string]string{}
+	for _, n := range g.Nodes {
+		cidByQname[n.QualifiedName] = n.CanonicalID
+	}
+	cases := map[string]string{
+		"coll1.Set":         "ckgresolve.test/coll1.Set",         // struct type
+		"coll1.Set.n":       "ckgresolve.test/coll1.Set.n",       // struct field
+		"coll1.Box.Val":     "ckgresolve.test/coll1.Box.Val",     // exported field
+		"coll1.Hasher":      "ckgresolve.test/coll1.Hasher",      // interface type
+		"coll1.Hasher.Hash": "ckgresolve.test/coll1.Hasher.Hash", // interface method
+		"coll1.MaxItems":    "ckgresolve.test/coll1.MaxItems",    // package const
+		"coll1.defaultName": "ckgresolve.test/coll1.defaultName", // package var
+	}
+	for qname, want := range cases {
+		got, ok := cidByQname[qname]
+		if !ok {
+			t.Errorf("node %q not found", qname)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s canonical id = %q, want %q", qname, got, want)
+		}
+	}
+	// interface method vs same-named concrete method must differ.
+	if iface, concrete := cidByQname["coll1.Hasher.Hash"], cidByQname["coll1.Thing.Hash"]; iface == concrete || concrete == "" {
+		t.Errorf("interface vs concrete Hash share/empty canonical id: iface=%q concrete=%q", iface, concrete)
+	}
+	if want := "ckgresolve.test/coll1.(Thing).Hash"; cidByQname["coll1.Thing.Hash"] != want {
+		t.Errorf("coll1.Thing.Hash canonical id = %q, want %q", cidByQname["coll1.Thing.Hash"], want)
+	}
+}
+
 // TestResolveSameNameMethodPrefersReceiverType guards the name-collision fix:
 // coll1.Set.Quorum calls its own receiver's Size(), while coll2.Other.Size is a
 // same-named decoy in another package. The typed resolver must bind the call to

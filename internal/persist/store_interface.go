@@ -43,6 +43,12 @@ type StoreReader interface {
 	// FindSymbol returns nodes matching name (exact or LIKE-suffix per `exact`).
 	// See FindSymbolOptions for filter push-down (Language, Kinds).
 	FindSymbol(name string, exact bool, opts FindSymbolOptions) ([]types.Node, error)
+	// FindByCanonicalID returns the single node whose canonical_id matches
+	// exactly. canonical_id is the globally-unique, import-path-qualified
+	// identity (ADR-0001), so the match is unambiguous — unlike FindSymbol's
+	// short name, it cannot collide across packages. Returns found=false (nil
+	// error) when nothing matches or canonicalID is empty.
+	FindByCanonicalID(canonicalID string) (types.Node, bool, error)
 	NodesByIDs(ids []string) ([]types.Node, error)
 	QueryNodes(parent string, limit int) ([]types.Node, error)
 	// TopNodes returns the top-N nodes ranked by metric, descending.

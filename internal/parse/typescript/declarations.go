@@ -168,7 +168,10 @@ func (v *declVisitor) runQuery(q string, nt types.NodeType) {
 			id := makeID(qname, "ts", startByte)
 			v.nodes = append(v.nodes, types.Node{
 				ID: id, Type: nt, Name: ident, QualifiedName: qname,
-				FilePath: v.rel, StartLine: startLine, EndLine: endLine,
+				// canonical id (ADR-0001): no import path in TS, so the
+				// relative file path is the qualifier — <relpath>:<qname>.
+				CanonicalID: v.rel + ":" + qname,
+				FilePath:    v.rel, StartLine: startLine, EndLine: endLine,
 				StartByte: startByte, EndByte: endByte,
 				Language: "ts", Confidence: types.ConfExtracted, SubKind: subKind,
 			})

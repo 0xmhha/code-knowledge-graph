@@ -106,6 +106,17 @@ func (v *visitor) parse() {
 			v.skipToTopLevel()
 		}
 	}
+	// canonical id (ADR-0001): proto has no import path, so the relative file
+	// path is the qualifier — <relpath>:<qualified_name>. Applied once here so
+	// every emit site (service/rpc/message/field/enum) gets it uniformly. File
+	// and import nodes are not symbols and are skipped.
+	for i := range v.nodes {
+		n := &v.nodes[i]
+		if n.CanonicalID != "" || n.Type == types.NodeFile || n.Type == types.NodeImport {
+			continue
+		}
+		n.CanonicalID = v.rel + ":" + n.QualifiedName
+	}
 }
 
 // ── token cursor helpers ──────────────────────────────────────────────────

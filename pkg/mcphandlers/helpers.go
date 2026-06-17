@@ -31,6 +31,8 @@ var callEdgeTypes = []string{"calls", "invokes"}
 // getting an empty result (those tools resolve seeds with exact=true).
 //
 // Resolution order:
+//  0. exact match on canonical_id — globally unique (ADR-0001), so a hit is
+//     unambiguous by construction; resolves to that node's qualified_name.
 //  1. exact match on qualified_name — the common, unambiguous case.
 //  2. suffix match (bare name) when exact found nothing.
 //
@@ -43,12 +45,18 @@ var callEdgeTypes = []string{"calls", "invokes"}
 //
 // Multiple nodes sharing ONE qualified_name (e.g. the same symbol across
 // languages) is not ambiguous: every such node becomes a traversal root
-// inside NeighborhoodByQname/SubgraphByQname.
+// inside NeighborhoodByQname/SubgraphByQname. To traverse one exact node
+// regardless of qname collisions, seed with its canonical_id (step 0).
 func resolveSeed(reader store.Reader, seed, lang string) (qname string, candidates []string, ambiguous bool, ok bool) {
 	if seed == "" {
 		return "", nil, false, false
 	}
 	opts := store.FindSymbolOptions{Language: lang}
+
+	// 0. exact canonical_id — unambiguous; resolve to the node's qualified_name.
+	if n, found, err := reader.FindByCanonicalID(seed); err == nil && found {
+		return n.QualifiedName, nil, false, true
+	}
 
 	// 1. exact qualified_name.
 	if nodes, err := reader.FindSymbol(seed, true, opts); err == nil && len(nodes) > 0 {
@@ -121,6 +129,13 @@ func attachBlobs(reader store.Reader, nodes []types.Node, include bool) []map[st
 			"confidence":  n.Confidence,
 			"signature":   n.Signature,
 			"usage_score": n.UsageScore,
+		}
+		// canonical_id (ADR-0001): the globally-unique, import-path-qualified
+		// identity. Included only when present (empty for builtins, AST-only
+		// mode, and not-yet-wired languages) so the agent can feed it back as an
+		// unambiguous seed to the traversal tools. Omitted when empty.
+		if n.CanonicalID != "" {
+			m["canonical_id"] = n.CanonicalID
 		}
 		if include {
 			if b, err := reader.GetBlob(n.ID); err == nil {
