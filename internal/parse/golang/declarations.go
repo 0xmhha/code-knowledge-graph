@@ -159,30 +159,49 @@ func (v *declVisitor) emitTypeSpec(s *ast.TypeSpec, doc *ast.CommentGroup) {
 	startLine, startByte := v.pos(s.Pos())
 	endLine, endByte := v.pos(s.End())
 	id := MakeID(qname, "go", startByte)
+	// canonical id for the type itself: <importpath>.<Type> (symbol-identity
+	// Phase 1). Empty in AST-only mode. Passed down so fields and interface
+	// methods qualify against the type's canonical id, not the short pkg name.
+	var cid string
+	if v.typesInfo != nil {
+		cid = goCanonicalID(v.typesInfo.ObjectOf(s.Name))
+	}
 	var nodeType types.NodeType
 	switch t := s.Type.(type) {
 	case *ast.StructType:
 		nodeType = types.NodeStruct
 		v.appendNode(id, nodeType, s.Name.Name, qname, startLine, endLine, startByte, endByte, exported(s.Name.Name), commentText(doc), "")
+		v.setLastCanonicalID(cid)
 		for _, f := range t.Fields.List {
-			v.emitFields(id, qname, f)
+			v.emitFields(id, qname, cid, f)
 		}
 	case *ast.InterfaceType:
 		nodeType = types.NodeInterface
 		v.appendNode(id, nodeType, s.Name.Name, qname, startLine, endLine, startByte, endByte, exported(s.Name.Name), commentText(doc), "")
+		v.setLastCanonicalID(cid)
 		for _, f := range t.Methods.List {
-			v.emitInterfaceMethod(id, qname, f)
+			v.emitInterfaceMethod(id, qname, cid, f)
 		}
 	default:
 		nodeType = types.NodeTypeAlias
 		v.appendNode(id, nodeType, s.Name.Name, qname, startLine, endLine, startByte, endByte, exported(s.Name.Name), commentText(doc), "")
+		v.setLastCanonicalID(cid)
 	}
 	v.edges = append(v.edges, types.Edge{
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 	})
 }
 
-func (v *declVisitor) emitFields(parentID, parentQname string, f *ast.Field) {
+// setLastCanonicalID assigns cid to the most recently appended node when cid is
+// non-empty. Centralises the "set canonical id on the node we just appended"
+// pattern used across the decl emitters.
+func (v *declVisitor) setLastCanonicalID(cid string) {
+	if cid != "" && len(v.nodes) > 0 {
+		v.nodes[len(v.nodes)-1].CanonicalID = cid
+	}
+}
+
+func (v *declVisitor) emitFields(parentID, parentQname, parentCanonical string, f *ast.Field) {
 	for _, name := range f.Names {
 		qname := parentQname + "." + name.Name
 		startLine, startByte := v.pos(f.Pos())
@@ -191,6 +210,11 @@ func (v *declVisitor) emitFields(parentID, parentQname string, f *ast.Field) {
 		v.appendNode(id, types.NodeField, name.Name, qname,
 			startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(f.Doc), "")
+		// field canonical id: <importpath>.<Type>.<Field>, derived from the
+		// owning type's canonical id (a field *types.Var carries no receiver).
+		if parentCanonical != "" {
+			v.setLastCanonicalID(parentCanonical + "." + name.Name)
+		}
 		v.edges = append(v.edges, types.Edge{
 			Src: parentID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
@@ -209,7 +233,7 @@ func (v *declVisitor) emitFields(parentID, parentQname string, f *ast.Field) {
 	}
 }
 
-func (v *declVisitor) emitInterfaceMethod(parentID, parentQname string, f *ast.Field) {
+func (v *declVisitor) emitInterfaceMethod(parentID, parentQname, parentCanonical string, f *ast.Field) {
 	for _, name := range f.Names {
 		qname := parentQname + "." + name.Name
 		startLine, startByte := v.pos(f.Pos())
@@ -218,6 +242,11 @@ func (v *declVisitor) emitInterfaceMethod(parentID, parentQname string, f *ast.F
 		v.appendNode(id, types.NodeMethod, name.Name, qname,
 			startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(f.Doc), "")
+		// interface-method canonical id: <importpath>.<Interface>.<Method>,
+		// distinct from any concrete impl's <importpath>.(*T).<Method>.
+		if parentCanonical != "" {
+			v.setLastCanonicalID(parentCanonical + "." + name.Name)
+		}
 		v.edges = append(v.edges, types.Edge{
 			Src: parentID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
@@ -236,6 +265,10 @@ func (v *declVisitor) emitValueSpec(s *ast.ValueSpec, tok token.Token) {
 		}
 		v.appendNode(id, nt, name.Name, qname, startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(s.Doc), "")
+		// package-level const/var canonical id: <importpath>.<Name>.
+		if v.typesInfo != nil {
+			v.setLastCanonicalID(goCanonicalID(v.typesInfo.ObjectOf(name)))
+		}
 		v.edges = append(v.edges, types.Edge{
 			Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,
 		})
@@ -273,9 +306,7 @@ func (v *declVisitor) visitFuncDecl(d *ast.FuncDecl) {
 	v.appendNode(id, nt, d.Name.Name, qname, startLine, endLine, startByte, endByte,
 		exported(d.Name.Name), commentText(d.Doc), sig)
 	if v.typesInfo != nil {
-		if cid := goCanonicalID(v.typesInfo.ObjectOf(d.Name)); cid != "" {
-			v.nodes[len(v.nodes)-1].CanonicalID = cid
-		}
+		v.setLastCanonicalID(goCanonicalID(v.typesInfo.ObjectOf(d.Name)))
 	}
 	v.edges = append(v.edges, types.Edge{
 		Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,

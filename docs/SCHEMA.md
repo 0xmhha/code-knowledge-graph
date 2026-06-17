@@ -1,6 +1,6 @@
 # CKG Schema (V0)
 
-Schema version: **1.15**.
+Schema version: **1.19**.
 
 > **Authoritative source of truth (single source).** The machine-readable
 > node/edge type lists and their exact counts live in `pkg/types/enums.go`
@@ -33,7 +33,11 @@ internal bumps; P1 #4 (1.13 → 1.14) added `NodePolicy` + edge `governed_by`
 (`pkg/policy`, opt-in `--policy-file`); P1 #5 (1.14 → 1.15) added
 `NodeSecurityPattern` + edge `has_security_pattern` (`pkg/security`, opt-in
 `--security-pattern-file`). `uses_for` (Solidity using-for, W-C) is also
-present in the current edge set. Full per-bump rationale:
+present in the current edge set. PR #23 (1.15 → 1.18) added full Go
+signatures + qualified call resolution (1.16), promoted-method nodes (1.17),
+and `writes_field` edges (1.18); symbol-identity Phase 1 (1.18 → 1.19)
+populates `canonical_id` for all Go node kinds (types/fields/const/var/
+interface methods, not just func/method). Full per-bump rationale:
 `internal/buildpipe/cache.go`.
 
 ## Node types (37)

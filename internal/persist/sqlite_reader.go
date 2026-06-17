@@ -40,6 +40,38 @@ func (s *sqliteStore) GetNode(id string) (types.Node, error) {
 	return n, nil
 }
 
+// FindByCanonicalID fetches the single node whose canonical_id matches exactly.
+// canonical_id is the globally-unique, import-path-qualified identity (ADR-0001),
+// so the match is unambiguous. Returns found=false (nil error) when nothing
+// matches or canonicalID is empty. LIMIT 1 is defensive — canonical_id is unique
+// by construction, but it keeps the contract single-valued regardless.
+func (s *sqliteStore) FindByCanonicalID(canonicalID string) (types.Node, bool, error) {
+	var n types.Node
+	if canonicalID == "" {
+		return n, false, nil
+	}
+	row := s.db.QueryRow(`SELECT id, type, name, qualified_name, COALESCE(canonical_id,''), file_path,
+		start_line, end_line, start_byte, end_byte, language, visibility,
+		signature, doc_comment, complexity, in_degree, out_degree, pagerank,
+		usage_score, confidence, sub_kind, COALESCE(attrs,'') FROM nodes
+		WHERE canonical_id = ? LIMIT 1`, canonicalID)
+	var conf, attrs string
+	err := row.Scan(&n.ID, &n.Type, &n.Name, &n.QualifiedName, &n.CanonicalID, &n.FilePath,
+		&n.StartLine, &n.EndLine, &n.StartByte, &n.EndByte, &n.Language,
+		&n.Visibility, &n.Signature, &n.DocComment, &n.Complexity,
+		&n.InDegree, &n.OutDegree, &n.PageRank, &n.UsageScore,
+		&conf, &n.SubKind, &attrs)
+	if err == sql.ErrNoRows {
+		return n, false, nil
+	}
+	if err != nil {
+		return n, false, err
+	}
+	n.Confidence = types.Confidence(conf)
+	unmarshalNodeAttrs(attrs, &n)
+	return n, true, nil
+}
+
 // DistinctFilePaths returns the unique file_path values recorded on nodes
 // for the given language. Used by `ckg audit` to compare the DB's actual
 // file inclusion set against an authoritative reference (e.g. the Go build

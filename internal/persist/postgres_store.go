@@ -685,6 +685,15 @@ func (s *pgStore) FindSymbol(name string, exact bool, opts FindSymbolOptions) ([
 	return scanPGNodes(rows)
 }
 
+// FindByCanonicalID — see StoreReader.FindByCanonicalID. The Postgres schema
+// does not yet carry the canonical_id column (it is sqlite-only as of schema
+// 1.19; Postgres canonical_id parity is a tracked follow-up — see
+// docs/symbol-identity-remaining-work.md). Until that lands, this reports
+// not-found rather than referencing a column that does not exist.
+func (s *pgStore) FindByCanonicalID(_ string) (types.Node, bool, error) {
+	return types.Node{}, false, nil
+}
+
 // NodesByIDs fetches nodes by primary key. Empty input yields nil without DB hit.
 func (s *pgStore) NodesByIDs(ids []string) ([]types.Node, error) {
 	if len(ids) == 0 {

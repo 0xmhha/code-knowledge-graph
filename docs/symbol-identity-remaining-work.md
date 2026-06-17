@@ -48,42 +48,48 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
 ## Remaining work
 
 ### Phase 1 (ckg) — finish canonical id
-1. ❌ **Wire the remaining Go node kinds** in `declarations.go` (currently only
-   func/method, set in `visitFuncDecl:275`; `emitTypeSpec:156` and
-   `emitValueSpec:226` do NOT call `goCanonicalID`): types/structs/interfaces
-   (`emitTypeSpec`), fields (need the enclosing type to qualify:
-   `<pkg>.<Type>.<Field>`), package-level const/var (`emitValueSpec` — these ARE
-   emitted as nodes but resolution drops them today), and interface methods
-   (distinct id from each concrete impl). Use `v.typesInfo.ObjectOf(ident)` at
-   each site; extend `goCanonicalID` for the field case (its `*types.Var` has no
-   receiver — derive the owner type).
+
+> **Progress (branch `feat/canonical-symbol-id-phase1`, 2026-06-17):** items 1,
+> 4 done; item 3 half done (reader path added; traversal multi-match=error still
+> pending); item 6 expanded. Schema baseline had moved to 1.18 (PR #23), so the
+> bump landed as **1.18 → 1.19** (not 1.16). New gap found: **Postgres has no
+> `canonical_id` column** (sqlite-only) — see item 7.
+
+1. ✅ **Wire the remaining Go node kinds** in `declarations.go` — done. A shared
+   `setLastCanonicalID` helper now sets `canonical_id` in `emitTypeSpec`
+   (types/structs/interfaces), `emitFields` (`<importpath>.<Type>.<Field>`,
+   derived from the owning type's id), `emitInterfaceMethod`
+   (`<importpath>.<Interface>.<Method>`, distinct from concrete impls), and
+   `emitValueSpec` (package const/var). Covered by `TestCanonicalID_AllGoNodeKinds`.
 2. ❌ **Other languages:** Solidity (`<dir>/<Contract>.<func>(<paramTypes>)` — the
    parameter-type signature is required to separate overloads, and the version
    directory to separate v1/v2; see `internal/parse/solidity/`), TypeScript, and
    proto. They have no Go import path, so the file/package path is the qualifier.
    Verified: `CanonicalID` is set in **no** parser outside `golang/`.
-3. ❌ **Canonical resolution:** add an exact `FindByCanonicalID` path in
-   `internal/persist/sqlite_reader.go` (none exists today) and make the traversal
-   family (find_callers/get_subgraph/impact_analysis) resolve on the canonical id;
-   a short-name lookup that matches >1 node must be an **error**, not the silent
-   pick it is today (`FindSymbol:315` does `qualified_name` LIKE matching and
-   returns up to `LIMIT 100` with no multi-match guard). Also update the Pass-2
-   call resolver (`internal/parse/golang/resolve.go`) to key on canonical id where
-   available (note `qualifiedStaticTarget` in `statements.go:268` already uses
-   go/types for forward edges — align it to emit canonical-id-form targets).
-4. ❌ **Schema version bump** to 1.16: change `const SchemaVersion` in
-   `internal/buildpipe/cache.go:108` from `"1.15"` to `"1.16"`. This is the
-   cache-key contributor — bumping invalidates the build cache so a reindex
-   repopulates `canonical_id`. **Prerequisite for item 5:** without it the cache
-   is not invalidated and a rebuild will reuse stale rows that have no
-   `canonical_id`.
-5. ⏸ **Reindex go-stablenet** (graph build is LLM-free, minutes; do item 4 first)
+3. 🔶 **Canonical resolution:** `FindByCanonicalID(canonicalID) (Node, found, err)`
+   added to `StoreReader` + sqlite (`sqlite_reader.go`) + Postgres stub, covered
+   by `TestFindByCanonicalID`. **Still pending:** make the traversal family
+   (find_callers/get_subgraph/impact_analysis) resolve on the canonical id, and
+   make a short-name lookup that matches >1 node an **error** rather than the
+   silent pick it is today (`FindSymbol` does `qualified_name` LIKE matching and
+   returns up to `LIMIT 100` with no multi-match guard). Also align the Pass-2
+   call resolver (`resolve.go` / `qualifiedStaticTarget` in `statements.go`).
+4. ✅ **Schema version bump** — done. `const SchemaVersion` in
+   `internal/buildpipe/cache.go` bumped **1.18 → 1.19** (the cache-key
+   contributor; invalidates the build cache so a reindex repopulates
+   `canonical_id`). Prerequisite for item 5, now satisfied.
+5. ⏸ **Reindex go-stablenet** (graph build is LLM-free, minutes; item 4 done)
    to a scratch out first, validate that real collisions resolve uniquely (e.g. a
    `Size` method in `core/types` vs `consensus/wbft/core` gets distinct canonical
    ids), then to the shared `data/ckg-stablenet`.
-6. 🔶 **Tests:** only `TestCanonicalID_DistinguishesSameNameAcrossPackages`
-   (`resolve_test.go:15`) exists today. Still need: Solidity overload, interface
-   vs concrete, const/var, field.
+6. 🔶 **Tests:** `TestCanonicalID_DistinguishesSameNameAcrossPackages` plus new
+   `TestCanonicalID_AllGoNodeKinds` (type/field/interface-method/const/var +
+   interface-vs-concrete) and `TestFindByCanonicalID`. Still need: Solidity
+   overload (blocked on item 2).
+7. ❌ **Postgres `canonical_id` parity** (newly found): the Postgres schema and
+   `pgNodeColumns` carry no `canonical_id` column — PR #21 added it to sqlite
+   only. `pgStore.FindByCanonicalID` is a documented not-found stub. Add the
+   column + writer/reader round-trip for Postgres-backed graphs.
 
 ### Phase 2 (ckv = `../code-knowledge-vector`, separate repo) — additive canonical field (no re-embed)
 - Add an additive `canonical_id` to `pkg/types.Chunk` and the search `Hit`
