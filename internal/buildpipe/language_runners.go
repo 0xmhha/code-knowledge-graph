@@ -6,6 +6,7 @@
 package buildpipe
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -253,6 +254,7 @@ func runGoPipeline(srcRoot string, files []string, log *slog.Logger) (*parse.Res
 // belongs to X by construction. Cross-file edges come from Pass 2 (Resolve),
 // not per-file ParseFile, so this stamping doesn't touch them.
 func stampFilePath(r *parse.ParseResult) {
+	lineQualifyDuplicateCanonicalIDs(r.Nodes)
 	rel := filepath.ToSlash(r.Path)
 	if rel == "" {
 		return
@@ -260,6 +262,30 @@ func stampFilePath(r *parse.ParseResult) {
 	for i := range r.Edges {
 		if r.Edges[i].FilePath == "" {
 			r.Edges[i].FilePath = rel
+		}
+	}
+}
+
+// lineQualifyDuplicateCanonicalIDs appends "@<startLine>" to any canonical_id
+// shared by more than one node in the same file (B3), so same-file same-name
+// symbols — a minified-JS `function t(){}` repeated dozens of times, or several
+// Go `init` functions in one file — get distinct ids. Single-occurrence ids are
+// left untouched, so normal code keeps a stable, line-independent canonical id;
+// only genuine intra-file collisions pay the line-dependence cost. Runs per
+// ParseResult (one file) at the single post-ParseFile chokepoint.
+func lineQualifyDuplicateCanonicalIDs(nodes []types.Node) {
+	if len(nodes) < 2 {
+		return
+	}
+	counts := make(map[string]int, len(nodes))
+	for _, n := range nodes {
+		if n.CanonicalID != "" {
+			counts[n.CanonicalID]++
+		}
+	}
+	for i := range nodes {
+		if cid := nodes[i].CanonicalID; cid != "" && counts[cid] > 1 {
+			nodes[i].CanonicalID = fmt.Sprintf("%s@%d", cid, nodes[i].StartLine)
 		}
 	}
 }

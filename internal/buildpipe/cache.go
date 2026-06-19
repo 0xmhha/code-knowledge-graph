@@ -140,11 +140,13 @@ import (
 // receives a canonical_id (it was a non-unique <pkg>._ before). Stored
 // canonical_id values change for those nodes, so force a cold rebuild.
 //
-// Bumped from "1.20" to "1.21" by refinements B2 + B4: function-local `var`
-// declarations no longer receive a canonical_id (only package-level const/var
-// do — the local <pkg>.<name> id collided across functions), and proto
-// canonical ids drop the doubled `proto:` prefix (<relpath>:<pkg>.<Sym>).
-// Both change stored canonical_id values, so force a cold rebuild.
+// Bumped from "1.20" to "1.21" by refinements B2 + B4 + B3: function-local
+// `var` declarations no longer receive a canonical_id (only package-level
+// const/var do — the local <pkg>.<name> id collided across functions); proto
+// canonical ids drop the doubled `proto:` prefix (<relpath>:<pkg>.<Sym>); and
+// a canonical_id shared by >1 node in the same file is line-qualified with
+// "@<line>" (B3 — minified-JS `function t(){}`, multiple Go `init`). All change
+// stored canonical_id values, so force a cold rebuild.
 const SchemaVersion = "1.21"
 
 // fileClass classifies one source file against the previous manifest.

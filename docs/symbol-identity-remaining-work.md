@@ -79,9 +79,12 @@ in item-5 validation).**
   (`obj.Parent() == obj.Pkg().Scope()`); function-local `var`s get none,
   removing the ~1,000 same-named-local collisions. Schema 1.20 → 1.21. Test:
   `TestCanonicalID_LocalVarSkipped`.
-- **B3 — line-qualify same-file same-name functions** ❌ pending (design fork —
-  see below): removes the minified-JS (`graphiql.min.js`) collisions but trades
-  off id stability.
+- **B3 — line-qualify same-file same-name (on collision)** ✅ done: a per-file
+  post-pass (`stampFilePath` → `lineQualifyDuplicateCanonicalIDs` at the single
+  post-ParseFile chokepoint) appends `@<line>` only to canonical_ids shared by
+  >1 node in the same file (minified-JS `function t`, multiple Go `init`).
+  Unique ids stay line-independent. Schema 1.20 → 1.21. Test:
+  `TestLineQualifyDuplicateCanonicalIDs`.
 - **B4 — proto double-prefix** ✅ done: the proto canonical post-pass strips the
   leading `proto:` from the qname, so ids read `<relpath>:<pkg>.<Sym>`. Schema
   1.20 → 1.21. Test: `TestCanonicalID_NoDoubleProtoPrefix`.

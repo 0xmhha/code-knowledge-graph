@@ -40,9 +40,9 @@ populates `canonical_id` across all parsers — all Go node kinds (types/fields/
 const/var/interface methods), and Solidity/TypeScript/proto using the relative
 file path as qualifier (Solidity adds a `(paramTypes)` signature for overloads).
 Refinement B1 (1.19 → 1.20) stops emitting `canonical_id` for the blank
-identifier `_`; B2 + B4 (1.20 → 1.21) skip `canonical_id` for function-local
-`var`s (only package-level const/var get one) and drop proto's doubled
-`proto:` prefix. Full per-bump rationale:
+identifier `_`; B2 + B4 + B3 (1.20 → 1.21) skip `canonical_id` for function-local `var`s (only
+package-level const/var get one), drop proto's doubled `proto:` prefix, and
+line-qualify (`@<line>`) any canonical_id shared by >1 node in one file. Full per-bump rationale:
 `internal/buildpipe/cache.go`.
 
 ## Node types (37)
