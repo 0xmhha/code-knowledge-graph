@@ -54,6 +54,7 @@ Tier 1 wins.
 |---|---|
 | [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
 | [symbol-identity-remaining-work.md](symbol-identity-remaining-work.md) | Canonical-id (symbol identity) status + remaining work (decision: [ADR-0001](adr/0001-canonical-symbol-id.md)) |
+| [HANDOFF-2026-06-19-symbol-identity.md](HANDOFF-2026-06-19-symbol-identity.md) | Self-contained cross-machine resume doc for the canonical_id effort (ckg/ckv/cks state, verification, follow-ups) |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
 | [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | North-star → capability gap mapping (requirements reference) |
