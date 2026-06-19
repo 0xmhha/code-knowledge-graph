@@ -53,14 +53,15 @@ Phase 1 (ckg) is done except item 7. The remaining effort, in priority order:
 
 **Tier A — highest leverage (makes Phase 1 pay off; canonical_id only helps once
 downstream *consumes* it). Separate repos / sessions.**
-- **A1 — cks Phase 3** (`../code-knowledge-system`): 🔶 core done on branch
-  `feat/canonical-id-resolution` (commit `6609d12`): ckg dependency bumped to a
-  canonical_id build, `FindByCanonicalID` added to the storeReader adapter,
-  `resolveQname`/`resolveNodeID`/`resolveSeedFile` resolve canonical-first and a
-  multi-match returns unresolved instead of the silent `defs[0]`, and the
-  find_callers/find_callees MCP docs are fixed. **A1-3 remaining** — domain anchor
-  `kind: def|loc` schema + `cks-anchor-refresh`/`cks-inventory-check` +
-  `internal/domainexport` + 146+ go-stablenet anchor migration.
+- **A1 — cks Phase 3** (`../code-knowledge-system`): 🔶 code+tooling done on
+  branch `feat/canonical-id-resolution`. Commits: `6609d12` (dep bump +
+  `FindByCanonicalID` adapter + canonical-first resolution dropping silent
+  `defs[0]` + MCP-doc fix), `8425fa3` (anchor `kind: def|loc` struct + schema,
+  additive), `f480de6` (`cks-anchor-refresh` never repoints loc), `a9b2282`
+  (`cks-inventory-check --graph` asserts def-symbol uniqueness; `domainexport`
+  renders per kind). **A1-3b remaining (data only):** migrate the 146+
+  go-stablenet anchors to carry explicit `kind` — concurrency-sensitive, must be
+  coordinated with the session growing those entries.
 - **A2 — ckv Phase 2** (`../code-knowledge-vector`): ✅ done on branch
   `feat/canonical-id-alignment` (commit `ebc3f31`): `ckgalign` copies ckg's
   `canonical_id` (column-probed for old graphs) onto `types.Chunk` + `query.Hit`,
@@ -84,7 +85,7 @@ in item-5 validation).**
 - **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to
   deprecate the Postgres backend (sqlite is the de-facto only target). See item 7.
 
-Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 (in progress) → (B2/B3/B4, C1 as capacity allows).**
+Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 tooling ✅ → A1-3b data migration (deferred, concurrency-sensitive) → (B2/B3/B4, C1 as capacity allows).**
 
 ## Remaining work
 
