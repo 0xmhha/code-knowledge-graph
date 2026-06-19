@@ -266,9 +266,16 @@ func (v *declVisitor) emitValueSpec(s *ast.ValueSpec, tok token.Token) {
 		}
 		v.appendNode(id, nt, name.Name, qname, startLine, endLine, startByte, endByte,
 			exported(name.Name), commentText(s.Doc), "")
-		// package-level const/var canonical id: <importpath>.<Name>.
+		// canonical id only for PACKAGE-LEVEL const/var (B2): the AST walk also
+		// reaches `var x = …` declared inside function bodies, whose id
+		// <importpath>.<name> is neither unique (many funcs declare `gspec`,
+		// `err`, …) nor a useful retrieval target. go/types tells them apart:
+		// a package-level object's parent scope is the package scope.
 		if v.typesInfo != nil {
-			v.setLastCanonicalID(goCanonicalID(v.typesInfo.ObjectOf(name)))
+			if obj := v.typesInfo.ObjectOf(name); obj != nil && obj.Pkg() != nil &&
+				obj.Parent() == obj.Pkg().Scope() {
+				v.setLastCanonicalID(goCanonicalID(obj))
+			}
 		}
 		v.edges = append(v.edges, types.Edge{
 			Src: v.fileID, Dst: id, Type: types.EdgeDefines, Count: 1, Confidence: types.ConfExtracted,

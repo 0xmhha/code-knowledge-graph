@@ -74,12 +74,20 @@ in item-5 validation).**
   blank identifier `_` (`goCanonicalID` guard + field/interface-method paths;
   schema 1.19 → 1.20). Promoted/synthetic methods already carry none (verified).
   Test: `TestCanonicalID_BlankIdentifierSkipped`.
-- **B2 — scope-qualify local `var`s** (or only emit for package-level), removing
-  the ~1,000 same-named-local collisions.
-- **B3 — line-qualify same-file same-name functions**, removing the minified-JS
-  (`graphiql.min.js`) collisions.
-- **B4 — proto double-prefix**: `<relpath>:proto:<pkg>…` → strip the redundant
-  `proto:` (cosmetic).
+- **B2 — package-level-only const/var** ✅ done: `emitValueSpec` sets
+  `canonical_id` only when go/types says the object is package-level
+  (`obj.Parent() == obj.Pkg().Scope()`); function-local `var`s get none,
+  removing the ~1,000 same-named-local collisions. Schema 1.20 → 1.21. Test:
+  `TestCanonicalID_LocalVarSkipped`.
+- **B3 — line-qualify same-file same-name (on collision)** ✅ done: a per-file
+  post-pass (`stampFilePath` → `lineQualifyDuplicateCanonicalIDs` at the single
+  post-ParseFile chokepoint) appends `@<line>` only to canonical_ids shared by
+  >1 node in the same file (minified-JS `function t`, multiple Go `init`).
+  Unique ids stay line-independent. Schema 1.20 → 1.21. Test:
+  `TestLineQualifyDuplicateCanonicalIDs`.
+- **B4 — proto double-prefix** ✅ done: the proto canonical post-pass strips the
+  leading `proto:` from the qname, so ids read `<relpath>:<pkg>.<Sym>`. Schema
+  1.20 → 1.21. Test: `TestCanonicalID_NoDoubleProtoPrefix`.
 
 **Tier C — deferred decision.**
 - **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to

@@ -104,6 +104,32 @@ func TestCanonicalID_BlankIdentifierSkipped(t *testing.T) {
 	}
 }
 
+// TestCanonicalID_LocalVarSkipped guards B2: a function-local `var` declaration
+// must NOT receive a canonical id (only package-level const/var do), since
+// <pkg>.<localName> collides across the many functions that reuse a name.
+func TestCanonicalID_LocalVarSkipped(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	sawLocal := false
+	for _, n := range g.Nodes {
+		if n.Name == "localOnly" {
+			sawLocal = true
+			if n.CanonicalID != "" {
+				t.Errorf("function-local var localOnly got canonical id %q, want empty", n.CanonicalID)
+			}
+		}
+		// package-level var must still carry one.
+		if n.QualifiedName == "coll1.defaultName" && n.CanonicalID != "ckgresolve.test/coll1.defaultName" {
+			t.Errorf("package-level defaultName canonical id = %q, want ckgresolve.test/coll1.defaultName", n.CanonicalID)
+		}
+	}
+	if !sawLocal {
+		t.Fatal("local var node localOnly not found in graph")
+	}
+}
+
 // TestResolveSameNameMethodPrefersReceiverType guards the name-collision fix:
 // coll1.Set.Quorum calls its own receiver's Size(), while coll2.Other.Size is a
 // same-named decoy in another package. The typed resolver must bind the call to

@@ -17,3 +17,11 @@ type Padded struct {
 	_ [4]byte
 	X int
 }
+
+// useLocal declares a function-local `var` — B2: a local var must NOT get a
+// canonical id (its <pkg>.localOnly is non-unique across functions and is not a
+// retrieval target). Only package-level MaxItems/defaultName do.
+func useLocal() int {
+	var localOnly = MaxItems
+	return localOnly
+}

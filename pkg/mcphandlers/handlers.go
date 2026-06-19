@@ -62,7 +62,10 @@ func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
 		if !ok {
 			return textResult(seedNotFoundResult(q)), nil
 		}
-		nodes, edges, err := reader.NeighborhoodByQname(resolved, d, true /*reverse*/, callEdgeTypes...)
+		// Union the concrete seed with the interface methods it satisfies, so
+		// interface-dispatched callers (recorded as `invokes` to the interface
+		// method, not the concrete method) are not missed. See reverseCallersUnion.
+		nodes, edges, err := reverseCallersUnion(reader, resolved, d)
 		if err != nil {
 			return nil, err
 		}

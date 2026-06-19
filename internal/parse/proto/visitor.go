@@ -115,7 +115,10 @@ func (v *visitor) parse() {
 		if n.CanonicalID != "" || n.Type == types.NodeFile || n.Type == types.NodeImport {
 			continue
 		}
-		n.CanonicalID = v.rel + ":" + n.QualifiedName
+		// proto qnames already carry a "proto:" prefix; strip it (B4) so the
+		// canonical id reads <relpath>:<pkg>.<Msg> rather than the doubled
+		// <relpath>:proto:<pkg>.<Msg>.
+		n.CanonicalID = v.rel + ":" + strings.TrimPrefix(n.QualifiedName, "proto:")
 	}
 }
 
