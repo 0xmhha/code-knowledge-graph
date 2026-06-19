@@ -53,11 +53,19 @@ Phase 1 (ckg) is done except item 7. The remaining effort, in priority order:
 
 **Tier A — highest leverage (makes Phase 1 pay off; canonical_id only helps once
 downstream *consumes* it). Separate repos / sessions.**
-- **A1 — cks Phase 3** (`../code-knowledge-system`): resolve by canonical_id,
-  drop the `defs[0]` fallback, anchor `kind: def|loc`, fix MCP tool docs, migrate
-  the 146+ symbol+line anchors. See Phase 3 below.
-- **A2 — ckv Phase 2** (`../code-knowledge-vector`): additive `canonical_id` on
-  Chunk/Hit, no re-embed. See Phase 2 below.
+- **A1 — cks Phase 3** (`../code-knowledge-system`): 🔶 core done on branch
+  `feat/canonical-id-resolution` (commit `6609d12`): ckg dependency bumped to a
+  canonical_id build, `FindByCanonicalID` added to the storeReader adapter,
+  `resolveQname`/`resolveNodeID`/`resolveSeedFile` resolve canonical-first and a
+  multi-match returns unresolved instead of the silent `defs[0]`, and the
+  find_callers/find_callees MCP docs are fixed. **A1-3 remaining** — domain anchor
+  `kind: def|loc` schema + `cks-anchor-refresh`/`cks-inventory-check` +
+  `internal/domainexport` + 146+ go-stablenet anchor migration.
+- **A2 — ckv Phase 2** (`../code-knowledge-vector`): ✅ done on branch
+  `feat/canonical-id-alignment` (commit `ebc3f31`): `ckgalign` copies ckg's
+  `canonical_id` (column-probed for old graphs) onto `types.Chunk` + `query.Hit`,
+  persisted in the sqlitevec store; embed text unchanged so no re-embed. The
+  compatibility key is inherited from ckg's graph.db, not recomputed.
 
 **Tier B — ckg quality (this repo; shrinks the residual ~4% non-uniqueness found
 in item-5 validation).**
@@ -76,7 +84,7 @@ in item-5 validation).**
 - **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to
   deprecate the Postgres backend (sqlite is the de-facto only target). See item 7.
 
-Execution: **B1 → A1/A2 → (B2/B3/B4, C1 as capacity allows).**
+Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 (in progress) → (B2/B3/B4, C1 as capacity allows).**
 
 ## Remaining work
 
@@ -189,6 +197,11 @@ defect):**
 - Skip emitting `canonical_id` for `_` and for synthetic/promoted methods.
 
 ### Phase 2 (ckv = `../code-knowledge-vector`, separate repo) — additive canonical field (no re-embed)
+> ✅ **Done** — branch `feat/canonical-id-alignment` (`ebc3f31`). See the Tier A
+> "Next" entry above for the implementation summary. Note: the working approach
+> was the `ckgalign` Load column-probe + verbatim copy (not a `cmd/ckv/migrate.go`
+> runner — the in-place ALTER + next aligned build covers population).
+
 - Add an additive `canonical_id` to `pkg/types.Chunk` and the search `Hit`
   (omitempty), populated from the aligned ckg node. Alignment is already
   **positional** (`internal/ckgalign`), so it is name-agnostic — do NOT change the
@@ -197,12 +210,16 @@ defect):**
   ckg canonical id; vectors byte-identical.
 
 ### Phase 3 (cks = `../code-knowledge-system`, separate repo) — exact resolution + two anchor kinds + data migration
-- `internal/ckgclient/real.go`: resolve by canonical id; drop the `defs[0]`
-  fallback in `resolveQname`/`resolveNodeID`/`resolveSeedFile` (multi-match = error
-  for the traversal family).
-- MCP tool docs (`internal/mcp/graph.go`, `analysis.go`) advertise a
-  `consensus.wbft.Finalize` form ckg does not store — fix them to the real
-  identity.
+> 🔶 **Core done** — branch `feat/canonical-id-resolution` (`6609d12`): the
+> resolution + MCP-doc items below are complete. **A1-3 remaining**: the anchor
+> `kind: def|loc` schema + skills + domainexport + data migration.
+
+- ✅ `internal/ckgclient/real.go`: resolve by canonical id; drop the `defs[0]`
+  fallback in `resolveQname`/`resolveNodeID`/`resolveSeedFile` (multi-match now
+  returns unresolved, not a silent pick).
+- ✅ MCP tool docs (`internal/mcp/graph.go`) advertised a
+  `consensus.wbft.Finalize` form ckg does not store — fixed to real
+  qualified_name / bare-name / canonical_id examples.
 - Domain-knowledge anchor schema (`docs/domain-knowledge/shared/entry.schema.yaml`):
   add `kind: def | loc`. `def` requires a uniquely-resolvable symbol and
   `line == definition line`; `loc` carries `enclosing_symbol` + arbitrary `line`
