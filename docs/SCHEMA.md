@@ -1,6 +1,6 @@
 # CKG Schema (V0)
 
-Schema version: **1.19**.
+Schema version: **1.20**.
 
 > **Authoritative source of truth (single source).** The machine-readable
 > node/edge type lists and their exact counts live in `pkg/types/enums.go`
@@ -38,7 +38,9 @@ signatures + qualified call resolution (1.16), promoted-method nodes (1.17),
 and `writes_field` edges (1.18); symbol-identity Phase 1 (1.18 → 1.19)
 populates `canonical_id` across all parsers — all Go node kinds (types/fields/
 const/var/interface methods), and Solidity/TypeScript/proto using the relative
-file path as qualifier (Solidity adds a `(paramTypes)` signature for overloads). Full per-bump rationale:
+file path as qualifier (Solidity adds a `(paramTypes)` signature for overloads).
+Refinement B1 (1.19 → 1.20) stops emitting `canonical_id` for the blank
+identifier `_`. Full per-bump rationale:
 `internal/buildpipe/cache.go`.
 
 ## Node types (37)

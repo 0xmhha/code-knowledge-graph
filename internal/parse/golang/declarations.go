@@ -212,7 +212,8 @@ func (v *declVisitor) emitFields(parentID, parentQname, parentCanonical string, 
 			exported(name.Name), commentText(f.Doc), "")
 		// field canonical id: <importpath>.<Type>.<Field>, derived from the
 		// owning type's canonical id (a field *types.Var carries no receiver).
-		if parentCanonical != "" {
+		// Skip the blank identifier `_` (struct padding fields) — see B1.
+		if parentCanonical != "" && name.Name != "_" {
 			v.setLastCanonicalID(parentCanonical + "." + name.Name)
 		}
 		v.edges = append(v.edges, types.Edge{
@@ -244,7 +245,7 @@ func (v *declVisitor) emitInterfaceMethod(parentID, parentQname, parentCanonical
 			exported(name.Name), commentText(f.Doc), "")
 		// interface-method canonical id: <importpath>.<Interface>.<Method>,
 		// distinct from any concrete impl's <importpath>.(*T).<Method>.
-		if parentCanonical != "" {
+		if parentCanonical != "" && name.Name != "_" {
 			v.setLastCanonicalID(parentCanonical + "." + name.Name)
 		}
 		v.edges = append(v.edges, types.Edge{
@@ -367,6 +368,12 @@ func commentText(g *ast.CommentGroup) string {
 // node's CanonicalID empty rather than emitting an ambiguous id.
 func goCanonicalID(obj gotypes.Object) string {
 	if obj == nil || obj.Pkg() == nil {
+		return ""
+	}
+	// The blank identifier `_` is not an addressable symbol — many package-level
+	// `var _ = ...` / `_ "import"` declarations share the name, so an id like
+	// `<pkg>._` is intentionally non-unique. Leave it empty (B1).
+	if obj.Name() == "_" {
 		return ""
 	}
 	pkgPath := obj.Pkg().Path()

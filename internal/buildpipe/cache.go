@@ -134,7 +134,12 @@ import (
 // already exists (idempotent ALTER); pre-1.19 DBs carry it empty, so the
 // cache-key flip forces a cold rebuild to repopulate canonical_id graph-wide.
 // Additive — qualified_name, node IDs, edges unchanged.
-const SchemaVersion = "1.19"
+//
+// Bumped from "1.19" to "1.20" by symbol-identity refinement B1: the blank
+// identifier `_` (package-level `var _`, struct padding fields) no longer
+// receives a canonical_id (it was a non-unique <pkg>._ before). Stored
+// canonical_id values change for those nodes, so force a cold rebuild.
+const SchemaVersion = "1.20"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

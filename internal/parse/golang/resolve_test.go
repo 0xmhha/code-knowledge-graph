@@ -78,6 +78,32 @@ func TestCanonicalID_AllGoNodeKinds(t *testing.T) {
 	}
 }
 
+// TestCanonicalID_BlankIdentifierSkipped guards B1: the blank identifier `_`
+// (package-level `var _ = …`, struct padding fields) must NOT receive a
+// canonical id — `<pkg>._` is intentionally non-unique and pollutes uniqueness.
+func TestCanonicalID_BlankIdentifierSkipped(t *testing.T) {
+	g, err := gop.LoadAndResolve("testdata/resolve")
+	if err != nil {
+		t.Fatalf("LoadAndResolve: %v", err)
+	}
+	for _, n := range g.Nodes {
+		if n.Name == "_" && n.CanonicalID != "" {
+			t.Errorf("blank identifier got canonical id %q (type=%s qname=%s) — want empty",
+				n.CanonicalID, n.Type, n.QualifiedName)
+		}
+	}
+	// sanity: the non-blank field X on Padded still gets a canonical id.
+	var xc string
+	for _, n := range g.Nodes {
+		if n.QualifiedName == "coll1.Padded.X" {
+			xc = n.CanonicalID
+		}
+	}
+	if xc != "ckgresolve.test/coll1.Padded.X" {
+		t.Errorf("coll1.Padded.X canonical id = %q, want ckgresolve.test/coll1.Padded.X", xc)
+	}
+}
+
 // TestResolveSameNameMethodPrefersReceiverType guards the name-collision fix:
 // coll1.Set.Quorum calls its own receiver's Size(), while coll2.Other.Size is a
 // same-named decoy in another package. The typed resolver must bind the call to

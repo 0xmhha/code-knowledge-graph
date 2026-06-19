@@ -47,6 +47,37 @@ go-stablenet has been run on the Phase 1 branch (see "Validation results"); any
 *shared* `EVAL_DB_ROOT` graph still needs a rebuild under schema 1.19 to carry
 `canonical_id`.
 
+## Next — prioritized work queue (2026-06-19)
+
+Phase 1 (ckg) is done except item 7. The remaining effort, in priority order:
+
+**Tier A — highest leverage (makes Phase 1 pay off; canonical_id only helps once
+downstream *consumes* it). Separate repos / sessions.**
+- **A1 — cks Phase 3** (`../code-knowledge-system`): resolve by canonical_id,
+  drop the `defs[0]` fallback, anchor `kind: def|loc`, fix MCP tool docs, migrate
+  the 146+ symbol+line anchors. See Phase 3 below.
+- **A2 — ckv Phase 2** (`../code-knowledge-vector`): additive `canonical_id` on
+  Chunk/Hit, no re-embed. See Phase 2 below.
+
+**Tier B — ckg quality (this repo; shrinks the residual ~4% non-uniqueness found
+in item-5 validation).**
+- **B1 — skip non-symbols** ✅ done: `canonical_id` is no longer emitted for the
+  blank identifier `_` (`goCanonicalID` guard + field/interface-method paths;
+  schema 1.19 → 1.20). Promoted/synthetic methods already carry none (verified).
+  Test: `TestCanonicalID_BlankIdentifierSkipped`.
+- **B2 — scope-qualify local `var`s** (or only emit for package-level), removing
+  the ~1,000 same-named-local collisions.
+- **B3 — line-qualify same-file same-name functions**, removing the minified-JS
+  (`graphiql.min.js`) collisions.
+- **B4 — proto double-prefix**: `<relpath>:proto:<pkg>…` → strip the redundant
+  `proto:` (cosmetic).
+
+**Tier C — deferred decision.**
+- **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to
+  deprecate the Postgres backend (sqlite is the de-facto only target). See item 7.
+
+Execution: **B1 → A1/A2 → (B2/B3/B4, C1 as capacity allows).**
+
 ## Remaining work
 
 ### Phase 1 (ckg) — finish canonical id
