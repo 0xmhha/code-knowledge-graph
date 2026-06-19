@@ -441,3 +441,28 @@ func debugNodes(ns []types.Node) string {
 	}
 	return sb.String()
 }
+
+// TestCanonicalID_NoDoubleProtoPrefix guards B4: proto qnames already carry a
+// "proto:" prefix, so the canonical id must read <relpath>:<pkg>.<Sym>, not the
+// doubled <relpath>:proto:<pkg>.<Sym>.
+func TestCanonicalID_NoDoubleProtoPrefix(t *testing.T) {
+	src, root, full := readFixture(t, "simple", "echo.proto")
+	p := New(root)
+	r, err := p.ParseFile(full, src)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	svc := hasNode(r.Nodes, types.NodeInterface, "proto:simple.EchoService")
+	if svc == nil {
+		t.Fatalf("missing service node")
+	}
+	if svc.CanonicalID == "" {
+		t.Fatal("service canonical id is empty")
+	}
+	if strings.Contains(svc.CanonicalID, ":proto:") || strings.Contains(svc.CanonicalID, "proto:proto:") {
+		t.Errorf("canonical id %q has a doubled proto: prefix", svc.CanonicalID)
+	}
+	if !strings.HasSuffix(svc.CanonicalID, ":simple.EchoService") {
+		t.Errorf("canonical id = %q, want suffix :simple.EchoService", svc.CanonicalID)
+	}
+}
