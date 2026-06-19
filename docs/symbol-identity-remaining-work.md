@@ -64,13 +64,16 @@ downstream *consumes* it). Separate repos / sessions.**
   go-stablenet ckg graph with the maxShift=15 def/loc threshold → **125 def**
   (kind absent = def), **4 loc** migrated (`StateTransition.TransitionDb`
   check-points + `EVM.Call:213`; symbol→enclosing_symbol + `kind: loc`), **64
-  file-only**. Two **data follow-ups need human judgment** (surfaced, not
-  auto-applied): (a) ~10+ def anchors whose short symbol resolves to multiple
-  defs (`API.Status`→2, `ValidatorSet`→3, `Compile`→5, `txType`→8) — qualify the
-  symbol; (b) 17 review anchors — descriptive symbols like
-  `"ValidateTransaction (Berlin gate)"` (move the parenthetical to `reason`, use
-  `enclosing_symbol` + `kind: loc`), pointer-receiver forms, and a doc-file
-  anchor. `cks-inventory-check --graph` reports both.
+  file-only**. The ~10 def-uniqueness "errors" were **mostly false positives** — the
+  `--graph` check counted symbol matches globally, ignoring the anchor's `file`
+  (`API.Status` is global-ambiguous clique-vs-wbft but unique in its file). Fixed
+  file-aware in cks PR #23. **Genuine residue (small data follow-ups, human
+  judgment):** 7 in-file ambiguities where a bare symbol suffix-matches a type +
+  fields (`EpochInfo`→3, `WBFTExtra`, `Status`, `FeeDelegateDynamicFeeTx.FeePayer`)
+  — qualify the symbol; ~12 does-not-resolve warnings (pointer-receiver form
+  `(*T).method` ckg stores as `pkg.T.method`, descriptive symbols like
+  `"ValidateTransaction (Berlin gate)"` → move parenthetical to `reason` + loc, a
+  doc-file anchor). `cks-inventory-check --graph` now reports these trustworthily.
 - **A2 — ckv Phase 2** (`../code-knowledge-vector`): ✅ done on branch
   `feat/canonical-id-alignment` (commit `ebc3f31`): `ckgalign` copies ckg's
   `canonical_id` (column-probed for old graphs) onto `types.Chunk` + `query.Hit`,
