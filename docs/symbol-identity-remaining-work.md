@@ -59,9 +59,18 @@ downstream *consumes* it). Separate repos / sessions.**
   `defs[0]` + MCP-doc fix), `8425fa3` (anchor `kind: def|loc` struct + schema,
   additive), `f480de6` (`cks-anchor-refresh` never repoints loc), `a9b2282`
   (`cks-inventory-check --graph` asserts def-symbol uniqueness; `domainexport`
-  renders per kind). **A1-3b remaining (data only):** migrate the 146+
-  go-stablenet anchors to carry explicit `kind` — concurrency-sensitive, must be
-  coordinated with the session growing those entries.
+  renders per kind). **A1-3b 🔶 partial** (cks branch `feat/anchor-kind-migration`,
+  `1990e77`): of 244 anchors (174 with symbol+line), classified against the
+  go-stablenet ckg graph with the maxShift=15 def/loc threshold → **125 def**
+  (kind absent = def), **4 loc** migrated (`StateTransition.TransitionDb`
+  check-points + `EVM.Call:213`; symbol→enclosing_symbol + `kind: loc`), **64
+  file-only**. Two **data follow-ups need human judgment** (surfaced, not
+  auto-applied): (a) ~10+ def anchors whose short symbol resolves to multiple
+  defs (`API.Status`→2, `ValidatorSet`→3, `Compile`→5, `txType`→8) — qualify the
+  symbol; (b) 17 review anchors — descriptive symbols like
+  `"ValidateTransaction (Berlin gate)"` (move the parenthetical to `reason`, use
+  `enclosing_symbol` + `kind: loc`), pointer-receiver forms, and a doc-file
+  anchor. `cks-inventory-check --graph` reports both.
 - **A2 — ckv Phase 2** (`../code-knowledge-vector`): ✅ done on branch
   `feat/canonical-id-alignment` (commit `ebc3f31`): `ckgalign` copies ckg's
   `canonical_id` (column-probed for old graphs) onto `types.Chunk` + `query.Hit`,
@@ -93,7 +102,7 @@ in item-5 validation).**
 - **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to
   deprecate the Postgres backend (sqlite is the de-facto only target). See item 7.
 
-Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 tooling ✅ → A1-3b data migration (deferred, concurrency-sensitive) → (B2/B3/B4, C1 as capacity allows).**
+Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 tooling ✅ → B2/B3/B4 ✅ → A1-3b loc-classify ✅ (def-uniqueness + 17 review anchors = data follow-up) → C1 (next).**
 
 ## Remaining work
 
