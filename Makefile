@@ -162,11 +162,17 @@ EVAL_DB_ROOT  ?=
 # Builds HEAD by default; pass AT_COMMITS for additional snapshots.
 #
 # Examples:
-#   make eval-build-dbs                                 # HEAD only
+#   make eval-build-dbs                                 # HEAD only, Go corpus
 #   make eval-build-dbs AT_COMMITS="319b84d 0bf2f4d"   # HEAD + two past commits
 #   make eval-build-dbs FORCE=--force                   # rebuild all
+#   make eval-build-dbs LANG=auto                        # include sol/proto too
+#
+# LANG defaults to `go` because the retrieval eval measures the Go consensus
+# corpus; pass LANG=auto (or LANG=go,sol) to index Solidity/proto as well, e.g.
+# to validate cross-language canonical_id.
 FORCE ?=
 AT_COMMITS ?=
+LANG ?= go
 eval-build-dbs: build-no-viewer
 	@[ -n "$(STABLENET_SRC)" ] || { echo "ERROR: STABLENET_SRC not set. Add it to .env.local"; exit 1; }
 	@[ -n "$(EVAL_DB_ROOT)" ]  || { echo "ERROR: EVAL_DB_ROOT not set. Add it to .env.local"; exit 1; }
@@ -177,7 +183,7 @@ eval-build-dbs: build-no-viewer
 	    --src=$(STABLENET_SRC) \
 	    --out=$(EVAL_DB_ROOT)/stablenet \
 	    --out-tag=auto-commit-hash \
-	    --lang=go $(FORCE)
+	    --lang=$(LANG) $(FORCE)
 	@for sha in $(AT_COMMITS); do \
 	    echo ""; \
 	    echo "=== Building graph at $$sha ==="; \
@@ -186,7 +192,7 @@ eval-build-dbs: build-no-viewer
 	        --at-commit=$$sha \
 	        --out=$(EVAL_DB_ROOT)/stablenet \
 	        --out-tag=auto-commit-hash \
-	        --lang=go $(FORCE); \
+	        --lang=$(LANG) $(FORCE); \
 	done
 	@echo ""
 	@echo "=== Evaluation DBs in $(EVAL_DB_ROOT) ==="

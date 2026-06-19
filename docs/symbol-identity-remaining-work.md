@@ -42,20 +42,22 @@ Implemented and tested (build + `internal/persist` + `internal/parse/...` green)
   methods in different packages get distinct ids.
 
 Everything is **additive**: `qualified_name`, node IDs (`sha256(qname|lang|startByte)`),
-edges, and all existing consumers are unchanged. No reindex has been run yet, so the
-live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
+edges, and all existing consumers are unchanged. A validation reindex of
+go-stablenet has been run on the Phase 1 branch (see "Validation results"); any
+*shared* `EVAL_DB_ROOT` graph still needs a rebuild under schema 1.19 to carry
+`canonical_id`.
 
 ## Remaining work
 
 ### Phase 1 (ckg) — finish canonical id
 
-> **Progress (branch `feat/canonical-symbol-id-phase1`, 2026-06-17):** items 1,
-> 2, 3, 4, 6 done (Go + Solidity + TypeScript + proto canonical_id, exact
-> resolution, schema bump, tests). Remaining: item 5 (reindex — now unblocked),
-> item 7 (Postgres parity — deferred, status quo per decision). Schema baseline
-> had moved to 1.18 (PR #23), so the bump landed as **1.18 → 1.19** (not 1.16).
-> New gap found: **Postgres has no `canonical_id` column** (sqlite-only) — see
-> item 7.
+> **Progress (branch `feat/canonical-symbol-id-phase1`, updated 2026-06-19):**
+> items **1–6 done** (Go + Solidity + TypeScript + proto canonical_id, exact
+> resolution, schema bump 1.18 → 1.19, tests, and go-stablenet reindex validated
+> — see "Validation results"). Only remaining: item 7 (Postgres parity —
+> deferred, status quo per decision). PR #24 carries items 1–4, 6; item 5 is a
+> runtime validation (no code) plus a small `LANG` Makefile var for multi-lang
+> eval builds.
 
 1. ✅ **Wire the remaining Go node kinds** in `declarations.go` — done. A shared
    `setLastCanonicalID` helper now sets `canonical_id` in `emitTypeSpec`
@@ -87,18 +89,73 @@ live `data/ckg-stablenet/graph.db` does **not** carry `canonical_id` values yet.
    `internal/buildpipe/cache.go` bumped **1.18 → 1.19** (the cache-key
    contributor; invalidates the build cache so a reindex repopulates
    `canonical_id`). Prerequisite for item 5, now satisfied.
-5. ⏸ **Reindex go-stablenet** (graph build is LLM-free, minutes; item 4 done)
-   to a scratch out first, validate that real collisions resolve uniquely (e.g. a
-   `Size` method in `core/types` vs `consensus/wbft/core` gets distinct canonical
-   ids), then to the shared `data/ckg-stablenet`.
-6. 🔶 **Tests:** `TestCanonicalID_DistinguishesSameNameAcrossPackages` plus new
+5. ✅ **Reindex go-stablenet** — done & validated (2026-06-19). Built via
+   `make eval-build-dbs LANG=auto` (a new `LANG ?= go` Makefile var lets the
+   eval build include sol/proto without changing its Go-only default) over
+   `/Users/.../go-stablenet` (1297 go + 294 sol + 4 proto) to a scratch
+   `EVAL_DB_ROOT`: **251,236 nodes / 1,974,320 edges**. See "Validation results"
+   below. Promotion to a shared `EVAL_DB_ROOT` is a runtime/ops step, not code.
+6. ✅ **Tests** — `TestCanonicalID_DistinguishesSameNameAcrossPackages`,
    `TestCanonicalID_AllGoNodeKinds` (type/field/interface-method/const/var +
-   interface-vs-concrete) and `TestFindByCanonicalID`. Still need: Solidity
-   overload (blocked on item 2).
+   interface-vs-concrete), `TestCanonicalID_SolidityOverloads`, and
+   `TestFindByCanonicalID` + the `TestResolveSeed` canonical subtest. Solidity
+   golden snapshots also lock canonical_id.
 7. ❌ **Postgres `canonical_id` parity** (newly found): the Postgres schema and
    `pgNodeColumns` carry no `canonical_id` column — PR #21 added it to sqlite
    only. `pgStore.FindByCanonicalID` is a documented not-found stub. Add the
    column + writer/reader round-trip for Postgres-backed graphs.
+
+### Validation results (item 5, go-stablenet reindex, 2026-06-19)
+
+Reindexed go-stablenet (251,236 nodes / 1,974,320 edges). Ground-truth queries
+against the resulting sqlite `graph.db`:
+
+**Population** — symbol nodes carry `canonical_id` as expected; statement/meta
+nodes correctly do not:
+
+| node type (go) | total | with canonical_id |
+|---|---|---|
+| Function | 6,497 | 6,497 (100%) |
+| Method | 8,438 | 8,438 (100%) |
+| Struct | 1,779 | 1,779 (100%) |
+| Field | 7,943 | 7,943 (100%) |
+| Constant | 1,655 | 1,655 (100%) |
+| CallSite / IfStmt / git Commit·Hunk | — | 0 (by design) |
+
+Solidity 2,664 and proto 409 symbol nodes also populated.
+
+**Core goal — cross-package collisions resolve uniquely (✅):**
+- The 28 `Size` methods across packages get **28 distinct** canonical ids.
+- Even an identical short `qualified_name` is disambiguated: `prque..Size`
+  resolves to `…/common/prque.(*LazyQueue).Size` vs `…/common/prque.(*Prque).Size`.
+- Go Method uniqueness is **99.98%** (2 collisions / 8,438 — see below).
+
+**Solidity overloads (✅):** parameter-type signatures separate real OpenZeppelin
+overloads, e.g. `AccessControl._checkRole(bytes32)` vs `(bytes32,address)`,
+`Address.functionCall(address,bytes)` vs `(address,bytes,string)`; function-type
+params are captured.
+
+**Residual non-uniqueness (~4% of canonical ids; all explained — not a scheme
+defect):**
+- *Minified vendored JS* (`graphql/internal/graphiql/graphiql.min.js`): ~293
+  single-letter `function t/i/n…` reuse the same `<relpath>:<name>` (no
+  intra-file scope qualifier). Degenerate — a minified bundle indexed as source.
+- *Go blank identifier* `_` (109): not a real symbol.
+- *Same-named local `var`* within a package (`gspec`, `engine`, `funds`, …,
+  ~1,000): `canonical_id = <importpath>.<name>` has no function/scope qualifier.
+- *Legitimately non-unique by Go rules*: `init` functions (Go allows many per
+  package), duplicated test-stub types (the 2 Method collisions are a mock
+  `freezer` type with `Ancients`/`Freeze` defined in both
+  `core/blockchain_repair_test.go` and `core/blockchain_sethead_test.go`), and
+  generated `.pb.go`.
+
+**Optional future refinements (do NOT block Phase 1):**
+- Scope-qualify local-variable canonical ids (or skip non-package-level vars
+  and `_`), and line-qualify same-file same-name functions, to remove the
+  minified-JS / local-var noise.
+- proto canonical id double-prefixes (`<relpath>:proto:<pkg>.<msg>`) because the
+  proto qname already carries a `proto:` prefix — cosmetic; consider stripping.
+- Skip emitting `canonical_id` for `_` and for synthetic/promoted methods.
 
 ### Phase 2 (ckv = `../code-knowledge-vector`, separate repo) — additive canonical field (no re-embed)
 - Add an additive `canonical_id` to `pkg/types.Chunk` and the search `Hit`
