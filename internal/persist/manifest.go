@@ -125,6 +125,12 @@ func (s *sqliteStore) GetManifest() (Manifest, error) {
 		}
 		kv[k] = v
 	}
+	// A driver-level iteration error (e.g. a truncated read) ends the loop
+	// early; without this check it would be swallowed and a partial manifest
+	// returned as success — a silently incomplete index.
+	if err := rows.Err(); err != nil {
+		return Manifest{}, err
+	}
 	m := Manifest{
 		SchemaVersion:    kv["schema_version"],
 		CKGVersion:       kv["ckg_version"],
