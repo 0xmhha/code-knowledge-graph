@@ -15,7 +15,7 @@ import (
 func newBuildCmd() *cobra.Command {
 	var src, out, outTag, atCommit, dbDsn, filesFrom, policyFile, securityPatternFile string
 	var langs []string
-	var noCache, force, rebuildMetrics, strictValidate, lockPropagation bool
+	var noCache, force, rebuildMetrics, strictValidate, lockPropagation, failOnParseErrors bool
 	var temporalDepth int
 	cmd := &cobra.Command{
 		Use:   "build",
@@ -68,6 +68,18 @@ func newBuildCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Surface dropped files: parse failures are skipped during the
+			// build, so a plain success line would misreport a partial graph
+			// as complete. --fail-on-parse-errors turns that into a hard
+			// failure for CI / reproducible builds.
+			if m.ParseErrorsCount > 0 {
+				_, _ = fmt.Fprintf(os.Stderr, "ckg: built %d nodes / %d edges into %s (%d files failed to parse and were skipped)\n",
+					m.Stats["nodes"], m.Stats["edges"], effectiveOut, m.ParseErrorsCount)
+				if failOnParseErrors {
+					return fmt.Errorf("ckg: %d files failed to parse (--fail-on-parse-errors)", m.ParseErrorsCount)
+				}
+				return nil
+			}
 			_, _ = fmt.Fprintf(os.Stderr, "ckg: built %d nodes / %d edges into %s\n",
 				m.Stats["nodes"], m.Stats["edges"], effectiveOut)
 			return nil
@@ -100,6 +112,8 @@ func newBuildCmd() *cobra.Command {
 		"max commits per file the temporal pass walks for changed_in/Hunk/blame edges (0 = default 10; higher deepens commit history at ~linear graph-size cost; does not affect node_prs symbol history)")
 	cmd.Flags().StringVar(&securityPatternFile, "security-pattern-file", "",
 		"path to security risk pattern YAML (pkg/security); enriches the graph with NodeSecurityPattern + EdgeHasSecurityPattern rows")
+	cmd.Flags().BoolVar(&failOnParseErrors, "fail-on-parse-errors", false,
+		"exit non-zero if any source file fails to parse (default: skip the file and report the count); use in CI to reject partial graphs")
 	_ = cmd.MarkFlagRequired("src")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
