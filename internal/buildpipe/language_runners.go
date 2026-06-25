@@ -70,11 +70,30 @@ func parseConcurrent(
 	var errMu sync.Mutex
 	errs := 0
 
+	// Single collector goroutine — owns the result slice and is the only
+	// writer to it (mirrors the persist single-writer contract). It runs
+	// concurrently with the spawn loop so resultCh is drained while parsing:
+	// required because the loop now blocks acquiring `sem`, and a loop that
+	// filled resultCh with no live drainer would deadlock.
+	collected := make(chan []*parse.ParseResult, 1)
+	go func() {
+		var out []*parse.ParseResult
+		for r := range resultCh {
+			out = append(out, r)
+		}
+		collected <- out
+	}()
+
 	for _, rel := range files {
+		// Acquire the worker slot in the parent loop BEFORE spawning, so the
+		// number of live goroutines is bounded by `workers`. The old form
+		// (acquire inside the goroutine) spawned one goroutine per file up
+		// front — hundreds of thousands on a large repo — each parked on the
+		// semaphore, wasting scheduler memory.
+		sem <- struct{}{}
 		wg.Add(1)
 		go func(rel string) {
 			defer wg.Done()
-			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			full := filepath.Join(srcRoot, rel)
@@ -99,23 +118,10 @@ func parseConcurrent(
 		}(rel)
 	}
 
-	// Closer goroutine: waits for all parsers, then closes the result
-	// channel so the collector loop terminates.
-	go func() {
-		wg.Wait()
-		close(resultCh)
-	}()
-
-	// Single collector goroutine — owns the result slice and is the only
-	// writer to it. Mirrors the persist side's single-writer contract.
-	collected := make(chan []*parse.ParseResult, 1)
-	go func() {
-		var out []*parse.ParseResult
-		for r := range resultCh {
-			out = append(out, r)
-		}
-		collected <- out
-	}()
+	// All slots spawned; wait for parsers, close resultCh so the collector
+	// terminates, then take the collected slice.
+	wg.Wait()
+	close(resultCh)
 	results := <-collected
 
 	sort.Slice(results, func(i, j int) bool { return results[i].Path < results[j].Path })
