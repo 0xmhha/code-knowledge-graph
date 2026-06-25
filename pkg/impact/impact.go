@@ -66,6 +66,23 @@ func groups() []group {
 	}
 }
 
+// allImpactEdges is the deduped union of every group's edge filter. The single
+// reverse-neighborhood query uses it so one traversal per seed covers every
+// bucket; the per-group split then happens in memory.
+func allImpactEdges() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, g := range groups() {
+		for _, t := range g.edges {
+			if !seen[t] {
+				seen[t] = true
+				out = append(out, t)
+			}
+		}
+	}
+	return out
+}
+
 // Options bundles the tunable knobs of Compute. Zero values are resolved to
 // documented defaults inside Compute so callers can pass an empty struct
 // for the typical case.
@@ -128,12 +145,13 @@ func Compute(store persist.StoreReader, seedQname, seedFile string, opt Options)
 		return out, nil
 	}
 
-	// Per-group reverse traversal. We walk each group's edge filter
-	// independently so we can attribute reached nodes to their bucket
-	// without inspecting each edge after the fact. That means we pay
-	// len(groups) * traversal cost — for the small graphs CKG targets
-	// (sub-million nodes) this is well under the SQLite cost floor and
-	// keeps bucket attribution unambiguous.
+	// Reverse traversal. Fetch the union reverse-neighborhood once per seed
+	// (all impact edge classes at once), then split the returned subgraph into
+	// buckets by replaying a per-group BFS in memory. Bucket attribution stays
+	// edge-class-exact — a node lands in a bucket only if a path of that class
+	// alone reaches it — but we pay one store traversal per seed instead of one
+	// per (seed, group). The union neighborhood is a superset of every group's,
+	// so the in-memory replay reaches exactly the same nodes and edges.
 	type groupResult struct {
 		nodes []map[string]any
 		count int
@@ -151,33 +169,91 @@ func Compute(store persist.StoreReader, seedQname, seedFile string, opt Options)
 		seedIDs[s.ID] = true
 	}
 
+	// Per-group reached node sets, accumulated across seeds.
+	groupReached := make(map[string]map[string]types.Node, len(groups()))
 	for _, g := range groups() {
-		reached := map[string]types.Node{}
-		for _, seed := range seeds {
-			if seed.QualifiedName == "" {
-				continue
-			}
-			nodes, edges, err := store.NeighborhoodByQname(seed.QualifiedName, depth, true /*reverse*/, g.edges...)
-			if err != nil {
-				return nil, err
-			}
-			for _, n := range nodes {
-				if seedIDs[n.ID] {
-					continue
-				}
-				reached[n.ID] = n
-				dedupNodes[n.ID] = n
-			}
-			for _, e := range edges {
-				k := edgeKey(e)
-				dedupEdges[k] = e
+		groupReached[g.key] = map[string]types.Node{}
+	}
+
+	unionEdges := allImpactEdges()
+	for _, seed := range seeds {
+		if seed.QualifiedName == "" {
+			continue
+		}
+		nbNodes, nbEdges, err := store.NeighborhoodByQname(seed.QualifiedName, depth, true /*reverse*/, unionEdges...)
+		if err != nil {
+			return nil, err
+		}
+		nodeByID := make(map[string]types.Node, len(nbNodes))
+		for _, n := range nbNodes {
+			nodeByID[n.ID] = n
+		}
+		// Reverse adjacency over the returned subgraph: edges keyed by the
+		// node they point to, so a reverse BFS walks src ← dst.
+		inEdges := make(map[string][]types.Edge, len(nbNodes))
+		for _, e := range nbEdges {
+			inEdges[e.Dst] = append(inEdges[e.Dst], e)
+		}
+		// Roots are the nodes the store resolved this qname to (exact qname
+		// match), mirroring NeighborhoodByQname's own FindSymbol seeding.
+		var roots []string
+		for _, n := range nbNodes {
+			if n.QualifiedName == seed.QualifiedName {
+				roots = append(roots, n.ID)
 			}
 		}
 
-		// Sort reached nodes by qname (tiebreak id) BEFORE projecting
-		// into the response shape — Go map iteration is random, and
-		// without this the same seed yields different bucket ordering
-		// across calls, breaking prompt cache reuse.
+		for _, g := range groups() {
+			edgeSet := make(map[string]bool, len(g.edges))
+			for _, t := range g.edges {
+				edgeSet[t] = true
+			}
+			seen := make(map[string]bool, len(roots))
+			frontier := make([]string, 0, len(roots))
+			for _, r := range roots {
+				if !seen[r] {
+					seen[r] = true
+					frontier = append(frontier, r)
+				}
+			}
+			for d := 0; d < depth; d++ {
+				if len(frontier) == 0 {
+					break
+				}
+				var next []string
+				for _, fid := range frontier {
+					for _, e := range inEdges[fid] {
+						if !edgeSet[string(e.Type)] {
+							continue
+						}
+						dedupEdges[edgeKey(e)] = e
+						if !seen[e.Src] {
+							seen[e.Src] = true
+							next = append(next, e.Src)
+						}
+					}
+				}
+				frontier = next
+			}
+			reached := groupReached[g.key]
+			for id := range seen {
+				if seedIDs[id] {
+					continue
+				}
+				if n, ok := nodeByID[id]; ok {
+					reached[id] = n
+					dedupNodes[id] = n
+				}
+			}
+		}
+	}
+
+	for _, g := range groups() {
+		reached := groupReached[g.key]
+		// Sort reached nodes by qname (tiebreak id) BEFORE projecting into the
+		// response shape — Go map iteration is random, and without this the
+		// same seed yields different bucket ordering across calls, breaking
+		// prompt cache reuse.
 		sortedNodes := make([]types.Node, 0, len(reached))
 		for _, n := range reached {
 			sortedNodes = append(sortedNodes, n)
@@ -191,8 +267,7 @@ func Compute(store persist.StoreReader, seedQname, seedFile string, opt Options)
 
 		bucket := make([]map[string]any, 0, len(sortedNodes))
 		for _, n := range sortedNodes {
-			m := nodeToImpactEntry(store, n, opt.IncludeBlobs, &warnings)
-			bucket = append(bucket, m)
+			bucket = append(bucket, nodeToImpactEntry(store, n, opt.IncludeBlobs, &warnings))
 		}
 		groupOut[g.key] = groupResult{nodes: bucket, count: len(bucket)}
 	}
