@@ -680,6 +680,22 @@ func TestFindSymbol_SuffixMatch(t *testing.T) {
 	}
 }
 
+// TestFindSymbol_SuffixMatchCaseInsensitive locks the contract that suffix
+// matching is case-insensitive, as the original leading-wildcard LIKE was.
+// The simple_name equi-join must use COLLATE NOCASE so a lowercase query still
+// hits a CamelCase symbol (e.g. "funcb" → "mypkg.FuncB").
+func TestFindSymbol_SuffixMatchCaseInsensitive(t *testing.T) {
+	s := newFixtureStore(t)
+
+	nodes, err := s.FindSymbol("funcb", false, persist.FindSymbolOptions{})
+	if err != nil {
+		t.Fatalf("FindSymbol case-insensitive suffix: %v", err)
+	}
+	if !containsID(nodeIDs(nodes), "funcB00000000000") {
+		t.Errorf("case-insensitive suffix 'funcb' did not hit mypkg.FuncB: %v", nodeIDs(nodes))
+	}
+}
+
 func TestFindSymbol_WithLanguageFilter(t *testing.T) {
 	s := newFixtureStore(t)
 

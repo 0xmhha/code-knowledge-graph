@@ -41,7 +41,14 @@ CREATE TABLE IF NOT EXISTS nodes (
   -- from name + qualified_name, space-separated. Indexed by nodes_fts so
   -- prefix queries like "deposit*" match "HandleDeposit" via the split
   -- token "deposit". Generated at build time by pkg/bm25.Tokenize.
-  search_tokens  TEXT
+  search_tokens  TEXT,
+  -- simple_name (schema 1.22): the last dotted segment of qualified_name
+  -- (e.g. "Helper" for "edgepin.Helper"), or the whole name when undotted.
+  -- Lets suffix lookups ("Foo" matches "pkg.Foo") use an indexed equi-join
+  -- instead of a leading-wildcard LIKE that cannot use idx_nodes_qname.
+  -- Populated at write time; idx_nodes_simple_name is created by
+  -- ensureSimpleNameColumn. Pre-1.22 DBs are migrated at Open().
+  simple_name    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_qname ON nodes(qualified_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_file  ON nodes(file_path);
