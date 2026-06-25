@@ -61,8 +61,8 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO nodes
 		(id, type, name, qualified_name, canonical_id, file_path, start_line, end_line,
 		 start_byte, end_byte, language, visibility, signature, doc_comment,
-		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind, attrs, search_tokens)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 complexity, in_degree, out_degree, pagerank, usage_score, confidence, sub_kind, attrs, search_tokens, simple_name)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return err
 	}
@@ -74,7 +74,7 @@ func (s *sqliteStore) InsertNodes(nodes []types.Node) error {
 			n.StartLine, n.EndLine, n.StartByte, n.EndByte, n.Language,
 			n.Visibility, n.Signature, n.DocComment, n.Complexity,
 			n.InDegree, n.OutDegree, n.PageRank, n.UsageScore,
-			string(n.Confidence), n.SubKind, attrs, tokens); err != nil {
+			string(n.Confidence), n.SubKind, attrs, tokens, simpleName(n.QualifiedName)); err != nil {
 			return fmt.Errorf("insert node %s: %w", n.ID, err)
 		}
 	}

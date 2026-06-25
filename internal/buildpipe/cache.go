@@ -147,7 +147,13 @@ import (
 // a canonical_id shared by >1 node in the same file is line-qualified with
 // "@<line>" (B3 — minified-JS `function t(){}`, multiple Go `init`). All change
 // stored canonical_id values, so force a cold rebuild.
-const SchemaVersion = "1.21"
+//
+// Bumped from "1.21" to "1.22" by the simple_name column: nodes now store the
+// short name (last dotted segment) so suffix lookups use an indexed equi-join
+// instead of a leading-wildcard LIKE. The column is populated at write time, so
+// pre-1.22 DBs must be rebuilt to fill it graph-wide (read-only opens cannot
+// run the ALTER); the cache-key flip forces that cold rebuild.
+const SchemaVersion = "1.22"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

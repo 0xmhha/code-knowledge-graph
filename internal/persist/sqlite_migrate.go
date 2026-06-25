@@ -57,7 +57,73 @@ func (s *sqliteStore) Migrate() error {
 	if err := ensureCanonicalIDColumn(s.db); err != nil {
 		return fmt.Errorf("migrate canonical_id on nodes: %w", err)
 	}
+	if err := ensureSimpleNameColumn(s.db); err != nil {
+		return fmt.Errorf("migrate simple_name on nodes: %w", err)
+	}
 	return nil
+}
+
+// simpleName returns the last dotted segment of a qualified name (the symbol's
+// short name), or the whole string when undotted. Mirrors simpleName() in
+// internal/parse/golang/resolve.go so suffix lookups match the same candidates
+// the resolver does.
+func simpleName(qname string) string {
+	if i := strings.LastIndex(qname, "."); i >= 0 {
+		return qname[i+1:]
+	}
+	return qname
+}
+
+// ensureSimpleNameColumn ALTER-adds nodes.simple_name on pre-1.22 DBs and
+// ensures its index exists. Idempotent. The column is populated at write time
+// (InsertNodes); existing rows are repopulated by the cold rebuild the
+// SchemaVersion 1.22 bump forces, so no backfill is needed here.
+func ensureSimpleNameColumn(db *sql.DB) error {
+	has, err := columnExists(db, "nodes", "simple_name")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := db.Exec(`ALTER TABLE nodes ADD COLUMN simple_name TEXT`); err != nil {
+			return fmt.Errorf("alter nodes add simple_name: %w", err)
+		}
+	}
+	// COLLATE NOCASE so the index serves the case-insensitive suffix lookups
+	// (the old LIKE was case-insensitive); the equi-joins compare with the
+	// same collation.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_nodes_simple_name ON nodes(simple_name COLLATE NOCASE)`); err != nil {
+		return fmt.Errorf("create idx_nodes_simple_name: %w", err)
+	}
+	return nil
+}
+
+// columnExists reports whether table has a column of the given name.
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, fmt.Errorf("table_info(%s): %w", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, fmt.Errorf("scan table_info: %w", err)
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("iterate table_info: %w", err)
+	}
+	return false, nil
 }
 
 // ensureCanonicalIDColumn ALTER-adds nodes.canonical_id on pre-1.16 DBs.

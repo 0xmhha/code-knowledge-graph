@@ -351,8 +351,11 @@ func (s *sqliteStore) FindSymbol(name string, exact bool, opts FindSymbolOptions
 		q += `AND qualified_name = ? `
 		args = append(args, name)
 	} else {
-		q += `AND (qualified_name = ? OR qualified_name LIKE ?) `
-		args = append(args, name, "%."+name)
+		// simple_name equi-join replaces a leading-wildcard LIKE so the
+		// suffix match ("Foo" hits "pkg.Foo") uses idx_nodes_simple_name.
+		// COLLATE NOCASE preserves the old LIKE's case-insensitivity.
+		q += `AND (qualified_name = ? OR simple_name = ? COLLATE NOCASE) `
+		args = append(args, name, name)
 	}
 	if opts.Language != "" {
 		q += `AND language = ? `
@@ -730,13 +733,15 @@ func (s *sqliteStore) ReverseDepsForFiles(dirtyPaths []string) ([]string, error)
 	allArgs = append(allArgs, dirtyArgs...)
 	// pending_refs.target_qname stores the unresolved AST name (e.g. "Helper"),
 	// while nodes.qualified_name is fully-qualified (e.g. "edgepin.Helper").
-	// The LIKE arm matches the suffix after the last dot — mirrors simpleName()
-	// in resolve.go so C1 finds the same candidates as Pass 2 Resolve does.
+	// The simple_name arm matches the short name (last dotted segment) via an
+	// indexed equi-join — the same candidates the old `LIKE '%.' || target`
+	// found and the resolver's simpleName() uses, but without the leading
+	// wildcard that defeated the index.
 	q := `SELECT DISTINCT pr.file_path
 	      FROM pending_refs pr
 	      INNER JOIN nodes n ON (
 	          n.qualified_name = pr.target_qname
-	          OR n.qualified_name LIKE ('%.' || pr.target_qname)
+	          OR n.simple_name = pr.target_qname COLLATE NOCASE
 	      )
 	      WHERE n.file_path IN (` + ph + `)
 	        AND pr.file_path NOT IN (` + ph + `)`
