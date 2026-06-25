@@ -39,7 +39,12 @@ type sqliteStore struct {
 // setting them once via Migrate() would not propagate to other pooled connections,
 // leaving FK constraints unenforced and WAL inactive on most queries.
 func Open(path string) (*sqliteStore, error) {
-	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)"
+	// busy_timeout makes a contended connection wait instead of failing
+	// immediately with SQLITE_BUSY (concurrent build writers + readers on WAL).
+	// synchronous=NORMAL is the recommended durability level under WAL: safe
+	// across app crashes, only a power loss can lose the last commit — an
+	// acceptable trade for a rebuildable graph, and a meaningful write speedup.
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite at %s: %w", path, err)
@@ -48,10 +53,11 @@ func Open(path string) (*sqliteStore, error) {
 }
 
 // OpenReadOnly opens a SQLite file in read-only mode (used by serve/mcp).
-// FK pragma is enforced per-connection via DSN; WAL is omitted because read-only
-// mode cannot mutate journal state.
+// FK pragma is enforced per-connection via DSN; WAL/synchronous are omitted
+// because read-only mode cannot mutate journal state. busy_timeout still
+// helps a reader wait out a concurrent checkpoint instead of erroring.
 func OpenReadOnly(path string) (*sqliteStore, error) {
-	dsn := path + "?mode=ro&immutable=1&_pragma=foreign_keys(1)"
+	dsn := path + "?mode=ro&immutable=1&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite ro at %s: %w", path, err)

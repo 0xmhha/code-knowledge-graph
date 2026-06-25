@@ -90,12 +90,6 @@ CREATE INDEX IF NOT EXISTS idx_nodes_name_trgm  ON nodes USING GIN (name  gin_tr
 CREATE INDEX IF NOT EXISTS idx_nodes_qname_trgm ON nodes USING GIN (qname gin_trgm_ops);
 `
 
-// knownLanguages is the set of language tags the CKG schema currently
-// recognises. Used by loadAllNodes to enumerate all distinct file paths
-// without a language-neutral "SELECT DISTINCT file_path FROM nodes" that
-// the StoreReader interface does not expose.
-var knownLanguages = []string{"go", "ts", "sol"}
-
 // DSNHost extracts the host portion of a PostgreSQL DSN for safe logging
 // (avoids printing credentials in log output). It handles both URL format
 // (postgres://user:pass@host/db) and key=value format (host=localhost dbname=mydb).
@@ -182,62 +176,20 @@ func applySchema(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) erro
 	return nil
 }
 
-// loadAllNodes fetches every node from the SQLite store.
+// loadAllNodes fetches every node from the SQLite store in a single scan.
 //
-// Strategy: DistinctFilePaths requires a language filter, so we call it once
-// per known language and union the results. This is correct and avoids the two
-// bugs in the old two-pass approach:
-//   - Pass 1 used QueryNodes("", 0) which SQLite interprets as LIMIT 0 (zero rows).
-//   - Pass 2 used DistinctFilePaths("") which only returns rows with language=”.
-//
-// Package nodes always have a file_path in the SQLite schema (schema.sql line 11),
-// so they are covered by the NodesByFilePath scan and Pass 1 is unnecessary.
+// Earlier this iterated DistinctFilePaths × NodesByFilePath per known
+// language — an N+1 over every file, and one that silently dropped nodes in
+// languages outside the hardcoded set (e.g. proto). AllNodes is one table
+// scan and returns the complete set.
 func loadAllNodes(store StoreReader) ([]types.Node, error) {
-	seen := make(map[string]struct{})
-	var out []types.Node
-
-	for _, lang := range knownLanguages {
-		paths, err := store.DistinctFilePaths(lang)
-		if err != nil {
-			return nil, fmt.Errorf("list distinct file paths (lang=%q): %w", lang, err)
-		}
-		for _, fp := range paths {
-			nodes, err := store.NodesByFilePath(fp)
-			if err != nil {
-				return nil, fmt.Errorf("nodes for file %s: %w", fp, err)
-			}
-			for _, n := range nodes {
-				if _, dup := seen[n.ID]; !dup {
-					seen[n.ID] = struct{}{}
-					out = append(out, n)
-				}
-			}
-		}
-	}
-	return out, nil
+	return store.AllNodes()
 }
 
-// loadAllEdges fetches every edge from the SQLite store by iterating over
-// all known EdgeType values. Duplicate IDs are deduped (each edge type
-// returns a disjoint set, so in practice dedup is a no-op; it is retained
-// for safety in case future types alias underlying rows).
+// loadAllEdges fetches every edge from the SQLite store in a single scan.
+// Earlier this issued one query per EdgeType; AllEdges is one scan.
 func loadAllEdges(store StoreReader) ([]types.Edge, error) {
-	seen := make(map[int64]struct{})
-	var out []types.Edge
-
-	for _, et := range types.AllEdgeTypes() {
-		edges, err := store.QueryEdgesByType(string(et))
-		if err != nil {
-			return nil, fmt.Errorf("query edges type %s: %w", et, err)
-		}
-		for _, e := range edges {
-			if _, dup := seen[e.ID]; !dup {
-				seen[e.ID] = struct{}{}
-				out = append(out, e)
-			}
-		}
-	}
-	return out, nil
+	return store.AllEdges()
 }
 
 // insertNodes bulk-copies nodes to PostgreSQL using the COPY protocol.
