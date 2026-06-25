@@ -25,7 +25,7 @@ jobs:
       GOOS:   ${{ matrix.goos }}
       GOARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version: '1.25.11' }
       - run: go vet ./...
@@ -53,7 +53,7 @@ jobs:
     # does not apply here.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
@@ -78,7 +78,7 @@ jobs:
     # does not apply here.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
@@ -93,7 +93,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version: '1.25.11' }
       - uses: actions/setup-node@v4
@@ -126,7 +126,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with: { go-version: '1.25.11' }
       - run: make eval
