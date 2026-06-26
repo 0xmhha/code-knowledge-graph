@@ -17,6 +17,7 @@ import (
 // consumes it in-process; this file is the MCP request envelope only (the
 // dev-only ckg server, 00 §7), mirroring RegisterImpactOfChange.
 func RegisterConcurrencyImpact(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("concurrency_impact",
 		mcp.WithDescription(
 			"Concurrency blast radius for a symbol: modules that affect or are affected by it via "+

@@ -19,11 +19,23 @@ type llmSafeReader struct {
 }
 
 // NewLLMSafeReader wraps r so AMBIGUOUS Hunk/Commit nodes are
-// stripped from every read result. [RegisterAll] applies this
-// wrapper for the full tool set; callers that mount individual
-// Register* functions should wrap their reader themselves to
-// preserve the §11.3 H3 boundary across the whole tool set.
+// stripped from every read result. Every Register* handler applies this
+// boundary itself via [safeReader], so the §11.3 H3 boundary holds no
+// matter how tools are mounted; this constructor stays exported for
+// callers that want the wrapped reader for their own use.
 func NewLLMSafeReader(r store.Reader) store.Reader {
+	return &llmSafeReader{Reader: r}
+}
+
+// safeReader returns r wrapped in the §11.3 H3 boundary, idempotently: a
+// reader that is already wrapped is returned unchanged, so handlers can wrap
+// unconditionally without double-filtering when RegisterAll (or a caller)
+// already wrapped. This makes the boundary enforced by construction rather
+// than an opt-in each individual Register* caller must remember.
+func safeReader(r store.Reader) store.Reader {
+	if _, ok := r.(*llmSafeReader); ok {
+		return r
+	}
 	return &llmSafeReader{Reader: r}
 }
 

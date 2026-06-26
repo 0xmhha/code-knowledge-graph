@@ -345,3 +345,25 @@ func (f *fakeStore) GetBlob(id string) ([]byte, error) {
 	}
 	return nil, sql.ErrNoRows
 }
+
+// TestSafeReader_Idempotent locks the enforcement mechanism: every Register*
+// wraps its reader via safeReader, so the wrap must (1) apply the §11.3
+// boundary to a raw reader and (2) be a no-op on an already-wrapped reader so
+// RegisterAll's chained calls don't double-filter.
+func TestSafeReader_Idempotent(t *testing.T) {
+	raw := &fakeStore{}
+
+	wrapped := safeReader(raw)
+	if _, ok := wrapped.(*llmSafeReader); !ok {
+		t.Fatalf("safeReader(raw) must wrap; got %T", wrapped)
+	}
+	if again := safeReader(wrapped); again != wrapped {
+		t.Errorf("safeReader must be idempotent on an already-wrapped reader")
+	}
+	// NewLLMSafeReader output is also recognized as already-wrapped.
+	if again := safeReader(NewLLMSafeReader(raw)); again == nil {
+		t.Error("safeReader(NewLLMSafeReader(...)) returned nil")
+	} else if _, ok := again.(*llmSafeReader); !ok {
+		t.Errorf("expected *llmSafeReader, got %T", again)
+	}
+}

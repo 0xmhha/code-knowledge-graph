@@ -19,6 +19,7 @@ import (
 // match). The schema spells that contract out so LLM agents don't
 // false-empty on `{"name":"NewBlockChain","exact":true}`.
 func RegisterFindSymbol(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("find_symbol",
 		mcp.WithDescription("Find symbols by qualified_name. With exact=true (default), the input must match qualified_name exactly (e.g. \"core.NewBlockChain\"). With exact=false, the input is treated as a suffix — a bare symbol name (\"NewBlockChain\") matches every qualified_name ending in that segment. Use exact=false when you only know the symbol's short name."),
 		mcp.WithString("name", mcp.Required()),
@@ -45,6 +46,7 @@ func RegisterFindSymbol(s *server.MCPServer, reader store.Reader) {
 // depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the
 // latency justification.
 func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("find_callers",
 		mcp.WithDescription("Functions that call the symbol (reverse call graph). qname may be a full qualified_name (\"core.NewBlockChain\") or a bare short name (\"NewBlockChain\") — a bare name is resolved by suffix, and an ambiguous bare name returns its candidate qnames instead of an empty result. Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
@@ -80,6 +82,7 @@ func RegisterFindCallers(s *server.MCPServer, reader store.Reader) {
 // RegisterFindCallees walks the forward call graph from the seed.
 // Same edge-type filter as RegisterFindCallers for symmetry.
 func RegisterFindCallees(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("find_callees",
 		mcp.WithDescription("Functions called by the symbol (forward call graph). qname may be a full qualified_name or a bare short name (resolved by suffix; an ambiguous bare name returns candidate qnames instead of an empty result). Filters to calls/invokes edges only. Default depth=2 — see docs/ckg5-depth-sweep-report-2026-05-20.md for the latency justification."),
 		mcp.WithString("qname", mcp.Required()),
@@ -113,6 +116,7 @@ func RegisterFindCallees(s *server.MCPServer, reader store.Reader) {
 // at qname. Unlike find_callers / find_callees this DOES follow every
 // edge type — the caller asked for a neighbourhood, not a call graph.
 func RegisterGetSubgraph(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("get_subgraph",
 		mcp.WithDescription("Subgraph rooted at qname, expanded by depth (both directions). seed_qname may be a full qualified_name or a bare short name (resolved by suffix; an ambiguous bare name returns candidate qnames instead of an empty result)."),
 		mcp.WithString("seed_qname", mcp.Required()),
@@ -163,6 +167,7 @@ func RegisterGetSubgraph(s *server.MCPServer, reader store.Reader) {
 // produced by types.AllNodeTypes — to disable the default narrowing
 // and surface every FTS match.
 func RegisterSearchText(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("search_text",
 		mcp.WithDescription("Full-text search over name + qualified_name + signature + doc_comment. Auto-prefix on short ASCII queries; substring fallback on CJK input. mode=\"or\" (default) ORs multi-token queries; mode=\"and\" requires every token to appear in each hit's indexed columns. language filters the result set to a single source language (go|ts|sol). node_kinds is an optional whitelist of node types; omit it to apply the default symbol-only filter (statement / Commit / Hunk / Import / Export rows are stripped because their FTS hits are typically noise from the enclosing symbol's qname prefix)."),
 		mcp.WithString("query", mcp.Required()),

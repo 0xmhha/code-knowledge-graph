@@ -21,6 +21,7 @@ import (
 // get_context_for_task and the eval δ baseline). This file is the
 // MCP request envelope only.
 func RegisterImpactOfChange(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("impact_of_change",
 		mcp.WithDescription(
 			"Reverse-dependency closure for a symbol or file. Returns nodes/edges grouped by impact category "+

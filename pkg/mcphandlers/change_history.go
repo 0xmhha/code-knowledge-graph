@@ -19,6 +19,7 @@ const defaultChangeHistoryK = 20
 // (Reader.GetNodePRs) over MCP so an agent can answer "when/why did this code
 // change" from a single HEAD graph — no pre-fix re-index or git fallback.
 func RegisterChangeHistory(s *server.MCPServer, reader store.Reader) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("change_history",
 		mcp.WithDescription(
 			"PR history for a symbol: the merged pull requests (number, title, summary, merged_at) that changed it, newest first. "+

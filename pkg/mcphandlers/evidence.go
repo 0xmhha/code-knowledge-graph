@@ -36,6 +36,7 @@ import (
 //     wrapper, the EvidencePack assembler still hides the
 //     unreachable-history track from LLM consumers.
 func RegisterEvidenceForIntent(s *server.MCPServer, reader store.Reader, cache *evidence.Cache) {
+	reader = safeReader(reader) // enforce the §11.3 H3 boundary regardless of caller
 	tool := mcp.NewTool("evidence_for_intent",
 		mcp.WithDescription("EvidencePack: BM25-rank past commit hunks against an intent, return top-K with patches + modifies neighbours. Filters AMBIGUOUS unreachable-history per §11.3."),
 		mcp.WithString("intent",
