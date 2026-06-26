@@ -116,6 +116,21 @@ func (f *fakeMCPEvidenceStore) GetBlob(id string) ([]byte, error) {
 	return f.blobs[id], nil
 }
 
+// NodesByIDs backs the llmSafeReader.GetBlob backstop, which the handler now
+// routes through (every Register* wraps its reader). Returns the matching
+// seeded nodes so the safety filter can classify them.
+func (f *fakeMCPEvidenceStore) NodesByIDs(ids []string) ([]types.Node, error) {
+	var out []types.Node
+	for _, id := range ids {
+		for _, n := range f.nodes {
+			if n.ID == id {
+				out = append(out, n)
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeMCPEvidenceStore) GetManifest() (persist.Manifest, error) {
 	return persist.Manifest{BuildTimestamp: "test", SrcCommit: "test"}, nil
 }
