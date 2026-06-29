@@ -111,9 +111,14 @@ in item-5 validation).**
   leading `proto:` from the qname, so ids read `<relpath>:<pkg>.<Sym>`. Schema
   1.20 → 1.21. Test: `TestCanonicalID_NoDoubleProtoPrefix`.
 
-**Tier C — deferred decision.**
-- **C1 — item 7**: implement Postgres `canonical_id` parity *or* write an ADR to
-  deprecate the Postgres backend (sqlite is the de-facto only target). See item 7.
+**Tier C — RESOLVED (2026-06-29).**
+- **C1 — item 7**: ✅ **decided — deprecate the Postgres backend**
+  ([ADR-0003](adr/0003-deprecate-postgres-backend.md)). Postgres is opt-in
+  (`--db <DSN>`), unused, CI-untested, and already lags the SQLite schema
+  (`canonical_id` + `simple_name` both absent). No `canonical_id` parity will be
+  implemented; sqlite is the sole maintained backend. The `pgStore.FindByCanonicalID`
+  stub + missing columns are accepted deprecated-backend gaps, not bugs. Removal
+  is a separate later decision per the ADR.
 
 Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 tooling ✅ → B2/B3/B4 ✅ → A1-3b loc-classify ✅ (def-uniqueness + 17 review anchors = data follow-up) → C1 (next).**
 
@@ -170,10 +175,13 @@ Execution: **B1 ✅ → A2 ✅ → A1 core ✅ → A1-3 tooling ✅ → B2/B3/B4
    interface-vs-concrete), `TestCanonicalID_SolidityOverloads`, and
    `TestFindByCanonicalID` + the `TestResolveSeed` canonical subtest. Solidity
    golden snapshots also lock canonical_id.
-7. ❌ **Postgres `canonical_id` parity** (newly found): the Postgres schema and
-   `pgNodeColumns` carry no `canonical_id` column — PR #21 added it to sqlite
-   only. `pgStore.FindByCanonicalID` is a documented not-found stub. Add the
-   column + writer/reader round-trip for Postgres-backed graphs.
+7. ✅ **Postgres `canonical_id` parity — WON'T DO (deprecated).** The Postgres
+   schema / `pgNodeColumns` carry no `canonical_id` column and
+   `pgStore.FindByCanonicalID` is a not-found stub. **Decision
+   ([ADR-0003](adr/0003-deprecate-postgres-backend.md), 2026-06-29):** the
+   Postgres backend is deprecated (opt-in, unused, CI-untested, already lagging
+   the SQLite schema) — sqlite is the sole maintained backend, so no parity is
+   added. The stub + missing columns are accepted deprecated-backend gaps.
 
 ### Validation results (item 5, go-stablenet reindex, 2026-06-19)
 
