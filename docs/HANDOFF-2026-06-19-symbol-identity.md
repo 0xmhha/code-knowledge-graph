@@ -32,7 +32,9 @@ Verification used two more local repos (NOT part of the system):
 
 ## 3. Status — DONE & MERGED (per repo)
 
-**ckg** (cache `SchemaVersion` now **1.21**, in `internal/buildpipe/cache.go`):
+**ckg** (cache `SchemaVersion` was **1.21** at this handoff; now **1.22** —
+PR #31's `simple_name` suffix-lookup column bumped it, unrelated to canonical_id —
+in `internal/buildpipe/cache.go`):
 - Phase 1: `canonical_id` for all parsers — Go (all node kinds), Solidity
   (`<relpath>:<Contract>.<func>(<paramTypes>)`, param sig separates overloads),
   TypeScript/proto (`<relpath>:<qname>`). PRs #21,#23,#24.
@@ -142,7 +144,8 @@ chainbench stop
   but unique in its file is fine). 0 errors / 6 warnings is the expected baseline.
 - **Two SchemaVersion constants** in ckg — `buildpipe/cache.go` (cache key / forces
   reindex) vs `persist/manifest.go` (back-compat). canonical_id work bumps the
-  cache one. Currently 1.21.
+  cache one. Was 1.21 for the canonical_id work (B2/B3/B4); now **1.22** after
+  PR #31 added the `simple_name` column (a perf change, not canonical_id).
 - Build via `make`; `go build ./cmd/...` without `-o` drops a binary in the repo
   root (a stray `/ckg` was gitignored to prevent committing it).
 

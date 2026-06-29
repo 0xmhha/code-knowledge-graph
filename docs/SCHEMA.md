@@ -1,6 +1,6 @@
 # CKG Schema (V0)
 
-Schema version: **1.21**.
+Schema version: **1.22**.
 
 > **Authoritative source of truth (single source).** The machine-readable
 > node/edge type lists and their exact counts live in `pkg/types/enums.go`
@@ -42,8 +42,10 @@ file path as qualifier (Solidity adds a `(paramTypes)` signature for overloads).
 Refinement B1 (1.19 → 1.20) stops emitting `canonical_id` for the blank
 identifier `_`; B2 + B4 + B3 (1.20 → 1.21) skip `canonical_id` for function-local `var`s (only
 package-level const/var get one), drop proto's doubled `proto:` prefix, and
-line-qualify (`@<line>`) any canonical_id shared by >1 node in one file. Full per-bump rationale:
-`internal/buildpipe/cache.go`.
+line-qualify (`@<line>`) any canonical_id shared by >1 node in one file. PR #31
+(1.21 → 1.22) added the `nodes.simple_name` column (short last-segment name) so
+suffix lookups use an indexed equi-join instead of a leading-wildcard LIKE.
+Full per-bump rationale: `internal/buildpipe/cache.go`.
 
 ## Node types (37)
 
