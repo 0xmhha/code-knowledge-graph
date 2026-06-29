@@ -67,6 +67,12 @@ repopulate canonical_id graph-wide"). CKV의 PRAGMA 컬럼-존재 probe는 1.16~
 2. ~~D4: `search_tokens` 확장~~ → **종결(코드 확인).** signature·doc_comment는 이미 `nodes_fts`
    5컬럼 인덱싱으로 키워드 corpus에 포함(PR #40 입증). 추가 작업 불요 — 위 Q4 정정 참조.
 3. integration fixture를 양측 합의로 추가(≥1.19 게이트 + `@<line>` 중복 케이스 포함).
+   - **CKG 半 완료(2026-06-29):** `TestCanonicalID_IntegrationContract_DeterministicAndAlignable`
+     (`internal/parse/golang/canonical_integration_test.go`)가 join 계약의 CKG 쪽을 잠근다 —
+     (a) **결정성**: 동일 소스 재빌드 시 canonical_id가 qname·(file,line) 양쪽으로 동일,
+     (b) **정렬 전제조건**: canonical_id 보유 노드는 모두 ckgalign이 쓰는 (FilePath,StartLine,
+     EndLine) 위치를 동반. `@<line>` 중복은 기존 `TestLineQualifyDuplicateCanonicalIDs`(buildpipe)가,
+     ≥1.19 게이트는 CKV `hasPopulatedCanonical`가 담당. **CKV 半(청크가 동일 id 상속 단언)은 CKV 세션 소관.**
 
 ## coding-agent D-1~D-5 결정 (2026-06-29)
 
