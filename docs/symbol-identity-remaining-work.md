@@ -79,6 +79,16 @@ downstream *consumes* it). Separate repos / sessions.**
   `canonical_id` (column-probed for old graphs) onto `types.Chunk` + `query.Hit`,
   persisted in the sqlitevec store; embed text unchanged so no re-embed. The
   compatibility key is inherited from ckg's graph.db, not recomputed.
+  - **Coordination (2026-06-29, [coordination-response-ckg-2026-06-29.md](coordination-response-ckg-2026-06-29.md)):**
+    agreed the CKG↔CKV **join key = `canonical_id`** (no separate B7 normalization;
+    ckv inherits the ADR-0001 format byte-for-byte; non-symbol nodes fall back to
+    node ID). ⚠️ **Population gate is cache `SchemaVersion >= 1.19`, not the
+    SQL-column-appearance 1.16** — a PRAGMA column-probe passes on 1.16–1.18 graphs
+    but the values are NULL (`cache.go`: "pre-1.19 DBs carry it empty"). ckv's
+    coordination doc was corrected to gate on `>= 1.19` / current schema (1.22).
+    CKG action items: reindex go-stablenet at 1.22 for the ≥90% match-rate
+    measurement; confirm/extend `search_tokens` (qname+signature+doc-comment) for
+    D4; add a shared integration fixture (≥1.19 gate + `@<line>` dup cases).
 
 **Tier B — ckg quality (this repo; shrinks the residual ~4% non-uniqueness found
 in item-5 validation).**
