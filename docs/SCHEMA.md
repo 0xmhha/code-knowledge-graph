@@ -1,6 +1,6 @@
 # CKG Schema (V0)
 
-Schema version: **1.22**.
+Schema version: **1.23**.
 
 > **Authoritative source of truth (single source).** The machine-readable
 > node/edge type lists and their exact counts live in `pkg/types/enums.go`
@@ -45,6 +45,9 @@ package-level const/var get one), drop proto's doubled `proto:` prefix, and
 line-qualify (`@<line>`) any canonical_id shared by >1 node in one file. PR #31
 (1.21 → 1.22) added the `nodes.simple_name` column (short last-segment name) so
 suffix lookups use an indexed equi-join instead of a leading-wildcard LIKE.
+ADR-0002 (1.22 → 1.23) gives primary (non-test-variant) Go packages deterministic
+ownership of production files in `buildFileIndex` (was order-dependent first-seen-wins;
+~17.5% of production files landed on a test variant), making the graph reproducible.
 Full per-bump rationale: `internal/buildpipe/cache.go`.
 
 ## Node types (37)

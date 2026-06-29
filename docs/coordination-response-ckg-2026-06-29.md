@@ -46,9 +46,12 @@ repopulate canonical_id graph-wide"). CKV의 PRAGMA 컬럼-존재 probe는 1.16~
 - **소유권 확인 ✅.** CKG가 BM25 소유: `pkg/bm25`(Okapi+tokenizer) + FTS5 인덱스
   (`internal/persist/sqlite_fts.go`) + evidence/hunk corpus(`pkg/evidence`). ADR-003의
   "BM25=CKG / CKV=vector-only / CKS=RRF"와 일치.
-- 노드는 이미 `Signature`·`DocComment` 보유(`pkg/types/node.go`). qname+signature+
-  doc-comment를 FTS 토큰 corpus에 접는 D4 확장 실현 가능 — 현재 `search_tokens` 커버리지
-  확인 후 확장이 CKG deliverable.
+- ⚠️ **정정(코드 확인 2026-06-29): D4 핵심 목표 이미 충족 — 코드 변경 없이 종결.** `nodes_fts`
+  FTS5(`schema.sql`)가 `name, qualified_name, signature, doc_comment, search_tokens` 5컬럼 전부
+  인덱싱(`rebuild`로 채움, `sqlite_writer.go`). signature·doc_comment는 이미 키워드 corpus 포함 —
+  PR #40 메시지 "its signature is FTS-indexed"가 입증(R06 'vault'). `search_tokens`는 name/qname
+  split 토큰 전용. 남은 micro-gap(signature/doc 내부 식별자 sub-word split)은 precision 리스크
+  대비 이득 낮아 fixture로 필요 입증 전까지 보류(YAGNI).
 
 ## 협의 결정 (CKG 측)
 - **매칭률 ≥90% 실측: 동의.** 대상 = go-stablenet(검증 코퍼스). 측정 그래프는 현재
@@ -61,7 +64,8 @@ repopulate canonical_id graph-wide"). CKV의 PRAGMA 컬럼-존재 probe는 1.16~
 ## 후속 (CKG action items)
 1. go-stablenet을 **`0bf2f4d1b`(PR-77 버그-부모)** 커밋 + 현재 스키마(1.22)로 재빌드 →
    graph.db 경로/sha/manifest schema_version를 CKV·CKS·coding-agent에 공유(D-1/D-2).
-2. D4: `search_tokens`가 qname+signature+doc-comment를 덮는지 확인, 미달 시 확장.
+2. ~~D4: `search_tokens` 확장~~ → **종결(코드 확인).** signature·doc_comment는 이미 `nodes_fts`
+   5컬럼 인덱싱으로 키워드 corpus에 포함(PR #40 입증). 추가 작업 불요 — 위 Q4 정정 참조.
 3. integration fixture를 양측 합의로 추가(≥1.19 게이트 + `@<line>` 중복 케이스 포함).
 
 ## coding-agent D-1~D-5 결정 (2026-06-29)
@@ -100,3 +104,28 @@ coding-agent §3-R(`coding-agent/docs/coordination-response-coding-agent-2026-06
   CKG graph.db는 임베딩 비의존 → 단일 그래프가 A·B 공통 서비스. CKG는 1회 빌드 + sha 공표.
 - **비전 R1/R2 (§6-2):** R1(차원)은 CKG 비의존. R2(flow/invariant cks 노출)는 CKG가 데이터
   제공·노출은 cks 소관 → post-Phase-2 defer 금지 가드레일 동의.
+
+## 정본 측정 그래프 공표 (D-1/D-2, 2026-06-29)
+
+CKG가 단독 생산한 정본 graph.db. CKV 정렬 / CKS config / coding-agent PR-77 A/B는
+**모두 이 산출물 하나**를 가리킨다(독자 재빌드 금지).
+
+```
+path:    /tmp/ckg-eval/stablenet-0bf2f4d1bfeb/graph.db   (동일 머신의 sibling 세션 기준)
+commit:  0bf2f4d1b   (PR-77 버그-부모, go-stablenet/test/pr-77 양쪽 존재)
+build:   ckg build --at-commit=0bf2f4d1b --lang=auto      (git worktree, untracked .claude 등 자동 배제)
+schema_version (manifest): 1.23                           (>= 1.19 → canonical_id 완전 채움)
+sha256(graph.db): 16ee6fb70b7391b1dcf792c58cbcef78b7584dd90e092fe349eeac51222c9f78
+nodes / edges:    245,272 / 1,964,326
+```
+
+**재현성:** 이 그래프는 **ADR-0002(staged composition, schema 1.23)** 적용본이다 —
+production 파일의 패키지 소유권이 결정적(test-variant 비의존)이라, 동일 커밋·동일
+바이너리로 재빌드하면 동일 그래프가 나온다.
+
+**매칭률 분모 스코프 (3자 합의 반영):** 공유언어(go/sol/ts/js)의 canonical_id 보유 심볼
+노드만 분모. 제외 대상:
+- **proto** 심볼(~409): CKV 미파싱(설계상 대응 청크 없음).
+- **promoted/synthetic 메서드**(~915, `doc_comment="promoted from …"`): embedded-field 승격
+  합성 노드로 canonical_id가 설계상 비어있음(진짜 메서드는 declaring 타입에 있고 거기 canonical_id 보유).
+  CKV에도 대응 청크 없음 → proto와 동일 논리로 분모 제외.

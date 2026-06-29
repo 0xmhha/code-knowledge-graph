@@ -153,7 +153,17 @@ import (
 // instead of a leading-wildcard LIKE. The column is populated at write time, so
 // pre-1.22 DBs must be rebuilt to fill it graph-wide (read-only opens cannot
 // run the ALTER); the cache-key flip forces that cold rebuild.
-const SchemaVersion = "1.22"
+//
+// Bumped from "1.22" to "1.23" by ADR-0002 (staged graph composition): the Go
+// loader's buildFileIndex now gives primary (non-test-variant) packages
+// deterministic ownership of production files, instead of order-dependent
+// first-seen-wins. ~17.5% of production files previously landed on a test
+// variant (whose TypesInfo also feeds the concurrency / field-touch passes),
+// making which package resolved them depend on packages.Load's unguaranteed
+// order. A cold rebuild pins them to the primary package deterministically.
+// (This does not change canonical_id values — test variants share the import
+// path; it removes a latent non-reproducibility in resolution context.)
+const SchemaVersion = "1.23"
 
 // fileClass classifies one source file against the previous manifest.
 type fileClass int

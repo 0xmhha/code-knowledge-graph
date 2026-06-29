@@ -50,3 +50,4 @@ Briefly, and why rejected.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](0001-canonical-symbol-id.md) | Canonical symbol identity (`canonical_id`) | Accepted |
+| [0002](0002-staged-graph-composition.md) | Staged graph composition — deterministic production core + test overlay | Accepted |
