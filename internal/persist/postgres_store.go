@@ -20,6 +20,10 @@ import (
 // All methods use the pgxpool.Pool for connection pooling. The pool is safe for
 // concurrent use; no external locking is required.
 //
+// Deprecated: the PostgreSQL backend is deprecated (ADR-0003). SQLite is the sole
+// maintained backend; pgStore is kept compiling but not at schema/feature parity
+// (e.g. no canonical_id / simple_name columns). Do not extend it.
+//
 // ro marks stores opened via OpenPostgresReadOnly. Write methods panic when ro
 // is true so that read-only callers can't accidentally mutate the graph.
 type pgStore struct {

@@ -69,6 +69,8 @@ Tier 1 wins.
 |---|---|
 | [adr/README.md](adr/README.md) | ADR index + template. One decision = one file; supersede, don't delete. |
 | [adr/0001-canonical-symbol-id.md](adr/0001-canonical-symbol-id.md) | Canonical symbol identity (`canonical_id`) decision — Accepted |
+| [adr/0002-staged-graph-composition.md](adr/0002-staged-graph-composition.md) | Staged graph composition: deterministic production core + test overlay (fixes test-variant pollution) — Accepted |
+| [adr/0003-deprecate-postgres-backend.md](adr/0003-deprecate-postgres-backend.md) | Deprecate the PostgreSQL backend; SQLite is the sole maintained target (closes symbol-identity item 7) — Accepted |
 
 ## Archive
 

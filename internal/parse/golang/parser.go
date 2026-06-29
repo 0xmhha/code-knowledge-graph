@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/tools/go/packages"
@@ -92,27 +93,52 @@ func (p *Parser) SetPackages(pkgs []*packages.Package) {
 // is the live value — callers must not mutate it.
 func (p *Parser) Pkgs() []*packages.Package { return p.pkgs }
 
-// buildFileIndex flattens a slice of packages into one (path → typedFile)
-// map. When the same file appears in multiple package variants (base + test),
-// the first-seen entry wins (tests carry the same TypesInfo for shared
-// production files; the differentiating data is in the test-only files).
+// isTestVariantPkg reports whether pkg is a go/packages test variant rather
+// than a primary build package. With Tests:true, packages.Load returns, for a
+// package P, both P (the `make gstable`/`go build` compile set) and the test
+// variants P [P.test] (re-includes P's production files plus its internal
+// _test.go), P_test [P.test] (external test files), and a synthesized P.test
+// main. The variant IDs carry `.test]` or a trailing `.test`; the primary's ID
+// does not. See ADR-0002.
+func isTestVariantPkg(pkg *packages.Package) bool {
+	return strings.Contains(pkg.ID, ".test]") || strings.HasSuffix(pkg.ID, ".test")
+}
+
+// buildFileIndex flattens a slice of packages into one (path → typedFile) map
+// with DETERMINISTIC, order-independent ownership (ADR-0002). The previous
+// first-seen-wins dedup let packages.Load's unstable order decide which variant
+// owned a shared production file — measured at 17.5% of production files landing
+// on a test variant, which resolves their symbols under the wrong package
+// context (unstable/empty canonical_id).
+//
+// Stage 1: primary (non-test-variant) packages own every production file. Stage
+// 2: test variants then fill only files no primary package compiled — i.e. the
+// _test.go files — preserving test code as few-shot context without overriding
+// the production core.
 func buildFileIndex(pkgs []*packages.Package) map[string]typedFile {
 	idx := map[string]typedFile{}
-	for _, pkg := range pkgs {
-		if pkg == nil || pkg.TypesInfo == nil || pkg.Fset == nil {
-			continue
-		}
-		for i, f := range pkg.Syntax {
-			if f == nil || i >= len(pkg.CompiledGoFiles) {
+	add := func(wantTestVariant bool) {
+		for _, pkg := range pkgs {
+			if pkg == nil || pkg.TypesInfo == nil || pkg.Fset == nil {
 				continue
 			}
-			path := pkg.CompiledGoFiles[i]
-			if _, exists := idx[path]; exists {
+			if isTestVariantPkg(pkg) != wantTestVariant {
 				continue
 			}
-			idx[path] = typedFile{info: pkg.TypesInfo, file: f, fset: pkg.Fset}
+			for i, f := range pkg.Syntax {
+				if f == nil || i >= len(pkg.CompiledGoFiles) {
+					continue
+				}
+				path := pkg.CompiledGoFiles[i]
+				if _, exists := idx[path]; exists {
+					continue
+				}
+				idx[path] = typedFile{info: pkg.TypesInfo, file: f, fset: pkg.Fset}
+			}
 		}
 	}
+	add(false) // primary packages own production files
+	add(true)  // test variants fill only the remaining _test.go files
 	return idx
 }
 

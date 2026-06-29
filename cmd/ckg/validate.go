@@ -103,7 +103,7 @@ Exit codes:
 		},
 	}
 	cmd.Flags().StringVar(&graphDir, "graph", "", "graph directory containing graph.db (required when --db is empty)")
-	cmd.Flags().StringVar(&dbDsn, "db", "", "PostgreSQL DSN; takes precedence over --graph when set")
+	cmd.Flags().StringVar(&dbDsn, "db", "", "PostgreSQL DSN; takes precedence over --graph when set. DEPRECATED (ADR-0003): SQLite is the sole maintained backend")
 	cmd.Flags().StringVar(&format, "format", "text", "output format: text|json")
 	cmd.Flags().BoolVar(&useLLM, "llm", false, "run the LLMValidator (V0 dry-run: emits LLM-ready prompts; V1+ wires real LLM calls)")
 	cmd.Flags().BoolVar(&llmDryRun, "llm-dry-run", true, "in --llm mode, emit prompts instead of calling an LLM (default true; --llm-dry-run=false errors until V1 wiring lands)")

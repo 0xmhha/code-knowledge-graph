@@ -99,7 +99,7 @@ func newBuildCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&rebuildMetrics, "rebuild-metrics", false,
 		"force PageRank/Leiden recompute even when cache would otherwise reuse them")
 	cmd.Flags().StringVar(&dbDsn, "db", "",
-		"PostgreSQL DSN (e.g. postgres://user:pass@host/dbname); if set, store graph in PG instead of local SQLite")
+		"PostgreSQL DSN (e.g. postgres://user:pass@host/dbname); if set, store graph in PG instead of local SQLite. DEPRECATED (ADR-0003): SQLite is the sole maintained backend")
 	cmd.Flags().BoolVar(&strictValidate, "strict-validate", false,
 		"abort on first dangling edge (legacy v0.x behaviour); default lenient drops them with a warning")
 	cmd.Flags().StringVar(&filesFrom, "files-from", "",
