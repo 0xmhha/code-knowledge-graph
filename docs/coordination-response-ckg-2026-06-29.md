@@ -59,6 +59,44 @@ repopulate canonical_id graph-wide"). CKV의 PRAGMA 컬럼-존재 probe는 1.16~
   writes_field/rpc_calls)로 보유. 약식 `pkg.Func` ↔ 노드 조인은 B7(canonical_id) 선행.
 
 ## 후속 (CKG action items)
-1. go-stablenet을 현재 스키마(1.22)로 재빌드 → graph.db 경로/sha를 CKV에 공유(매칭률 측정용).
+1. go-stablenet을 **`0bf2f4d1b`(PR-77 버그-부모)** 커밋 + 현재 스키마(1.22)로 재빌드 →
+   graph.db 경로/sha/manifest schema_version를 CKV·CKS·coding-agent에 공유(D-1/D-2).
 2. D4: `search_tokens`가 qname+signature+doc-comment를 덮는지 확인, 미달 시 확장.
 3. integration fixture를 양측 합의로 추가(≥1.19 게이트 + `@<line>` 중복 케이스 포함).
+
+## coding-agent D-1~D-5 결정 (2026-06-29)
+
+coding-agent §3-R(`coding-agent/docs/coordination-response-coding-agent-2026-06-29.md`)
+가 제기한 5개 결정 중 CKG 소관 회신. CKV 문서에는 §1-R2로 동일 반영.
+
+- **D-1 ★ 동의 — 재인덱싱 커밋 핀 `0bf2f4d1b`.** 커밋은 go-stablenet(HEAD 44d75d17)·
+  test/pr-77(HEAD 2e83c318) 양쪽 존재(PR #75). 그래프는 (소스@커밋 + 스키마)로 결정적 →
+  1회 재인덱싱으로 3자 커버. 제약: go-stablenet을 `0bf2f4d1b`로 detached+clean 체크아웃 후
+  `make eval-build-dbs LANG=auto` 빌드. 임베딩 A/B는 동일 그래프 공유(CKG는 임베딩 비의존).
+- **D-2 확인 — schema 1.22(≥1.19).** 현재 바이너리가 매니페스트에 1.22 스탬프 → canonical_id
+  완전 채움. manifest schema_version + sha 공표.
+- **D-3 동의 — parity 분리.** recall/rerank = 기존 cks search_text/semantic_search로 도달
+  (proxy 불요) / flow·invariant = ckg가 데이터 제공, 도달은 cks 표면 노출 전제(cks 소관).
+- **D-5 supersede 아님.** PR #40(`473bf1d`)은 `eval/baseline/retrieval.json` 단일 파일만 바꾼
+  baseline 수치 갱신(R06=search_text, recall 이미 1.0, precision_min 0.5 recall-first 완화).
+  "graph-gap P3(suffix-match resolver ~23% recall)"은 빌드 P3 Resolve 패스
+  (`internal/parse.Resolve()`)의 엣지-해소 완전성 = 다른 레이어 → #40 무관.
+  진짜 레버: PR #31 `simple_name` suffix 인덱스(머지됨) + deferred CamelCase 토크나이저(R10).
+  coding-agent에 "~23%" 측정 출처(툴/fixture) 지목 요청.
+
+## CKS §2-R2 / CKV §3-R-CKV-2 / §6 후속 수용 (2026-06-29)
+
+5세션 수렴. CKS·CKV가 §1-R2 이후 추가한 CKG 관련 항목 수용. CKV 문서에 §1-R3로 동일 반영.
+
+- **CKG = 정본 그래프 단독 생산자 (CKS §2-R2 수용).** `LANG=auto`(sol/proto) vs `--lang go`는
+  다른 그래프를 낳으므로 **누구도 독자 재빌드 안 함** — CKG가 `0bf2f4d1b` + `LANG=auto`로
+  만든 단일 canonical graph.db를 생산·공표(경로/sha/manifest schema_version), CKV 정렬 / CKS
+  config 참조. CKG가 단일 산출물 책임.
+- **매칭률 언어 스코프 = 공유언어(go/sol/ts/js), proto 제외 (CKV §3-R-CKV-2 수용).** CKG
+  `LANG=auto`의 proto 심볼 노드(~409)는 CKV 미파싱 → 대응 청크 부재(설계상). 분모에서 proto
+  제외 동의. **정밀화**: 분자의 CKG 노드는 canonical_id 보유 심볼 노드여야 join 유효(비심볼
+  노드 위치정렬은 NULL → 제외).
+- **모델 축: CKG 그래프 1회 (§6-3).** reindex-A(bge-m3)/B(Qwen3) 2회는 CKV 벡터 레이어;
+  CKG graph.db는 임베딩 비의존 → 단일 그래프가 A·B 공통 서비스. CKG는 1회 빌드 + sha 공표.
+- **비전 R1/R2 (§6-2):** R1(차원)은 CKG 비의존. R2(flow/invariant cks 노출)는 CKG가 데이터
+  제공·노출은 cks 소관 → post-Phase-2 defer 금지 가드레일 동의.
