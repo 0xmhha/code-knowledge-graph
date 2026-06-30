@@ -1,6 +1,6 @@
 # Continuity — cross-session / cross-machine entry point
 
-> Updated 2026-06-15. *Single entry point* for a new session or new machine
+> Updated 2026-06-30. *Single entry point* for a new session or new machine
 > picking up the ckg work. Deliberately short — every section links to the
 > authoritative source. **For project purpose read `docs/VISION.md`; for the
 > doc map read `docs/DOC-MAP.md`; "what is true now" = code + git.**
@@ -8,21 +8,24 @@
 ## 1. Snapshot (where the project is)
 
 - **Branch**: `main`
-- **Latest pushed commits** (top 6):
-  - `358f227` docs: establish 3-tier doc governance (CLAUDE.md, VISION, DOC-MAP, ADR) (#22)
-  - `1a9698c` Feat/canonical symbol (#21) — `canonical_id` Phase 1 foundation (Go func/method)
-  - `af2bda8` test(eval/stablenet): ckg func-verify harness + ground truth (#20)
-  - `c8c8393` feat(build): `--temporal-depth` flag for per-file commit cap (#19)
-  - `7ef33e2` feat(pr_history): definition-node PR history via `git -L` (#18)
-  - `a3260e6` fix(parse/golang): qualify static call targets vs bare-name collisions (#17)
-- **Doc governance (PR #22)**: 3-tier model live — VISION (Tier 1), ADR
-  (`docs/adr/`, Tier 2), status (Tier 3); `docs/DOC-MAP.md` is the index.
-- **Symbol identity (PR #21)**: `canonical_id` foundation merged; remaining work
-  (other node kinds, other langs, exact resolution, schema bump, reindex) tracked
-  in `docs/symbol-identity-remaining-work.md` + decision in `docs/adr/0001-*`.
-- **Eval framework (LLM-driven)**: production-ready, T-04/T-05 closed. Metrics
-  history: `docs/eval-trajectory.md`.
-- **Schema**: 1.15 (authoritative: `docs/SCHEMA.md` → `pkg/types/enums.go`).
+- **Doc governance**: 3-tier model live — VISION (Tier 1), ADR (`docs/adr/`,
+  Tier 2), status (Tier 3); `docs/DOC-MAP.md` is the index.
+- **Symbol identity — COMPLETE.** The `canonical_id` chain (ckg→ckv→cks) is
+  merged. Decisions: ADR-0001 (identity), ADR-0002 (deterministic graph
+  composition — primary packages own production files), ADR-0003 (deprecate the
+  Postgres backend, closing the old "item 7"). The status/handoff docs are
+  archived (`docs/archive/symbol-identity-*`, `docs/archive/HANDOFF-2026-06-19-*`).
+- **Build determinism (ADR-0002)**: `buildFileIndex` gives primary (non-test-variant)
+  packages deterministic ownership of production files; test variants only add
+  `_test.go`. Same source+commit+binary → same graph.
+- **Canonical corpus build**: `--files-from` filters under `eval/stablenet/`
+  (`stablenet-files.json` = no tests; `stablenet-files-with-tests.json` = binary
+  scope + tests). See README "Building a graph".
+- **Eval framework (LLM-driven)**: production-ready. Metrics: `docs/eval-trajectory.md`.
+- **Schema**: 1.23 (authoritative: `docs/SCHEMA.md` → `internal/buildpipe/cache.go`).
+- **Active cross-repo coordination (2026-06-29/30)**: canonical graph published
+  to CKV/CKS/coding-agent; live doc = `docs/coordination-response-ckg-2026-06-29.md`.
+  Open on others' side: CKV match-rate re-measure, coding-agent D-5.
 
 ## 2. Where to read next
 

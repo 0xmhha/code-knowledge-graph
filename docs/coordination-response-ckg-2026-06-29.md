@@ -116,22 +116,31 @@ coding-agent §3-R(`coding-agent/docs/coordination-response-coding-agent-2026-06
 CKG가 단독 생산한 정본 graph.db. CKV 정렬 / CKS config / coding-agent PR-77 A/B는
 **모두 이 산출물 하나**를 가리킨다(독자 재빌드 금지).
 
+> ⚠️ **갱신(2026-06-30): 정본 그래프가 필터본으로 교체됨.** 초기 공표는 whole-tree
+> (`/tmp/ckg-eval/…`, `--lang=auto`, sha `16ee6fb7…`, go/sol/ts/proto)였으나, **gstable
+> 바이너리 스코프 + 관련 test** 필터를 적용한 빌드로 확정한다(아래). 차이: **ts/proto와
+> 바이너리 외 디렉터리 제외 → 공유 스코프가 go+sol**. CKV/CKS/coding-agent는 *이* 그래프에
+> 정렬·측정해야 한다(옛 /tmp whole-tree 그래프는 폐기).
+
 ```
-path:    /tmp/ckg-eval/stablenet-0bf2f4d1bfeb/graph.db   (동일 머신의 sibling 세션 기준)
-commit:  0bf2f4d1b   (PR-77 버그-부모, go-stablenet/test/pr-77 양쪽 존재)
-build:   ckg build --at-commit=0bf2f4d1b --lang=auto      (git worktree, untracked .claude 등 자동 배제)
-schema_version (manifest): 1.23                           (>= 1.19 → canonical_id 완전 채움)
-sha256(graph.db): 16ee6fb70b7391b1dcf792c58cbcef78b7584dd90e092fe349eeac51222c9f78
-nodes / edges:    245,272 / 1,964,326
+path:    /Users/.../knowledge-data/pr-77-2/graph.db        (동일 머신의 sibling 세션 기준)
+src:     /Users/.../test/analysis-test-3                    (go-stablenet @ 0bf2f4d1b, detached/clean)
+commit:  0bf2f4d1b   (PR-77 버그-부모)
+build:   ckg build --src=analysis-test-3 --lang=auto \
+           --files-from=code-knowledge-graph/eval/stablenet/stablenet-files-with-tests.json
+         → gstable 바이너리 디렉터리의 .go(+ systemcontracts sol), **test 포함**, ts/proto 제외
+schema_version (manifest): 1.23                            (>= 1.19 → canonical_id 완전 채움)
+sha256(graph.db): 806e03faa0369d75fffbcfed7327a62e5ada736a81f3555c25c23f639969ebd1
+nodes / edges:    183,121 / 1,603,496   (그중 _test.go 노드 67,508 — test few-shot 포함)
 ```
 
-**재현성:** 이 그래프는 **ADR-0002(staged composition, schema 1.23)** 적용본이다 —
-production 파일의 패키지 소유권이 결정적(test-variant 비의존)이라, 동일 커밋·동일
-바이너리로 재빌드하면 동일 그래프가 나온다.
+**재현성:** ADR-0002(staged composition, schema 1.23) + 고정 필터(`stablenet-files-with-tests.json`)
+적용본이다 — 동일 커밋·동일 바이너리·동일 필터로 재빌드하면 동일 그래프가 나온다.
 
-**매칭률 분모 스코프 (3자 합의 반영):** 공유언어(go/sol/ts/js)의 canonical_id 보유 심볼
-노드만 분모. 제외 대상:
-- **proto** 심볼(~409): CKV 미파싱(설계상 대응 청크 없음).
+**매칭률 분모 스코프 (필터본 기준):** **공유언어 = go+sol**(필터가 ts/proto 제외)의
+canonical_id 보유 심볼 노드만 분모. 제외 대상:
+- **ts/proto**: 필터에서 제외됨(이번 정본엔 노드 자체가 없음).
+- **promoted/synthetic 메서드**(~915, `doc_comment="promoted from …"`): embedded-field 승격
 - **promoted/synthetic 메서드**(~915, `doc_comment="promoted from …"`): embedded-field 승격
   합성 노드로 canonical_id가 설계상 비어있음(진짜 메서드는 declaring 타입에 있고 거기 canonical_id 보유).
   CKV에도 대응 청크 없음 → proto와 동일 논리로 분모 제외.

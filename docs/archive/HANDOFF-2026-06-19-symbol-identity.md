@@ -1,3 +1,10 @@
+> **ARCHIVED 2026-06-30 — effort complete.** The ckg→ckv→cks canonical_id chain
+> is merged and the work is done. Decisions: [`adr/0001`](../adr/0001-canonical-symbol-id.md) /
+> [`adr/0002`](../adr/0002-staged-graph-composition.md) / [`adr/0003`](../adr/0003-deprecate-postgres-backend.md).
+> Note: the canonical measurement graph cited here (`/tmp/ckg-eval/…`, sha 16ee6fb7)
+> was later superseded by the filtered `knowledge-data/pr-77-2` build — see the live
+> coordination doc. Kept for provenance.
+
 # HANDOFF — symbol-identity (canonical_id) effort · 2026-06-19
 
 > **Self-contained resume doc.** Read only this to understand the full state and
