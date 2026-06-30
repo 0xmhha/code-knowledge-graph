@@ -22,7 +22,8 @@ CKG는 stablenet-ai-agent의 **Coding Agent System** 구축에서 *Stage S0의 �
 eval/stablenet/
 ├── VERIFICATION_REPORT.md          # 최종 검증 보고서 (8 sections, 278 lines)
 ├── build_filterlist.py             # BUILD_SOURCE_FILES.md → JSON 변환 파서
-├── stablenet-files.json            # 781-entry --files-from 화이트리스트
+├── stablenet-files.json            # 781-entry --files-from 화이트리스트 (테스트 제외)
+├── stablenet-files-with-tests.json # dir/*.go 글롭 --files-from (관련 테스트 포함)
 ├── tasks/                          # 평가 task YAML
 │   ├── T01-newblockchain-callers.yaml      (symbol_set, γ stress)
 │   ├── T02-wbft-prepare-validation.yaml    (rubric, δ stress)
@@ -37,6 +38,26 @@ eval/stablenet/
     ├── smoke/                      # MCP smoke + bench 결과
     ├── eval-v1/                    # ckg eval cli backend 12 측정점
     └── sim/                        # 직접 시뮬레이션 결과
+```
+
+## --files-from 필터 (두 종류)
+
+`ckg build --files-from`에 넘기는 화이트리스트. go-stablenet은 트리 전체에 테스트·
+TS·proto·플랫폼 외 빌드태그 파일이 섞여 있어, **무엇을 인덱싱할지 명시**해야 결정적이고
+의도에 맞는 그래프가 나온다. 용도에 따라 둘을 구분해 쓴다.
+
+| 파일 | 스코프 | 테스트 | 용도 |
+|---|---|---|---|
+| `stablenet-files.json` | 781개 명시 `.go` 파일 (바이너리 컴파일 입력, `BUILD_SOURCE_FILES.md` → `build_filterlist.py`) | **제외** (`exclude: **/*_test.go`) | 검색 정밀도 평가 코퍼스 (테스트 노이즈 없는 깨끗한 측정) |
+| `stablenet-files-with-tests.json` | 130개 `<pkg-dir>/*.go` 글롭 (+ `systemcontracts/**/*.sol`) | **포함** (글롭이 `_test.go`도 매칭) | 지식 데이터(cks/ckv) 코퍼스 — 테스트 코드의 few-shot 가치(사용법·구현 패턴)를 살림 |
+
+둘 다 TS/proto와 바이너리 외 디렉터리(`tests/`, 일부 `cmd/`·`internal/`)는 제외한다 —
+차이는 **바이너리 디렉터리 안의 `_test.go`를 넣느냐**다. 지식 데이터(예:
+`knowledge-data/pr-77`)는 with-tests 쪽을 쓴다. (출처: `.claude/docs/build-source-files.md`.)
+
+```
+ckg build --src=<go-stablenet@commit> --out=<dir> --lang=auto \
+    --files-from=eval/stablenet/stablenet-files-with-tests.json
 ```
 
 ## 실행 순서 (재현)
