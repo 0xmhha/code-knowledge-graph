@@ -1,3 +1,11 @@
+> **ARCHIVED 2026-06-30 — COMPLETE.** Every item (Phase 1 items 1–7, Tier A/B/C)
+> is done or resolved. The decisions live in the ADRs:
+> [`adr/0001-canonical-symbol-id.md`](../adr/0001-canonical-symbol-id.md) (identity),
+> [`adr/0002-staged-graph-composition.md`](../adr/0002-staged-graph-composition.md)
+> (deterministic build), [`adr/0003-deprecate-postgres-backend.md`](../adr/0003-deprecate-postgres-backend.md)
+> (item 7 → deprecate Postgres). Kept for provenance; the "How to resume" /
+> "remaining effort" prose below is historical and no longer accurate.
+
 # Symbol Identity — implementation status & remaining work (ckg)
 
 Companion to the design contract in **code-knowledge-system

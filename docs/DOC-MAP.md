@@ -53,8 +53,6 @@ Tier 1 wins.
 | Doc | Covers |
 |---|---|
 | [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
-| [symbol-identity-remaining-work.md](symbol-identity-remaining-work.md) | Canonical-id (symbol identity) status + remaining work (decision: [ADR-0001](adr/0001-canonical-symbol-id.md)) |
-| [HANDOFF-2026-06-19-symbol-identity.md](HANDOFF-2026-06-19-symbol-identity.md) | Self-contained cross-machine resume doc for the canonical_id effort (ckg/ckv/cks state, verification, follow-ups) |
 | [coordination-response-ckg-2026-06-29.md](coordination-response-ckg-2026-06-29.md) | CKG → CKV 협의 회신: canonical_id join key (=canonical_id), population gate >= 1.19 정정, BM25 소유권, flow-corpus control-flow 제공 |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
@@ -81,3 +79,8 @@ provenance; never the authoritative answer. Archived in the 2026-06-15 cleanup:
 - `HANDOFF-2026-05-29.md` — superseded by CONTINUITY as cold-start entry
 - `NEXT-CANDIDATES-WITHIN-LANG-SEMANTICS.md`, `DISPATCH-WITHIN-LANG-SEMANTICS.md` — W-A/W-B/W-C work complete; design intent lives in `design/*.md`
 - `analysis/` — dated point-in-time measurements & flow walkthroughs (see `archive/analysis/README.md`)
+
+Archived in the 2026-06-30 cleanup (symbol-identity effort complete):
+
+- `symbol-identity-remaining-work.md` — all items done/resolved; decisions in ADR-0001/0002/0003
+- `HANDOFF-2026-06-19-symbol-identity.md` — canonical_id effort merged; resume doc no longer needed

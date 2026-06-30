@@ -18,7 +18,7 @@ the *wrong* definition. That directly undermines the first-class metric
 The design contract was decided cross-repo and merged in CKS
 (`code-knowledge-system docs/symbol-identity-design.md`, PR #16). This ADR
 records the **CKG-side decision**; live implementation status lives in the Tier 3
-doc `docs/symbol-identity-remaining-work.md`, not here.
+doc `docs/archive/symbol-identity-remaining-work.md`, not here.
 
 ## Decision
 
@@ -55,7 +55,7 @@ doc `docs/symbol-identity-remaining-work.md`, not here.
 - Rollout is phased and cross-repo: Phase 1 (ckg identity + resolution), Phase 2
   (ckv additive field, no re-embed), Phase 3 (cks exact resolution + anchor
   kinds + data migration). Live per-phase status: see
-  `docs/symbol-identity-remaining-work.md`.
+  `docs/archive/symbol-identity-remaining-work.md`.
 - Because the field is additive + `omitempty`, the **manifest** `SchemaVersion`
   is intentionally **not** bumped; only the **cache** key changes so rebuilds
   repopulate the column.

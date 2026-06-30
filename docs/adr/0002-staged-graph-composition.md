@@ -88,7 +88,7 @@ columns: **bump the cache-key `SchemaVersion`** in `internal/buildpipe/cache.go`
 - Existing cached graphs are invalidated by the cache-key bump and rebuild
   deterministically. Live status / measurement numbers: Tier 3
   `docs/coordination-response-ckg-2026-06-29.md` and
-  `docs/symbol-identity-remaining-work.md`.
+  `docs/archive/symbol-identity-remaining-work.md`.
 - Stage 2's explicit test-scope semantics are deferred; Stage 1 already stops the
   pollution by giving primary packages ownership.
 

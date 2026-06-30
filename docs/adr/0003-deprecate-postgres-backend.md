@@ -25,7 +25,7 @@ In practice:
   on every additive schema change for a backend nobody runs.
 
 This is the open decision tracked as item 7 / Tier C ("C1") in
-`docs/symbol-identity-remaining-work.md`: implement Postgres `canonical_id`
+`docs/archive/symbol-identity-remaining-work.md`: implement Postgres `canonical_id`
 parity, or stop treating Postgres as a parity target.
 
 ## Decision
@@ -52,7 +52,7 @@ storage backend.
 ## Consequences
 
 - The last open symbol-identity item (item 7 / C1) is resolved: no Postgres
-  `canonical_id` work. Update `docs/symbol-identity-remaining-work.md` to point
+  `canonical_id` work. Update `docs/archive/symbol-identity-remaining-work.md` to point
   item 7 / Tier C at this ADR.
 - Future additive-schema changes only round-trip through the SQLite
   reader/writer; reviewers should not request Postgres mirroring.
