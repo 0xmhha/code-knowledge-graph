@@ -11,7 +11,7 @@ an MCP-enabled LLM, or a 3D web viewer.
 ## Features
 
 - **Multi-language parsing** — Go, TypeScript, Solidity via tree-sitter
-- **Persistent graph store** — SQLite (default) or PostgreSQL
+- **Persistent graph store** — SQLite (the maintained backend; the PostgreSQL backend is deprecated, see [ADR-0003](docs/adr/0003-deprecate-postgres-backend.md))
 - **Multiple query surfaces** — REST API, MCP server, 3D viewer
 - **Incremental builds** — file-level caching for fast re-indexing
 - **Rich schema** — 33 node kinds, dependency / call / git-history edges
@@ -33,6 +33,44 @@ make build
 claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/tmp/ckg"
 ```
 
+## Building a graph
+
+`ckg build` parses a source tree into a graph database (`<out>/graph.db`).
+Common patterns:
+
+```bash
+# Whole tree, auto-detect languages (Go / TypeScript / Solidity / proto)
+./bin/ckg build --src=/path/to/repo --out=/tmp/ckg
+
+# Restrict to specific languages
+./bin/ckg build --src=/path/to/repo --out=/tmp/ckg --lang=go,sol
+
+# Build from a specific commit — uses a git worktree, leaves the --src
+# working tree untouched, and indexes only that commit's tracked files
+./bin/ckg build --src=/path/to/repo --out=/tmp/ckg --at-commit=<sha>
+
+# Index only a curated file set via a --files-from whitelist
+./bin/ckg build --src=/path/to/repo --out=/tmp/ckg \
+    --files-from=eval/stablenet/stablenet-files-with-tests.json
+```
+
+The build is **deterministic**: the same source tree + commit + ckg binary
+yields the same graph (see [`docs/adr/0002-staged-graph-composition.md`](docs/adr/0002-staged-graph-composition.md)).
+
+**Filtering (`--files-from`).** A JSON `{ "include": [...], "exclude": [...] }`
+of globs (`**` spans any path depth). Without it, ckg indexes the whole tree
+(every `.go`/`.ts`/`.sol`/`.proto`, tests included). Two ready-made filters for
+the go-stablenet corpus live under [`eval/stablenet/`](eval/stablenet/):
+
+| Filter | Tests | Use |
+|---|---|---|
+| `stablenet-files.json` | excluded | clean retrieval-eval corpus |
+| `stablenet-files-with-tests.json` | included | knowledge-data (cks/ckv), keeps test few-shot value |
+
+Add `--out-tag=auto-commit-hash` to suffix the output dir with the source's
+short commit SHA (e.g. `--out=/data/stablenet` → `/data/stablenet-0bf2f4d1b`).
+Run `ckg build --help` for the full flag list.
+
 ## Commands
 
 | Command | Purpose |
@@ -41,7 +79,7 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/tmp/ckg"
 | `ckg serve`           | HTTP API + embedded 3D viewer |
 | `ckg mcp`             | MCP server for LLM agents (Claude Code, etc.) |
 | `ckg export-static`   | Export viewer + chunked JSON for static hosting |
-| `ckg export-postgres` | Migrate a SQLite graph to PostgreSQL |
+| `ckg export-postgres` | Migrate a SQLite graph to PostgreSQL (deprecated, ADR-0003) |
 | `ckg eval`            | Compare graph-context vs raw-file context on benchmark tasks |
 | `ckg audit`           | Validate graph integrity |
 
