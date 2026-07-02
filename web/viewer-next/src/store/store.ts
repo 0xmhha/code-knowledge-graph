@@ -293,7 +293,10 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   anchorId: null,
   depth: 0,
   viewMode: '3d',
-  colorMode: 'lang',
+  // 'type' default: real indexes are often single-language, which made
+  // the old 'lang' default paint every node the same colour. Type-based
+  // colour is the mode where the per-type shapes actually read.
+  colorMode: 'type',
   fontSize: 1.0,
   edgeTypeWhitelist: new Set(DEFAULT_EDGE_TYPES),
   // The three slots below are SSR-safe defaults; the real values get
@@ -351,9 +354,16 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
       else nextByDst.set(e.dst, [e]);
     }
     if (added) {
-      // Trigger re-derivation by replacing the top-level refs.
+      // P5: trigger re-derivation by replacing the INDEX refs only.
+      // `edges` is already appended in place above — the old
+      // `edges.slice()` re-copied the whole array on every call, which
+      // made multi-batch boots quadratic in edge count, and nothing
+      // subscribes to `edges` identity (GraphCanvas derives links from
+      // edgesBySrc; NodeDetail reads the maps). The shallow Map copies
+      // stay: they are what notifies subscribers (NodeDetail,
+      // GraphCanvas.fullData) that new edges landed.
       set({
-        edges: nextEdges.slice(),
+        edges: nextEdges,
         edgesBySrc: new Map(nextBySrc),
         edgesByDst: new Map(nextByDst),
       });

@@ -61,5 +61,8 @@ export interface CommitGraph {
 }
 
 export type ViewMode = '2d' | '3d';
-export type ColorMode = 'lang' | 'community';
+// 'type' colours nodes by their node type (Function/Struct/Mutex/…) —
+// added because real graphs are often single-language (198/200 Go on the
+// target repo), which made 'lang' mode render every node identically.
+export type ColorMode = 'lang' | 'community' | 'type';
 export type TraceDirection = 'callers' | 'callees' | 'both';

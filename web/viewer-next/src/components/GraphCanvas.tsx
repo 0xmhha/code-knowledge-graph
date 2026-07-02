@@ -1,35 +1,25 @@
 'use client';
 
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { useStore } from '@/store/store';
 import { useShallow } from 'zustand/react/shallow';
 import type { GraphEdge, GraphNode, NodeId, ViewMode } from '@/types';
 import {
-  ALPHA_BY_CONF, nodeColorCss, nodeColorHex, nodeMesh,
+  ALPHA_BY_CONF, nodeColorCss, nodeColorHex, nodeMaterial, nodeMesh, nodeSizeScore,
 } from '@/lib/encoding';
 import { EDGE_STYLE, edgeToGroup } from '@/lib/edges';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), { ssr: false });
 
-const FOCUS_OPACITY = [1.0, 0.92, 0.55, 0.18];
-const FOCUS_LINK_BRIGHTNESS = [1.0, 1.0, 0.55, 0.10];
-
-function focusOpacity(id: NodeId, focusDistance: Map<NodeId, number>): number {
-  if (focusDistance.size === 0) return 1.0;
-  const d = focusDistance.get(id);
-  if (d === undefined) return FOCUS_OPACITY[FOCUS_OPACITY.length - 1];
-  return FOCUS_OPACITY[Math.min(d, FOCUS_OPACITY.length - 1)];
-}
-
-function edgeFocusBrightness(e: GraphEdge, focusDistance: Map<NodeId, number>): number {
-  if (focusDistance.size === 0) return 1.0;
-  const a = focusDistance.get(e.src);
-  const b = focusDistance.get(e.dst);
-  if (a === undefined || b === undefined) return FOCUS_LINK_BRIGHTNESS[3];
-  return FOCUS_LINK_BRIGHTNESS[Math.min(Math.max(a, b), FOCUS_LINK_BRIGHTNESS.length - 1)];
-}
+// Focus model (user feedback, 2026-07-02): focus is VISIBILITY, not
+// dimming. The previous FOCUS_OPACITY [1, .92, .55, .18] node tiers and
+// FOCUS_LINK_BRIGHTNESS [1, 1, .55, .10] link tiers repainted everything
+// outside the 2-hop ball toward black on the dark canvas — colours must
+// stay exactly as the default state renders them. Off-focus elements are
+// now hidden via nodeVisibility/linkVisibility instead (which is also
+// cheaper: hidden objects skip draw entirely).
 
 function hexAtBrightness(hex: number, b: number): string {
   const r = ((hex >> 16) & 0xff) * b;
@@ -117,8 +107,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       // OrbitControls.target is a Three.Vector3 we mutate to lock the
       // orbit pivot onto the focused node (H1 — D1 decision). update()
       // re-syncs the camera after we move target so the next user drag
-      // orbits around the node, not the world origin.
-      target: { set: (x: number, y: number, z: number) => void };
+      // orbits around the node, not the world origin. x/y/z are read by
+      // zoom3D/centerOnNode to preserve the current view axis.
+      target: { set: (x: number, y: number, z: number) => void; x?: number; y?: number; z?: number };
       update: () => void;
     }
     interface FGShim {
@@ -143,6 +134,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // visually but lost too much surrounding context.
     const DOLLY_FACTOR = 0.6;
 
+    // NOTE (2026-07-02 revert): a "zoom along camera→orbit-target axis"
+    // variant was tried here and rolled back. Deriving distances from
+    // the live controls.target made successive pick+zoom operations
+    // COMPOUND (each dolly/zoom shrank the camera↔target distance, and
+    // the next operation started from the already-shrunk value), until
+    // the orbit radius collapsed to ~0 — at which point dragging spun
+    // the camera in place (first-person vertigo) staring at empty
+    // space. The origin-based math below re-inflates the distance on
+    // every call, which is what keeps drag = "orbit around the data".
     const zoom3D = (factor: number) => {
       const f = fg();
       if (!f?.cameraPosition) return;
@@ -208,6 +208,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
           // (mintscan-style cinematic focus). Easiest robust trick: place
           // the camera along the +z axis offset from the node by the new
           // (shorter) viewing distance.
+          //
+          // NOTE (2026-07-02 revert): a direction-preserving variant
+          // (keep the camera→target unit vector, slide it to the node)
+          // was tried and rolled back — deriving the dolly distance
+          // from |camera − target| made repeated picks compound the
+          // 0.6× shrink until the orbit radius collapsed and drag spun
+          // the camera in place. The origin-based distance below
+          // re-inflates on every pick, keeping drag anchored on the
+          // node/data.
           const nz = (n as GraphNode & { z?: number }).z ?? 0;
           if (typeof n.x !== 'number' || typeof n.y !== 'number') return;
           const cur = f.cameraPosition?.() as Vec3 | undefined;
@@ -231,15 +240,50 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     };
   }, []);
 
-  // graphData re-derives on visibleIds / edges / nodes change. We split
-  // into individual selectors and useMemo because returning a fresh object
-  // literal from a single selector defeats zustand's Object.is bail-out and
-  // re-fires every store update — which then cascades into a render loop
-  // through ForceGraph3D's simulation callbacks (React error #185).
+  // P2 (perf): graphData identity is the lever that decides whether
+  // react-force-graph re-ingests the dataset and re-heats the d3
+  // simulation. The previous version derived {nodes, links} from
+  // visibleIds, so EVERY visibility commit (search union, type filter,
+  // community toggle, list-pick) produced a fresh object → full
+  // re-ingest → layout restart. Raw 3d-force-graph apps keep graphData
+  // stable and gate what's drawn via the nodeVisibility/linkVisibility
+  // accessors — we now do the same:
+  //
+  //   - fullData: ALL cached nodes/edges. Rebuilt only when the data
+  //     actually grows (loadNodes / addEdges commits) — rare after
+  //     boot. Visibility toggles no longer touch it, so the simulation
+  //     keeps its settled positions (no restart, no visual jump).
+  //   - anchoredData: the BFS-scoped subset, used ONLY while an anchor
+  //     drives dagMode. DAG levels must be computed on the focused
+  //     subgraph (a global DAG over the full cache costs more AND lays
+  //     the focused flow out differently), so this path retains the
+  //     old rebuild-per-navigation semantics — the one interaction
+  //     where a re-layout IS the product behaviour.
+  //
+  // Selectors stay split (not one object selector) because a fresh
+  // object literal from a single selector defeats zustand's Object.is
+  // bail-out and re-fires every store update — which cascades into a
+  // render loop through ForceGraph3D's simulation callbacks (React
+  // error #185).
   const visibleIds = useStore(s => s.visibleIds);
   const allNodes = useStore(s => s.nodes);
   const edgesBySrc = useStore(s => s.edgesBySrc);
-  const graphData = useMemo(() => {
+  const anchorId = useStore(s => s.anchorId);
+  const fullData = useMemo(() => {
+    const nodes = [...allNodes.values()];
+    const links: GraphEdge[] = [];
+    for (const outs of edgesBySrc.values()) {
+      // Edges fetched for a node can reference endpoints that were never
+      // loaded (excluded types, beyond nodeLimit). force-graph throws on
+      // a link whose endpoint id has no node record — gate on the cache.
+      for (const e of outs) {
+        if (allNodes.has(e.src) && allNodes.has(e.dst)) links.push(e);
+      }
+    }
+    return { nodes, links };
+  }, [allNodes, edgesBySrc]);
+  const anchoredData = useMemo(() => {
+    if (!anchorId) return null;
     const nodes: GraphNode[] = [];
     for (const id of visibleIds) {
       const n = allNodes.get(id);
@@ -252,12 +296,20 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       for (const e of outs) if (visibleIds.has(e.dst)) links.push(e);
     }
     return { nodes, links };
-  }, [visibleIds, allNodes, edgesBySrc]);
+  }, [anchorId, visibleIds, allNodes, edgesBySrc]);
+  const graphData = anchoredData ?? fullData;
 
-  // Mirror graphData into a ref so the centerOnNode imperative method
-  // (captured once in useImperativeHandle's empty-deps closure) reads
-  // the live node positions instead of a snapshot from first mount.
+  // Mirror graphData into refs so imperative code (centerOnNode, the
+  // orbit-follow loop) reads live positions without being re-created.
+  // nodeById replaces the previous O(N) Array.find-per-frame lookup in
+  // the follow loop with O(1).
   graphDataRef.current = graphData;
+  const nodeByIdRef = useRef<Map<NodeId, GraphNode>>(new Map());
+  nodeByIdRef.current = useMemo(() => {
+    const m = new Map<NodeId, GraphNode>();
+    for (const n of graphData.nodes) m.set(n.id, n);
+    return m;
+  }, [graphData]);
 
   const focusDistance = useStore(s => s.focusDistance);
 
@@ -341,40 +393,32 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // delay it until ForceGraph's own first frame is past (e.g. via
     // an onEngineStop callback), which is a separate piece of work.
     let rafId = 0;
+    let running = false;
     let dragging = false;
     const onDown = () => { dragging = true; };
     const onUp = () => { dragging = false; };
     window.addEventListener('mousedown', onDown);
     window.addEventListener('mouseup', onUp);
-    const tick = () => {
-      rafId = requestAnimationFrame(tick);
-      // Drag-in-progress: leave controls.target alone. Mutating target
-      // every frame while OrbitControls is computing a delta from the
-      // mouse stream cancels out the rotation (camera and target both
-      // chase the same vector) — drag visibly does nothing. Snap the
-      // target back to the selected node BEFORE mousedown via the
-      // pre-drag pass below, then keep our hands off until mouseup.
-      if (dragging) return;
+
+    // One-shot defensive patch: 3d-force-graph's dragend handler
+    // dispatches a synthetic `new PointerEvent('pointerup')` on the
+    // document to release OrbitControls' drag state (see
+    // 3d-force-graph.mjs ~line 471). The event has the default
+    // pointerId=0, and if OrbitControls still has an OTHER pointerId
+    // in `_pointers` when this fires, its `case 1:` branch reads
+    // `_pointerPositions[pointerId]` which can be undefined and
+    // crashes on `position.x`. We can't fix the library; we wrap the
+    // handler so the throw is silently swallowed.
+    //
+    // P3: this used to piggyback on an always-on rAF loop (a per-frame
+    // check for the whole canvas lifetime). A short poller lands the
+    // patch once and stops — same idempotence via _onPointerUpPatched,
+    // zero steady-state cost.
+    const patchTimer = setInterval(() => {
       const fg = fgRef.current as FGShim | null;
       const ctrls = fg?.controls?.();
-      // One-shot defensive patch: 3d-force-graph's dragend handler
-      // dispatches a synthetic `new PointerEvent('pointerup')` on the
-      // document to release OrbitControls' drag state (see
-      // 3d-force-graph.mjs ~line 471). The event has the default
-      // pointerId=0, and if OrbitControls still has a OTHER pointerId
-      // in `_pointers` when this fires, its `case 1:` branch reads
-      // `_pointerPositions[pointerId]` which can be undefined and
-      // crashes on `position.x`. The throw surfaces in the console on
-      // every node click. We can't fix the library; we wrap the
-      // handler so the throw is silently swallowed without altering
-      // any successful-path behaviour.
-      //
-      // Runs BEFORE the `if (!t) return` bail below so the patch can
-      // land even when ctrls.target is still uninitialised (which the
-      // library does on first construction). Idempotent via the
-      // _patched flag so the rAF loop only does this once per controls
-      // instance.
-      if (ctrls && !ctrls._onPointerUpPatched && ctrls._onPointerUp && ctrls.disconnect && ctrls.connect && ctrls.domElement) {
+      if (!ctrls) return;
+      if (!ctrls._onPointerUpPatched && ctrls._onPointerUp && ctrls.disconnect && ctrls.connect && ctrls.domElement) {
         const original = ctrls._onPointerUp;
         const el = ctrls.domElement;
         ctrls.disconnect();
@@ -384,19 +428,30 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         ctrls.connect(el);
         ctrls._onPointerUpPatched = true;
       }
+      if (ctrls._onPointerUpPatched) clearInterval(patchTimer);
+    }, 100);
+
+    // P3: the follow loop runs ONLY while a node is selected. Boot /
+    // post-Home / post-clear states previously paid a 60fps wakeup
+    // (getState + controls() + bail) for nothing; now the loop stops
+    // itself when selection clears and is restarted by the store
+    // subscription below on the next select.
+    const tick = () => {
+      const sel = useStore.getState().selectedId;
+      if (!sel) { running = false; return; }
+      rafId = requestAnimationFrame(tick);
+      // Drag-in-progress: leave controls.target alone. Mutating target
+      // every frame while OrbitControls is computing a delta from the
+      // mouse stream cancels out the rotation (camera and target both
+      // chase the same vector) — drag visibly does nothing.
+      if (dragging) return;
+      const fg = fgRef.current as FGShim | null;
+      const ctrls = fg?.controls?.();
       const t = ctrls?.target;
       if (!t) return;
-      const sel = useStore.getState().selectedId;
-      // No selection yet (boot, post-Home, post-clear): leave the
-      // controls.target alone. ForceGraph-3D sets its own initial
-      // camera and target based on the graph extents, and our 0.5-eps
-      // chase to origin was forcing the camera to look at (0,0,0)
-      // even when the nodes had settled elsewhere — boot screen
-      // looked blank as a result. Once the user selects a node we
-      // resume follow logic below.
-      if (!sel) return;
-      const data = graphDataRef.current;
-      const n = data?.nodes.find(x => x.id === sel) as
+      // O(1) lookup via nodeByIdRef — the previous Array.find was O(N)
+      // per frame (5K nodes × 60fps = 300K comparisons/s while selected).
+      const n = nodeByIdRef.current.get(sel) as
         (GraphNode & { z?: number }) | undefined;
       if (!n || typeof n.x !== 'number' || typeof n.y !== 'number') return;
       const tx = n.x, ty = n.y, tz = n.z ?? 0;
@@ -415,9 +470,18 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         ctrls.update?.();
       }
     };
-    rafId = requestAnimationFrame(tick);
+    const start = () => {
+      if (running) return;
+      running = true;
+      rafId = requestAnimationFrame(tick);
+    };
+    if (useStore.getState().selectedId) start();
+    const unsub = useStore.subscribe(s => s.selectedId, sel => { if (sel) start(); });
     return () => {
+      running = false;
       cancelAnimationFrame(rafId);
+      clearInterval(patchTimer);
+      unsub();
       window.removeEventListener('mousedown', onDown);
       window.removeEventListener('mouseup', onUp);
     };
@@ -483,6 +547,29 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     return () => clearTimeout(id);
   }, [graphData.nodes.length, viewMode]);
 
+  // Camera-fix #3 (focus-fit): with focus-as-visibility, a search-pick /
+  // list-pick leaves only the focus ball on screen — but the camera was
+  // still parked at overview distance, showing a tiny cluster in a sea
+  // of nothing. Frame the remaining subgraph via zoomToFit's nodeFilter.
+  // Anchored navigation is excluded: the DAG re-layout is still moving
+  // at this point and a fit against mid-flight positions frames wrong
+  // (it also had no auto-fit before — behaviour preserved). The 350ms
+  // delay lets the visibility accessors apply and any centerOnNode
+  // dolly begin before the fit supersedes it. Works in 2D and 3D —
+  // both engines expose zoomToFit(ms, px, nodeFilter).
+  useEffect(() => {
+    if (anchorId) return;
+    if (focusDistance.size === 0) return;
+    const id = setTimeout(() => {
+      type FGFit = {
+        zoomToFit?: (ms?: number, padding?: number, filter?: (n: GraphNode) => boolean) => void;
+      };
+      const f = fgRef.current as FGFit | null;
+      f?.zoomToFit?.(500, 90, n => focusDistance.has(n.id));
+    }, 350);
+    return () => clearTimeout(id);
+  }, [focusDistance, anchorId]);
+
   // M2: BFS-ripple — when a fresh focusDistance lands (after a node
   // selection / trace) pulse the focused subgraph outward from dist=0,
   // staggered so dist=1 follows dist=0 by 50ms, dist=2 by 100ms, etc.
@@ -497,47 +584,57 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const rippleStartRef = useRef<number | null>(null);
   const focusDistanceRef = useRef(focusDistance);
   focusDistanceRef.current = focusDistance;
+  // dimmedNodesRef mirrors dimmedNodes for the stable nodeThreeObject
+  // accessor (P4) — same pattern as focusDistanceRef above.
+  const dimmedNodesRef = useRef(dimmedNodes);
+  dimmedNodesRef.current = dimmedNodes;
+  // P3: the ripple rAF used to run unconditionally for the lifetime of
+  // the canvas — 60fps wakeups even when no ripple was in flight (the
+  // overwhelmingly common state). The loop now starts when a fresh
+  // focusDistance kicks a ripple off and self-terminates at TOTAL.
+  // Existing ripple in flight gets truncated and replaced — clicking a
+  // new node should always re-pulse, not queue.
   useEffect(() => {
-    if (focusDistance.size > 0) {
-      // Kick off a fresh ripple. Existing ripple in flight gets
-      // truncated and replaced — clicking a new node should always
-      // re-pulse, not queue.
-      rippleStartRef.current = performance.now();
-    }
-  }, [focusDistance]);
-  useEffect(() => {
+    if (focusDistance.size === 0) return;
+    rippleStartRef.current = performance.now();
     const PULSE_DUR = 350;
     const STAGGER = 50;
     const TOTAL = 700;
     const AMP = 0.25;
+    // baseScale: nodeMesh stores the usage-derived size in
+    // mesh.userData.baseScale. The pulse multiplies it and the restore
+    // path returns to it — the old code reset to setScalar(1), which
+    // flattened every node to uniform size after the first ripple.
+    const base = (mesh: import('three').Mesh): number =>
+      (mesh.userData.baseScale as number | undefined) ?? 1;
     let rafId = 0;
     const tick = () => {
-      rafId = requestAnimationFrame(tick);
       const start = rippleStartRef.current;
       if (start == null) return;
       const elapsed = performance.now() - start;
       const fd = focusDistanceRef.current;
       if (fd.size === 0 || elapsed > TOTAL) {
         if (viewMode === '3d') {
-          for (const [, mesh] of meshIndex) mesh.scale.setScalar(1);
+          for (const [, mesh] of meshIndex) mesh.scale.setScalar(base(mesh));
         } else {
           // 2D: one last refresh so drawNode2D paints at unit scale.
           const f = fgRef.current as { refresh?: () => void } | null;
           f?.refresh?.();
         }
         rippleStartRef.current = null;
-        return;
+        return; // self-terminate — no rAF reschedule
       }
       if (viewMode === '3d') {
         for (const [id, mesh] of meshIndex) {
+          const b = base(mesh);
           const d = fd.get(id);
-          if (d == null) { mesh.scale.setScalar(1); continue; }
+          if (d == null) { mesh.scale.setScalar(b); continue; }
           const e2 = elapsed - d * STAGGER;
-          if (e2 < 0 || e2 > PULSE_DUR) { mesh.scale.setScalar(1); continue; }
+          if (e2 < 0 || e2 > PULSE_DUR) { mesh.scale.setScalar(b); continue; }
           const t = e2 / PULSE_DUR;
           // Half-sine: 0 at t=0, 1 at t=0.5, 0 at t=1. Times AMP gives
-          // an additive bump on top of unit scale.
-          mesh.scale.setScalar(1 + AMP * Math.sin(t * Math.PI));
+          // an additive bump on top of the base scale.
+          mesh.scale.setScalar(b * (1 + AMP * Math.sin(t * Math.PI)));
         }
       } else {
         // 2D: ripple scale is computed inside drawNode2D (it reads
@@ -545,15 +642,15 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
         // do here is force a redraw every frame — ForceGraph-2D stops
         // its render loop after cooldown, so without refresh() the
         // mid-ripple frames never get re-drawn and the pulse is
-        // invisible. The refresh is cheap (just a draw, no force
-        // simulation tick).
+        // invisible.
         const f = fgRef.current as { refresh?: () => void } | null;
         f?.refresh?.();
       }
+      rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [viewMode, meshIndex]);
+  }, [focusDistance, viewMode, meshIndex]);
 
   // Reapply focus halo to existing meshes whenever focusDistance OR
   // dimmedNodes changes. Without dimmedNodes in the deps array the 3D
@@ -561,33 +658,50 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // triggered another navigation that reset focusDistance.
   useEffect(() => {
     if (viewMode !== '3d') return;
-    const focusActive = focusDistance.size > 0;
     const nodes = useStore.getState().nodes;
     for (const [id, mesh] of meshIndex) {
       const n = nodes.get(id);
-      const conf = n?.confidence ?? '';
-      const baseAlpha = ALPHA_BY_CONF[conf] ?? 1;
-      let op: number;
-      if (dimmedNodes.has(id)) {
-        op = 0.2 * baseAlpha;
-      } else if (focusActive) {
-        op = focusOpacity(id, focusDistance) * baseAlpha;
-      } else {
-        op = baseAlpha;
-      }
-      const m = mesh.material as import('three').MeshStandardMaterial;
-      m.opacity = op;
-      m.transparent = op < 1;
-      m.needsUpdate = true;
+      if (!n) continue;
+      const baseAlpha = ALPHA_BY_CONF[n.confidence ?? ''] ?? 1;
+      // Colours/opacity stay at their default-state values regardless of
+      // focus (focus now hides instead of dims). The only modulation is
+      // the explicit Impact-panel dim.
+      const op = dimmedNodes.has(id) ? 0.2 * baseAlpha : baseAlpha;
+      // P1: materials are SHARED via the encoding.ts cache — mutating
+      // opacity in place would dim every node of the same colour. Swap
+      // the mesh's material reference to the cache entry for the target
+      // (color, opacity) instead; the discrete opacity tiers keep the
+      // cache bounded and the swap is just a pointer write (no
+      // needsUpdate/recompile).
+      mesh.material = nodeMaterial(nodeColorHex(n, colorMode), op);
     }
-  }, [focusDistance, dimmedNodes, viewMode, meshIndex]);
+  }, [dimmedNodes, viewMode, meshIndex, colorMode]);
 
-  const linkVisibility = (link: GraphEdge): boolean => {
+  // P4: every accessor below is memoized with its actual inputs as
+  // deps. react-force-graph diffs props by identity — an inline closure
+  // re-created per render forces the library to re-apply the accessor
+  // to every node/link on EVERY React commit (focus change, tooltip
+  // hover, …). With useCallback the re-apply happens exactly when the
+  // accessor's inputs change, which is also the precise moment a
+  // repaint is wanted.
+  const linkVisibility = useCallback((link: GraphEdge): boolean => {
     if (EDGE_STYLE[link.type]?.hidden) return false;
-    return edgeTypeWhitelist.has(link.type);
-  };
+    if (!edgeTypeWhitelist.has(link.type)) return false;
+    // Focus-as-visibility: while a focus ball is active without an
+    // anchor (search-pick / list-pick), only links INSIDE the ball
+    // draw — everything else is hidden rather than dimmed-to-black.
+    // Anchored navigation keeps its own BFS-scoped view (visibleIds).
+    if (!anchorId && focusDistance.size > 0) {
+      return focusDistance.has(link.src) && focusDistance.has(link.dst);
+    }
+    // P2: with fullData feeding the simulation, the "both endpoints
+    // visible" gate moved from graphData construction into this
+    // accessor — hidden-endpoint links stay in the dataset (stable
+    // identity) but never draw.
+    return visibleIds.has(link.src) && visibleIds.has(link.dst);
+  }, [edgeTypeWhitelist, visibleIds, focusDistance, anchorId]);
 
-  const nodeVisibility = (node: GraphNode): boolean => {
+  const nodeVisibility = useCallback((node: GraphNode): boolean => {
     if (isolatedCommunity != null && node.community_id !== isolatedCommunity) return false;
     // Community legend toggle = visibility off, not just dim. Earlier
     // builds dropped the node opacity to 0.18 which read as "still
@@ -602,33 +716,32 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // Toggling the type off in NodeTypeFilters yields a hidden node
     // without a refetch — the data stays cached, only render flips.
     if (node.type && !nodeTypeWhitelist.has(node.type)) return false;
-    return useStore.getState().visibleIds.has(node.id);
-  };
+    // Focus-as-visibility (matches linkVisibility above): search-pick /
+    // list-pick shows only the picked node + its traced neighbourhood.
+    if (!anchorId && focusDistance.size > 0) return focusDistance.has(node.id);
+    return visibleIds.has(node.id);
+  }, [isolatedCommunity, dimmedCommunities, nodeTypeWhitelist, visibleIds, focusDistance, anchorId]);
 
-  const linkColor = (e: GraphEdge): string => {
+  const linkColor = useCallback((e: GraphEdge): string => {
     const base = EDGE_STYLE[e.type]?.color ?? 0x999999;
-    // dimmedNodes-aware: edges with a dimmed endpoint render at the
-    // same low brightness used for far-focus edges so the impact
-    // subgraph spotlights cleanly against the rest of the graph.
+    // Colours never change with focus (user requirement) — the ONLY
+    // colour modulation left is the explicit Impact-panel dim, which is
+    // a deliberate user action on a named subgraph.
     const dimmed = dimmedNodes.size > 0 &&
       (dimmedNodes.has(e.src) || dimmedNodes.has(e.dst));
-    const b = dimmed ? 0.2 : edgeFocusBrightness(e, focusDistance);
-    return hexAtBrightness(base, b);
-  };
+    return hexAtBrightness(base, dimmed ? 0.2 : 1.0);
+  }, [dimmedNodes]);
 
-  const linkWidth = (e: GraphEdge): number => {
+  const linkWidth = useCallback((e: GraphEdge): number => {
     const base = EDGE_STYLE[e.type]?.width ?? 1;
     if (dimmedNodes.size > 0 &&
         (dimmedNodes.has(e.src) || dimmedNodes.has(e.dst))) {
-      // Match the dimmed-far edge thickness so dimmed edges visually
-      // recede behind the impact subgraph without becoming invisible.
+      // Impact-dim edges recede behind the spotlighted subgraph
+      // without becoming invisible.
       return 0.25;
     }
-    const brightness = edgeFocusBrightness(e, focusDistance);
-    if (brightness >= 0.9) return base + 0.5;
-    if (brightness >= 0.5) return Math.max(0.7, base);
-    return 0.25;
-  };
+    return base;
+  }, [dimmedNodes]);
 
   // linkLineDash (#3b): per-edge dash pattern keyed off the CKS graph
   // group. Returning null defers to a solid line. The 2D force-graph
@@ -640,7 +753,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   //   G5 Distributed  → [6,2,2,2] dash-dot
   //   G6 Temporal     → solid (the existing dim brightness already de-emphasises it)
   // Edges whose group is unknown also fall through to solid.
-  const linkLineDash = (e: GraphEdge): number[] | null => {
+  const linkLineDash = useCallback((e: GraphEdge): number[] | null => {
     const g = edgeToGroup(e.type);
     switch (g) {
       case 'G2': return [6, 3];
@@ -648,7 +761,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       case 'G5': return [6, 2, 2, 2];
       default:   return null;
     }
-  };
+  }, []);
 
   // H3 (D3 decision): src→dst alpha gradient overlay. Drawn ON TOP of the
   // default link line (linkCanvasObjectMode='after'), so the dst end shows
@@ -661,28 +774,43 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // draws for free. The dst-end fade is therefore subtle (the default
   // line is still there underneath). Switch to 'replace' if a stronger
   // fade is needed, but then we have to re-implement dash + arrow draws.
-  const linkCanvasObjectMode = (() => 'after') as never;
-  const linkCanvasObject = ((
-    link: GraphEdge & { source?: GraphNode; target?: GraphNode },
+  const linkCanvasObjectMode = useMemo(() => (() => 'after') as never, []);
+  const linkCanvasObject = useCallback(((
+    link: GraphEdge & {
+      source?: GraphNode; target?: GraphNode;
+      // P4 gradient cache slots — see below.
+      __gradKey?: string; __grad?: CanvasGradient;
+    },
     ctx: CanvasRenderingContext2D,
   ) => {
     const a = link.source, b = link.target;
     if (!a || !b || a.x == null || b.x == null || a.y == null || b.y == null) return;
-    // dimmedNodes / focusDistance match the same brightness model used
-    // by linkColor — so the gradient overlay fades in concert with the
-    // existing focus-halo behaviour instead of fighting it.
+    // Brightness model matches linkColor: default 1.0, Impact-dim 0.2 —
+    // focus never dims (off-focus links are hidden by linkVisibility).
     const dimmed = dimmedNodes.size > 0 &&
       (dimmedNodes.has(link.src) || dimmedNodes.has(link.dst));
-    const brightness = dimmed ? 0.2 : edgeFocusBrightness(link, focusDistance);
-    if (brightness < 0.3) return; // too faded to bother painting the overlay
+    const brightness = dimmed ? 0.2 : 1.0;
+    if (brightness < 0.3) return; // impact-dimmed: skip the overlay entirely
     const baseHex = EDGE_STYLE[link.type]?.color ?? 0x999999;
     const r = (baseHex >> 16) & 0xff;
     const g = (baseHex >> 8) & 0xff;
     const bl = baseHex & 0xff;
     const srcAlpha = 0.85 * brightness;
-    const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-    grad.addColorStop(0, `rgba(${r},${g},${bl},${srcAlpha})`);
-    grad.addColorStop(1, `rgba(${r},${g},${bl},0)`);
+    // P4: cache the gradient on the link object, keyed by quantised
+    // endpoint coords + colour + alpha. While the simulation is moving
+    // the key churns (allocation rate same as before); once the layout
+    // settles the coords are static, the key stops changing, and the
+    // per-edge-per-frame createLinearGradient allocation drops to zero
+    // — which is the steady state users actually interact in.
+    const key = `${a.x | 0},${a.y | 0},${b.x | 0},${b.y | 0},${baseHex},${srcAlpha.toFixed(2)}`;
+    let grad = link.__grad;
+    if (!grad || link.__gradKey !== key) {
+      grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+      grad.addColorStop(0, `rgba(${r},${g},${bl},${srcAlpha})`);
+      grad.addColorStop(1, `rgba(${r},${g},${bl},0)`);
+      link.__gradKey = key;
+      link.__grad = grad;
+    }
     ctx.save();
     ctx.strokeStyle = grad;
     ctx.lineWidth = linkWidth(link) * 1.6;
@@ -692,10 +820,13 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     ctx.lineTo(b.x, b.y);
     ctx.stroke();
     ctx.restore();
-  }) as never;
+  }) as never, [dimmedNodes, linkWidth]);
 
-  const drawNode2D = (node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-    let r = 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5;
+  const drawNode2D = useCallback((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    // nodeSizeScore: usage_score with a degree fallback — usage_score is
+    // 0 across entire real indexes, which flattened every node to the
+    // same 3px dot and hid the per-type shapes.
+    let r = 3 + Math.log10(nodeSizeScore(node) + 1) * 1.5;
     // C: 2D ripple — apply the same dist-staggered half-sine pulse used
     // by 3D mesh.scale to the radius the 2D rasteriser uses below. The
     // ripple effect's rAF drives forceGraph.refresh() every frame
@@ -726,7 +857,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     // far-cells (0.18) so the user reads "deliberately backgrounded"
     // rather than "out of focus".
     const dimmedByImpact = dimmedNodes.has(node.id);
-    const baseAlpha = focusOpacity(node.id, focusDistance) * (ALPHA_BY_CONF[node.confidence ?? ''] ?? 1);
+    // Default-state alpha only (confidence tier) — focus never repaints;
+    // off-focus nodes are hidden by nodeVisibility instead.
+    const baseAlpha = ALPHA_BY_CONF[node.confidence ?? ''] ?? 1;
     const op = dimmedByCommunity ? 0.18 : (dimmedByImpact ? 0.2 : baseAlpha);
     ctx.globalAlpha = op;
     ctx.fillStyle = nodeColorCss(node, colorMode);
@@ -780,22 +913,25 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       ctx.textAlign = 'center';
       ctx.fillText(node.name ?? '', node.x ?? 0, (node.y ?? 0) - r - 2);
     }
-  };
+  }, [colorMode, fontSize, dimmedCommunities, dimmedNodes, focusDistance]);
 
-  const pointerArea2D = (node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
-    const r = Math.max(4, 3 + Math.log10((node.usage_score ?? 0) + 1) * 1.5);
+  const pointerArea2D = useCallback((node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
+    const r = Math.max(4, 3 + Math.log10(nodeSizeScore(node) + 1) * 1.5);
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(node.x ?? 0, node.y ?? 0, r + 3, 0, 2 * Math.PI);
     ctx.fill();
-  };
+  }, []);
 
-  const tooltip = (node: GraphNode): string => buildTooltip(node, focusDistance, fontSize);
+  const tooltip = useCallback(
+    (node: GraphNode): string => buildTooltip(node, focusDistance, fontSize),
+    [focusDistance, fontSize],
+  );
 
-  const onClick = (n: GraphNode | { id?: NodeId }) => {
+  const onClick = useCallback((n: GraphNode | { id?: NodeId }) => {
     const id = (n as GraphNode).id;
     if (id) onNodeClick(id);
-  };
+  }, [onNodeClick]);
 
   // Layout key forces a hard remount when viewMode flips so meshes don't leak.
   const key = `fg-${viewMode}-${colorMode}`;
@@ -808,8 +944,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // to skip cycle-forming edges in the level assignment (call graphs
   // routinely have mutual recursion); the edges themselves still render,
   // just without participating in the level computation.
-  const anchorIdForDag = useStore(s => s.anchorId);
-  const dagMode = anchorIdForDag ? 'lr' : undefined;
+  // (anchorId is subscribed above for the graphData split — P2.)
+  const dagMode = anchorId ? 'lr' : undefined;
   // Scale cooldown with node count: 80 ticks suffices for the 400-node
   // boot seed, but the new 30K-node production-only boot needs more
   // time to settle. cooldownTime caps the wall-clock budget so users
@@ -822,6 +958,48 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // dst-end gradient overlay (linkCanvasObject) drawn on top.
   const arrowLength = 6;
   const arrowRelPos = 0.92;
+
+  // P6: 3D link LOD. In 3d-force-graph, linkWidth > 0 upgrades every
+  // link from a batched GL line to a per-link cylinder mesh, and each
+  // directional arrow adds a cone mesh — at 30K+ links that is tens of
+  // thousands of extra draw calls, the dominant 3D cost after
+  // materials. The raw library's default (and the reason its demos
+  // feel effortless) is width 0 → lines.
+  //
+  // Revision (user feedback): the first cut keyed this off
+  // `graphData.links.length > 2000`, i.e. the CURRENTLY displayed
+  // graph — so boot(5K) drew lines, clicking a node (≤800-node BFS
+  // subset) flipped to cylinders+arrows, and changing nodeLimit across
+  // the threshold flipped the whole canvas style. Unpredictable.
+  // The LOD is now tied to VIEW INTENT, which is stable:
+  //   - overview (no anchor): ALWAYS lines — regardless of nodeLimit,
+  //     so 500 and 10K boots look alike and selection doesn't surprise.
+  //   - anchored focus view: cylinders + arrows — the small subgraph
+  //     is where direction/width actually carry meaning, and it can
+  //     afford the meshes. A 4K-link safety cap keeps giant hub
+  //     neighbourhoods from degrading (falls back to lines).
+  const rich3D = !!anchorId && graphData.links.length <= 4000;
+
+  // P4: stable nodeThreeObject. When this accessor's identity changes,
+  // react-force-graph re-runs it for EVERY node — a full mesh rebuild.
+  // The previous inline closure changed identity on every render, so
+  // each focus click / hover-driven re-render rebuilt all N meshes.
+  // Focus/dim state is read through refs; per-node appearance updates
+  // after mount are handled by the focus-halo effect swapping shared
+  // materials (P1). Identity now changes only with colorMode (a full
+  // re-skin, where a rebuild is the intent).
+  const nodeThreeObject = useCallback((node: GraphNode) => {
+    const m = nodeMesh(node, colorMode);
+    meshIndex.set(node.id, m);
+    const baseAlpha = ALPHA_BY_CONF[node.confidence ?? ''] ?? 1;
+    // Default-state colour always; the only modulation is the explicit
+    // Impact-panel dim (focus hides via nodeVisibility, never repaints).
+    const op = dimmedNodesRef.current.has(node.id) ? 0.2 * baseAlpha : baseAlpha;
+    // Shared-material swap (P1): appearance = cache lookup, never an
+    // in-place material mutation.
+    m.material = nodeMaterial(nodeColorHex(node, colorMode), op);
+    return m;
+  }, [colorMode, meshIndex]);
 
   if (viewMode === '2d') {
     return (
@@ -879,8 +1057,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       nodeVisibility={nodeVisibility as never}
       linkVisibility={linkVisibility as never}
       linkColor={linkColor as never}
-      linkWidth={linkWidth as never}
-      linkDirectionalArrowLength={arrowLength}
+      // P6: overview = lines; anchored focus = cylinders + arrows —
+      // see rich3D above.
+      linkWidth={rich3D ? (linkWidth as never) : 0}
+      linkDirectionalArrowLength={rich3D ? arrowLength : 0}
       linkDirectionalArrowRelPos={arrowRelPos}
       // Transparent clear color so the .canvas-host purple/navy
       // radial-gradient (globals.css) bleeds through. Without this,
@@ -891,23 +1071,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       cooldownTicks={cooldownTicks}
       cooldownTime={cooldownTime}
       onNodeClick={onClick as never}
-      nodeThreeObject={((node: GraphNode) => {
-        const m = nodeMesh(node, colorMode);
-        meshIndex.set(node.id, m);
-        // Color override for community mode happens inside nodeMesh; here we
-        // also apply the immediate focus opacity so first-frame is correct.
-        const focusActive = focusDistance.size > 0;
-        const baseAlpha = ALPHA_BY_CONF[node.confidence ?? ''] ?? 1;
-        const op = focusActive ? focusOpacity(node.id, focusDistance) * baseAlpha : baseAlpha;
-        const mat = m.material as import('three').MeshStandardMaterial;
-        mat.opacity = op;
-        mat.transparent = op < 1;
-        // Community color is already baked in via nodeMesh; this assignment
-        // is a no-op when colorMode='lang' but lets us re-skin without
-        // remounting when the toggle flips.
-        mat.color.setHex(nodeColorHex(node, colorMode));
-        return m;
-      }) as never}
+      nodeThreeObject={nodeThreeObject as never}
     />
   );
 });

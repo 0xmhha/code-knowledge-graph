@@ -183,7 +183,7 @@ export default function App() {
         const vm = (typeof localStorage !== 'undefined' && localStorage.getItem('ckg.viewMode')) as ViewMode | null;
         if (vm === '2d' || vm === '3d') setViewMode(vm);
         const cm = (typeof localStorage !== 'undefined' && localStorage.getItem('ckg.colorMode')) as ColorMode | null;
-        if (cm === 'lang' || cm === 'community') setColorMode(cm);
+        if (cm === 'lang' || cm === 'community' || cm === 'type') setColorMode(cm);
         const fs = typeof localStorage !== 'undefined' ? localStorage.getItem('ckg.fontSize') : null;
         if (fs && FONT_SIZES[fs]) setFontSize(FONT_SIZES[fs]);
       } catch { /* localStorage may be blocked */ }
@@ -535,10 +535,11 @@ export default function App() {
         return;
       }
 
-      // Cycle colour mode.
+      // Cycle colour mode: type → lang → community → type.
       if (ev.key === 'm') {
         const cur = useStore.getState().colorMode;
-        const next: ColorMode = cur === 'lang' ? 'community' : 'lang';
+        const next: ColorMode =
+          cur === 'type' ? 'lang' : cur === 'lang' ? 'community' : 'type';
         setColorMode(next);
         try { localStorage.setItem('ckg.colorMode', next); } catch { /* ignore */ }
         return;

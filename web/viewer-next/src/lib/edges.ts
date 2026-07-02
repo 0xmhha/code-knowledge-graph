@@ -27,11 +27,14 @@ export interface EdgeStyle {
 // TODO: when vitest lands (WORK-PLAN Wave-5+), add edges.test.ts asserting
 // EDGE_STYLE keys match schema.
 export const EDGE_STYLE: Record<string, EdgeStyle> = {
-  // structural
+  // structural — previously all three shared 0x888888, which (with the
+  // type-relation greys below) made the boot graph read as one uniform
+  // dim colour on the dark canvas. Distinct hues per type; defines
+  // stays the most muted since it is pure structure.
   contains:        { hidden: true },
-  defines:         { color: 0x888888, width: 1, dash: true },
-  imports:         { color: 0x888888, width: 1 },
-  exports:         { color: 0x888888, width: 1 },
+  defines:         { color: 0x7f8fa6, width: 1, dash: true },
+  imports:         { color: 0x64b5f6, width: 1 },
+  exports:         { color: 0xffb74d, width: 1 },
 
   // call / invoke
   calls:           { color: 0xffffff, width: 1 },
@@ -53,10 +56,12 @@ export const EDGE_STYLE: Record<string, EdgeStyle> = {
   // competing for the warm hues that own G3's main flow.
   awaits:            { color: 0x99ccff, width: 1, dash: true },
 
-  // type relations
-  uses_type:       { color: 0xaaaaaa, width: 1, dash: true },
-  instantiates:    { color: 0xaaaaaa, width: 1, dash: true },
-  references:      { color: 0xaaaaaa, width: 1, dash: true },
+  // type relations — de-greyed (see structural note above): lavender /
+  // green / bright grey so the three most common semantic edges are
+  // tellable apart at a glance.
+  uses_type:       { color: 0xb39ddb, width: 1, dash: true },
+  instantiates:    { color: 0x81c784, width: 1, dash: true },
+  references:      { color: 0xbcc6d4, width: 1, dash: true },
   extends:         { color: 0x6699ff, width: 2 },
   implements:      { color: 0x66ccff, width: 2, dash: true },
   // Schema 1.10 (W-C W2) — Solidity virtual/override inheritance link.

@@ -75,14 +75,15 @@ export default function TopBar({
         {viewMode === '2d' ? '2D' : '3D'}
       </button>
       <button
-        title="Color by language vs community"
+        title="Color by node type / language / community (key: m)"
         onClick={() => {
-          const next = colorMode === 'lang' ? 'community' : 'lang';
+          const next = colorMode === 'type' ? 'lang'
+            : colorMode === 'lang' ? 'community' : 'type';
           setColorMode(next);
           try { localStorage.setItem('ckg.colorMode', next); } catch { /* ignore */ }
         }}
       >
-        {colorMode === 'lang' ? 'LANG' : 'COMMUNITY'}
+        {colorMode === 'type' ? 'TYPE' : colorMode === 'lang' ? 'LANG' : 'COMMUNITY'}
       </button>
       <button
         type="button"

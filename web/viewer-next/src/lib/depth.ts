@@ -1,4 +1,4 @@
-import type { CommitGraph, NodeId } from '@/types';
+import type { CommitGraph, GraphEdge, NodeId } from '@/types';
 import type { IAPI } from '@/lib/api';
 import { useStore, computeFocusDistance } from '@/store/store';
 import { isTestPath } from '@/lib/testFilter';
@@ -65,15 +65,23 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
 
     // Fetch edges for the boot set. With 30K+ nodes we batch the IDs
     // to keep the POST body under a sane size — Go backend handles
-    // ~5K IDs per request comfortably. Each batch resolves to its
-    // owning edges; we let addEdges dedupe across batches.
+    // ~5K IDs per request comfortably.
+    //
+    // P5: accumulate every batch and commit through addEdges ONCE. The
+    // previous per-batch addEdges fired a store notification each time,
+    // which (a) re-copied the edge indexes per batch and (b) — with the
+    // P2 fullData derivation in GraphCanvas — would re-ingest the graph
+    // and restart the simulation once per batch during boot. One call =
+    // one index rebuild = one ingest. addEdges still dedupes internally.
     const ids = top.map(n => n.id);
     const BATCH = 5000;
+    const collected: GraphEdge[] = [];
     for (let i = 0; i < ids.length; i += BATCH) {
       const slice = ids.slice(i, i + BATCH);
       const fresh = await api.edges(slice);
-      if (fresh.length) s.addEdges(fresh);
+      if (fresh.length) collected.push(...fresh);
     }
+    if (collected.length) s.addEdges(collected);
 
     return {
       visibleIds: new Set(ids),
