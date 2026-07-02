@@ -8,6 +8,13 @@ import type { GraphNode, ColorMode } from '@/types';
 const LANG_COLOR_HEX: Record<string, number> = { go: 0x29c7e8, ts: 0x5c9eff, sol: 0xffc46b };
 const FALLBACK_HEX = 0xb0b3c6;
 
+// As-you-type search highlight (projector-style): matched nodes tint
+// warm red while the query is non-empty, restoring their palette colour
+// the moment the query clears. Deliberately outside every palette above
+// so a highlighted node is unambiguous in any color mode.
+export const SEARCH_HIGHLIGHT_HEX = 0xff5a4f;
+export const SEARCH_HIGHLIGHT_CSS = '#ff5a4f';
+
 // hexCss: single source of truth between the 3D (hex number) and 2D
 // (CSS string) colour paths — the old duplicated tables drifted.
 function hexCss(hex: number): string {

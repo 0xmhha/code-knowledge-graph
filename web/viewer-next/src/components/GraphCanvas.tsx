@@ -6,7 +6,8 @@ import { useStore } from '@/store/store';
 import { useShallow } from 'zustand/react/shallow';
 import type { GraphEdge, GraphNode, NodeId, ViewMode } from '@/types';
 import {
-  ALPHA_BY_CONF, nodeColorCss, nodeColorHex, nodeMaterial, nodeMesh, nodeSizeScore,
+  ALPHA_BY_CONF, SEARCH_HIGHLIGHT_CSS, SEARCH_HIGHLIGHT_HEX,
+  nodeColorCss, nodeColorHex, nodeMaterial, nodeMesh, nodeSizeScore,
 } from '@/lib/encoding';
 import { EDGE_STYLE, edgeToGroup } from '@/lib/edges';
 
@@ -588,6 +589,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // accessor (P4) — same pattern as focusDistanceRef above.
   const dimmedNodesRef = useRef(dimmedNodes);
   dimmedNodesRef.current = dimmedNodes;
+  // As-you-type search highlight set (SearchBox writes per keystroke).
+  const searchHighlightIds = useStore(s => s.searchHighlightIds);
+  const searchHighlightRef = useRef(searchHighlightIds);
+  searchHighlightRef.current = searchHighlightIds;
   // P3: the ripple rAF used to run unconditionally for the lifetime of
   // the canvas — 60fps wakeups even when no ripple was in flight (the
   // overwhelmingly common state). The loop now starts when a fresh
@@ -664,18 +669,30 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       if (!n) continue;
       const baseAlpha = ALPHA_BY_CONF[n.confidence ?? ''] ?? 1;
       // Colours/opacity stay at their default-state values regardless of
-      // focus (focus now hides instead of dims). The only modulation is
-      // the explicit Impact-panel dim.
+      // focus (focus now hides instead of dims). Two explicit user-driven
+      // modulations exist: the as-you-type search highlight (warm red,
+      // reverts when the query clears) and the Impact-panel dim.
       const op = dimmedNodes.has(id) ? 0.2 * baseAlpha : baseAlpha;
+      const hex = searchHighlightIds.has(id)
+        ? SEARCH_HIGHLIGHT_HEX
+        : nodeColorHex(n, colorMode);
       // P1: materials are SHARED via the encoding.ts cache — mutating
       // opacity in place would dim every node of the same colour. Swap
       // the mesh's material reference to the cache entry for the target
       // (color, opacity) instead; the discrete opacity tiers keep the
       // cache bounded and the swap is just a pointer write (no
       // needsUpdate/recompile).
-      mesh.material = nodeMaterial(nodeColorHex(n, colorMode), op);
+      mesh.material = nodeMaterial(hex, op);
     }
-  }, [dimmedNodes, viewMode, meshIndex, colorMode]);
+  }, [dimmedNodes, searchHighlightIds, viewMode, meshIndex, colorMode]);
+
+  // 2D repaint on highlight change — ForceGraph-2D idles after cooldown,
+  // so without an explicit refresh the search tint would only appear on
+  // the next interaction-driven redraw. Cheap: draw only, no sim tick.
+  useEffect(() => {
+    if (viewMode !== '2d') return;
+    (fgRef.current as { refresh?: () => void } | null)?.refresh?.();
+  }, [searchHighlightIds, viewMode]);
 
   // P4: every accessor below is memoized with its actual inputs as
   // deps. react-force-graph diffs props by identity — an inline closure
@@ -862,7 +879,10 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const baseAlpha = ALPHA_BY_CONF[node.confidence ?? ''] ?? 1;
     const op = dimmedByCommunity ? 0.18 : (dimmedByImpact ? 0.2 : baseAlpha);
     ctx.globalAlpha = op;
-    ctx.fillStyle = nodeColorCss(node, colorMode);
+    // As-you-type search highlight mirrors the 3D material swap.
+    ctx.fillStyle = searchHighlightIds.has(node.id)
+      ? SEARCH_HIGHLIGHT_CSS
+      : nodeColorCss(node, colorMode);
     // Shape differentiation (#3a): map node.type to a 2D primitive.
     // The fallback is a circle so unknown types degrade gracefully.
     // Sizes derived from `r` so usage_score still drives node prominence
@@ -913,7 +933,7 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       ctx.textAlign = 'center';
       ctx.fillText(node.name ?? '', node.x ?? 0, (node.y ?? 0) - r - 2);
     }
-  }, [colorMode, fontSize, dimmedCommunities, dimmedNodes, focusDistance]);
+  }, [colorMode, fontSize, dimmedCommunities, dimmedNodes, focusDistance, searchHighlightIds]);
 
   const pointerArea2D = useCallback((node: GraphNode, color: string, ctx: CanvasRenderingContext2D) => {
     const r = Math.max(4, 3 + Math.log10(nodeSizeScore(node) + 1) * 1.5);
@@ -992,12 +1012,16 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     const m = nodeMesh(node, colorMode);
     meshIndex.set(node.id, m);
     const baseAlpha = ALPHA_BY_CONF[node.confidence ?? ''] ?? 1;
-    // Default-state colour always; the only modulation is the explicit
-    // Impact-panel dim (focus hides via nodeVisibility, never repaints).
+    // Default-state colour always; explicit user-driven modulations only
+    // (search highlight / Impact dim — focus hides via nodeVisibility,
+    // never repaints). Refs keep this accessor's identity stable.
     const op = dimmedNodesRef.current.has(node.id) ? 0.2 * baseAlpha : baseAlpha;
+    const hex = searchHighlightRef.current.has(node.id)
+      ? SEARCH_HIGHLIGHT_HEX
+      : nodeColorHex(node, colorMode);
     // Shared-material swap (P1): appearance = cache lookup, never an
     // in-place material mutation.
-    m.material = nodeMaterial(nodeColorHex(node, colorMode), op);
+    m.material = nodeMaterial(hex, op);
     return m;
   }, [colorMode, meshIndex]);
 

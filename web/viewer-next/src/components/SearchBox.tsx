@@ -11,10 +11,35 @@ export default function SearchBox({ api }: Props) {
   const [q, setQ] = useState('');
   const setSearchResults = useStore(s => s.setSearchResults);
   const setSearchQuery = useStore(s => s.setSearchQuery);
+  const setSearchHighlightIds = useStore(s => s.setSearchHighlightIds);
   const loadNodes = useStore(s => s.loadNodes);
   const addEdges = useStore(s => s.addEdges);
   const commit = useStore(s => s.commit);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Instant highlight (projector-style): every keystroke substring-
+  // matches the ALREADY-LOADED nodes and tints them on the canvas —
+  // no debounce, no fetch, no view change. The backend search below
+  // (debounced) unions its results in once they land, catching nodes
+  // the client-side pass can't know about. HIGHLIGHT_CAP bounds the
+  // per-keystroke material churn on generic 1–2 letter queries.
+  const HIGHLIGHT_CAP = 800;
+  useEffect(() => {
+    const ql = q.trim().toLowerCase();
+    if (!ql) {
+      setSearchHighlightIds(new Set());
+      return;
+    }
+    const ids = new Set<NodeId>();
+    for (const n of useStore.getState().nodes.values()) {
+      if (ids.size >= HIGHLIGHT_CAP) break;
+      if (
+        n.name?.toLowerCase().includes(ql) ||
+        n.qualified_name?.toLowerCase().includes(ql)
+      ) ids.add(n.id);
+    }
+    setSearchHighlightIds(ids);
+  }, [q, setSearchHighlightIds]);
 
   // clearSearch resets the query AND reverts visibleIds to the most
   // recent non-search root snapshot. Without the visibleIds revert,
@@ -25,6 +50,7 @@ export default function SearchBox({ api }: Props) {
     setQ('');
     setSearchQuery('');
     setSearchResults([]);
+    setSearchHighlightIds(new Set());
     const cur = useStore.getState();
     // Search clear is part of the "leave search context" reset — wipe
     // the dim set so a stale impact spotlight from before the search
@@ -40,7 +66,7 @@ export default function SearchBox({ api }: Props) {
       reason: 'search-pick',
     });
     inputRef.current?.focus();
-  }, [setSearchResults, setSearchQuery, commit]);
+  }, [setSearchResults, setSearchQuery, setSearchHighlightIds, commit]);
 
   useEffect(() => {
     const handler = (ev: KeyboardEvent) => {
@@ -77,8 +103,9 @@ export default function SearchBox({ api }: Props) {
     if (storeQuery === '' && qRef.current !== '') {
       setQ('');
       setSearchResults([]);
+      setSearchHighlightIds(new Set());
     }
-  }, [storeQuery, setSearchResults]);
+  }, [storeQuery, setSearchResults, setSearchHighlightIds]);
 
   useEffect(() => {
     if (!q.trim()) {
@@ -94,6 +121,13 @@ export default function SearchBox({ api }: Props) {
         }
         loadNodes(results);
         setSearchResults(results);
+
+        // Union backend hits into the live highlight — they can include
+        // nodes the instant client-side pass couldn't see (not yet
+        // loaded, or matched on backend-only fields).
+        const hl = new Set(useStore.getState().searchHighlightIds);
+        for (const r of results) hl.add(r.id);
+        setSearchHighlightIds(hl);
 
         // Push results onto the canvas as well as the sidebar — without
         // this, hits show up in the list but never appear in the graph,
@@ -123,7 +157,7 @@ export default function SearchBox({ api }: Props) {
       }
     }, 200);
     return () => clearTimeout(t);
-  }, [q, api, setSearchResults, loadNodes, addEdges, commit]);
+  }, [q, api, setSearchResults, setSearchHighlightIds, loadNodes, addEdges, commit]);
 
   return (
     <span className="search-wrap">

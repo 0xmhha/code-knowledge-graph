@@ -81,6 +81,11 @@ interface State {
   selectedId: NodeId | null;
   searchResults: GraphNode[];
   searchQuery: string;
+  // searchHighlightIds: live as-you-type match set (projector-style).
+  // Every keystroke updates it from a client-side substring match over
+  // the loaded nodes; the canvas tints these reddish WITHOUT changing
+  // the view (no visibleIds commit). Cleared when the query empties.
+  searchHighlightIds: Set<NodeId>;
   anchorId: NodeId | null;
   depth: number;
 
@@ -177,6 +182,7 @@ interface State {
   setSelected: (id: NodeId | null) => void;
   setSearchResults: (rs: GraphNode[]) => void;
   setSearchQuery: (q: string) => void;
+  setSearchHighlightIds: (ids: Set<NodeId>) => void;
   setAnchor: (id: NodeId | null, depth: number) => void;
   setViewMode: (m: ViewMode) => void;
   setColorMode: (m: ColorMode) => void;
@@ -290,6 +296,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   selectedId: null,
   searchResults: [],
   searchQuery: '',
+  searchHighlightIds: new Set(),
   anchorId: null,
   depth: 0,
   viewMode: '3d',
@@ -409,6 +416,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   setSelected: (id) => set({ selectedId: id }),
   setSearchResults: (rs) => set({ searchResults: rs }),
   setSearchQuery: (q) => set({ searchQuery: q }),
+  setSearchHighlightIds: (ids) => set({ searchHighlightIds: ids }),
   setAnchor: (id, depth) => set({ anchorId: id, depth }),
   setViewMode: (m) => set({ viewMode: m }),
   setColorMode: (m) => set({ colorMode: m }),
