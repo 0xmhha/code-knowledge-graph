@@ -16,20 +16,20 @@
     "react-dom": "18.3.1",
     "react-force-graph-2d": "^1.27.0",
     "react-force-graph-3d": "^1.26.0",
-    "three": "^0.185.0",
+    "three": "^0.185.1",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
-    "@types/node": "^26.0.1",
+    "@types/node": "^26.1.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@types/three": "^0.184.1",
-    "@typescript-eslint/parser": "^8.62.0",
+    "@types/three": "^0.185.0",
+    "@typescript-eslint/parser": "^8.62.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.1.1",
     "typescript": "^5.5.4",
-    "typescript-eslint": "^8.62.0"
+    "typescript-eslint": "^8.62.1"
   },
   "overrides": {
     "postcss": "^8.5.12"
