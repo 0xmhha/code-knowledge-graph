@@ -134,6 +134,9 @@ export default function App() {
   const setLastRenderMs = useStore(s => s.setLastRenderMs);
   const setViewMode = useStore(s => s.setViewMode);
   const setColorMode = useStore(s => s.setColorMode);
+  const setLayoutMode = useStore(s => s.setLayoutMode);
+  const layoutMode = useStore(s => s.layoutMode);
+  const anchorIdLive = useStore(s => s.anchorId);
   const hydrateFromStorage = useStore(s => s.hydrateFromStorage);
 
   // Apply persisted preferences (graphModeIsolation, firstTimeSeen,
@@ -184,6 +187,8 @@ export default function App() {
         if (vm === '2d' || vm === '3d') setViewMode(vm);
         const cm = (typeof localStorage !== 'undefined' && localStorage.getItem('ckg.colorMode')) as ColorMode | null;
         if (cm === 'lang' || cm === 'community' || cm === 'type') setColorMode(cm);
+        const lm = typeof localStorage !== 'undefined' ? localStorage.getItem('ckg.layoutMode') : null;
+        if (lm === 'force' || lm === 'dag') setLayoutMode(lm);
         const fs = typeof localStorage !== 'undefined' ? localStorage.getItem('ckg.fontSize') : null;
         if (fs && FONT_SIZES[fs]) setFontSize(FONT_SIZES[fs]);
       } catch { /* localStorage may be blocked */ }
@@ -212,7 +217,7 @@ export default function App() {
       requestAnimationFrame(() => setLastRenderMs(performance.now() - t0));
     })();
     return () => { cancelled = true; };
-  }, [commit, setColorMode, setFontSize, setLastRenderMs, setViewMode]);
+  }, [commit, setColorMode, setFontSize, setLastRenderMs, setViewMode, setLayoutMode]);
 
   const navigate = useCallback(async (mutator: () => Promise<void>) => {
     if (!api) return;
@@ -756,6 +761,14 @@ export default function App() {
             localStorage; renders nothing structural when api is still
             booting (cheap to mount unconditionally). */}
         <CanvasLegend />
+        {/* 계층(흐름) 레이아웃 축 라벨 — "레이아웃 = 던지는 질문"을 화면에
+            명시한다. 전역 흐름 모드 또는 앵커 내비게이션(국소 DAG) 시 표시. */}
+        {(layoutMode === 'dag' || anchorIdLive != null) && (
+          <div className="dag-axis-hint">
+            → 호출·의존 방향 — 왼쪽: 진입점·상위 호출자 / 오른쪽: 말단
+            <span className="dag-axis-sub"> (엣지 필터로 calls만 남기면 순수 호출 계층)</span>
+          </div>
+        )}
       </div>
       <div className="panel">
         {/* Resize handle on the panel's left edge. Hover paints a

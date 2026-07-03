@@ -2,25 +2,53 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GRAPH_GROUPS } from '@/lib/edges';
+import { typeColorCss } from '@/lib/encoding';
 import { usePersistedBool } from '@/lib/usePersistedState';
 
 interface ShapeEntry {
   shape: 'circle' | 'hex' | 'square' | 'triangle' | 'diamond' | 'star' | 'micro' | 'tri-up' | 'chevron' | 'lock' | 'asterisk';
   label: string;
+  // types: 이 행이 대표하는 node.type 들 — TYPE 색 모드(기본값)의 실제
+  // 팔레트 점을 행 옆에 그려 "색 = 타입" 채널을 범례에 포함시킨다.
+  // 렌더와 동일 소스(encoding.typeColorCss)라 드리프트 불가.
+  types: string[];
 }
 
+// 감사(2026-07-03) 반영: 2D drawShape 의 폴백(원)으로 렌더되던
+// Contract/Mapping/Event · Enum/Class/Modifier/Constructor ·
+// Import/Export/Decorator 를 명시 행으로 추가하고, triangle 행에
+// Parameter·LocalVariable 누락을 보충했다. 모양 아이콘은 2D 캔버스
+// 기준이며 3D 는 타입별 대응 입체(콘/큐브/토러스/…)를 쓴다 — 본문
+// 캡션에 명시. 색 점은 두 모드 공통.
 const SHAPES: ReadonlyArray<ShapeEntry> = [
-  { shape: 'circle',   label: 'Function · Method' },
-  { shape: 'hex',      label: 'Type · Struct · Interface · TypeAlias' },
-  { shape: 'square',   label: 'Package' },
-  { shape: 'triangle', label: 'Field · Variable · Constant' },
-  { shape: 'diamond',  label: 'File' },
-  { shape: 'star',     label: 'Commit' },
-  { shape: 'micro',    label: 'CallSite · IfStmt · LoopStmt · Hunk · …' },
-  { shape: 'tri-up',   label: 'Goroutine' },
-  { shape: 'chevron',  label: 'Channel' },
-  { shape: 'lock',     label: 'Mutex' },
-  { shape: 'asterisk', label: 'Endpoint' },
+  { shape: 'circle',   label: 'Function · Method',
+    types: ['Function', 'Method'] },
+  { shape: 'hex',      label: 'Type · Struct · Interface · TypeAlias',
+    types: ['Type', 'Struct', 'Interface', 'TypeAlias'] },
+  { shape: 'square',   label: 'Package',
+    types: ['Package'] },
+  { shape: 'triangle', label: 'Field · Var · Const · Param · LocalVar',
+    types: ['Field', 'Variable', 'Constant', 'Parameter', 'LocalVariable'] },
+  { shape: 'diamond',  label: 'File',
+    types: ['File'] },
+  { shape: 'star',     label: 'Commit',
+    types: ['Commit'] },
+  { shape: 'circle',   label: 'Contract · Mapping · Event (sol)',
+    types: ['Contract', 'Mapping', 'Event'] },
+  { shape: 'circle',   label: 'Enum · Class · Modifier · Constructor',
+    types: ['Enum', 'Class', 'Modifier', 'Constructor'] },
+  { shape: 'circle',   label: 'Import · Export · Decorator',
+    types: ['Import', 'Export', 'Decorator'] },
+  { shape: 'micro',    label: 'CallSite · IfStmt · LoopStmt · Hunk · …',
+    types: ['CallSite', 'Hunk'] },
+  { shape: 'tri-up',   label: 'Goroutine',
+    types: ['Goroutine'] },
+  { shape: 'chevron',  label: 'Channel',
+    types: ['Channel'] },
+  { shape: 'lock',     label: 'Mutex',
+    types: ['Mutex'] },
+  { shape: 'asterisk', label: 'Endpoint',
+    types: ['Endpoint'] },
 ];
 
 interface EdgeStyleEntry {
@@ -142,9 +170,11 @@ function EdgeIcon({ entry }: { entry: EdgeStyleEntry }) {
 // reading aid, not a primary surface.
 const LS_OPEN = 'ckg.canvasLegend.open';
 const LS_W = 'ckg.canvasLegend.w';
-const LS_H = 'ckg.canvasLegend.h';
+// h2: 범례 행이 11→14개로 늘며 기본 높이를 220→420 으로 올렸다. 구 키에
+// 저장된 220 안팎 값이 새 기본값을 덮지 않도록 키를 버전 업(h → h2).
+const LS_H = 'ckg.canvasLegend.h2';
 const MIN_W = 160, MAX_W = 480;
-const MIN_H = 120, MAX_H = 520;
+const MIN_H = 120, MAX_H = 680;
 
 // CanvasLegend renders in the bottom-right corner of the canvas-host as
 // a tip overlay — small enough to leave the graph visible, draggable
@@ -163,8 +193,8 @@ export default function CanvasLegend() {
   // mount so a returning user gets the previously-resized box on
   // their second render — one frame after the open/220×220 default.
   const [open, setOpen] = usePersistedBool(LS_OPEN, true);
-  const [width, setWidth] = useState<number>(220);
-  const [height, setHeight] = useState<number>(220);
+  const [width, setWidth] = useState<number>(240);
+  const [height, setHeight] = useState<number>(420);
   useEffect(() => {
     if (typeof localStorage === 'undefined') return;
     try {
@@ -248,10 +278,27 @@ export default function CanvasLegend() {
       </div>
       <div className="canvas-legend-body">
         <h5>Node Shapes</h5>
+        <div style={{ color: '#7d8188', fontSize: 10, margin: '0 0 4px 2px' }}>
+          모양 = 2D 기준 (3D는 대응 입체) · 점 색 = TYPE 색 모드
+        </div>
         {SHAPES.map(s => (
-          <div key={s.shape} className="legend-row">
+          // key 는 label — circle 모양이 여러 행에서 재사용되므로 shape 를
+          // key 로 쓰면 React 가 행을 병합해 버린다.
+          <div key={s.label} className="legend-row">
             <span className="legend-icon"><ShapeIcon shape={s.shape} /></span>
             <span className="legend-label">{s.label}</span>
+            <span style={{ display: 'inline-flex', gap: 2, marginLeft: 'auto', flex: 'none' }}>
+              {s.types.map(t => (
+                <span
+                  key={t}
+                  title={t}
+                  style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: typeColorCss(t), display: 'inline-block',
+                  }}
+                />
+              ))}
+            </span>
           </div>
         ))}
         <h5>Edge Styles</h5>

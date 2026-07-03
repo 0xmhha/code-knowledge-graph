@@ -298,7 +298,35 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }
     return { nodes, links };
   }, [anchorId, visibleIds, allNodes, edgesBySrc]);
-  const graphData = anchoredData ?? fullData;
+  // 계층(흐름) 모드 — 전역 DAG. dag 레벨 계산이 '보이는·허용된' 엣지에서만
+  // 이뤄지도록 필터된 데이터셋을 별도로 만든다: fullData 로 dag 를 돌리면
+  // 숨긴 엣지 타입(contains/defines 등)까지 레벨 배정에 끼어들어 호출
+  // 흐름이 왜곡된다. force 모드의 P2 안정성(재시작 회피)은 그대로 —
+  // 이 데이터셋은 layoutMode==='dag' 일 때만 존재한다.
+  const layoutMode = useStore(s => s.layoutMode);
+  const edgeTypeWhitelistForDag = useStore(s => s.edgeTypeWhitelist);
+  const dagData = useMemo(() => {
+    if (layoutMode !== 'dag' || anchorId) return null;
+    const nodes: GraphNode[] = [];
+    for (const id of visibleIds) {
+      const n = allNodes.get(id);
+      if (n) nodes.push(n);
+    }
+    const links: GraphEdge[] = [];
+    for (const id of visibleIds) {
+      const outs = edgesBySrc.get(id);
+      if (!outs) continue;
+      for (const e of outs) {
+        if (!visibleIds.has(e.dst)) continue;
+        if (EDGE_STYLE[e.type]?.hidden) continue;
+        if (!edgeTypeWhitelistForDag.has(e.type)) continue;
+        links.push(e);
+      }
+    }
+    return { nodes, links };
+  }, [layoutMode, anchorId, visibleIds, allNodes, edgesBySrc, edgeTypeWhitelistForDag]);
+
+  const graphData = anchoredData ?? dagData ?? fullData;
 
   // Mirror graphData into refs so imperative code (centerOnNode, the
   // orbit-follow loop) reads live positions without being re-created.
@@ -570,6 +598,102 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     }, 350);
     return () => clearTimeout(id);
   }, [focusDistance, anchorId]);
+
+  // 흐름(dag) 모드 y/z 압축 force. dag 는 x(계층축)만 구속하고 y/z 는
+  // 반발력만 받아 소수 노드가 수직으로 폭주하는데, 그 아웃라이어가 fit
+  // 이후 카메라 바로 앞에 걸리면 거대 반투명 메시가 화면 상부를 덮는
+  // "블러 레이어"처럼 보인다(user 시각 확인 + DOM elementsFromPoint 프로브
+  // 로 캔버스 내부 원인임을 확증). 원점 방향 약한 당김(0.08)으로 y/z 를
+  // 밴드로 압축해 아웃라이어 자체를 제거한다. force 모드 복귀 시 해제.
+  useEffect(() => {
+    type ForceFn = ((alpha: number) => void) & { initialize?: (nodes: unknown[]) => void };
+    type FGForce = { d3Force?: (name: string, fn?: ForceFn | null) => unknown };
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts++;
+      const fg = fgRef.current as FGForce | null;
+      if (!fg?.d3Force) {
+        if (attempts > 40) clearInterval(timer);
+        return;
+      }
+      if (layoutMode === 'dag') {
+        const compact = (axis: 'y' | 'z'): ForceFn => {
+          let ns: Array<Record<string, number | undefined>> = [];
+          const f = ((alpha: number) => {
+            const vKey = 'v' + axis;
+            for (const n of ns) {
+              const p = n[axis];
+              if (typeof p === 'number') n[vKey] = (n[vKey] ?? 0) - p * 0.08 * alpha;
+            }
+          }) as ForceFn;
+          f.initialize = nodes => { ns = nodes as Array<Record<string, number | undefined>>; };
+          return f;
+        };
+        fg.d3Force('compactY', compact('y'));
+        fg.d3Force('compactZ', compact('z'));
+      } else {
+        fg.d3Force('compactY', null);
+        fg.d3Force('compactZ', null);
+      }
+      clearInterval(timer);
+    }, 50);
+    return () => clearInterval(timer);
+  }, [layoutMode, viewMode]);
+
+  // 레이아웃 모드 전환 시 카메라 재프레이밍. dag 'lr' 는 force 클라우드와
+  // 전혀 다른 공간 범위(좌→우 계층 벽)로 노드를 재배치하는데, 카메라를
+  // 그대로 두면 그래프가 원거리/측면에 놓여 "색이 어두워지고 배경이
+  // 달라졌다"로 체감된다(스크린샷 대조로 확인 — force 뷰의 은은한 글로우는
+  // 링크 헤이즈였고, 프레이밍이 빠지면 그것까지 사라진다). 재배치가 진행될
+  // 시간을 두고 두 번 맞춘다: 1.5s(1차 안정) + 3.2s(cooldown 이후 확정).
+  const layoutFitSkipRef = useRef(true);
+  useEffect(() => {
+    if (layoutFitSkipRef.current) { layoutFitSkipRef.current = false; return; } // 마운트 시 부팅 fit 과 중복 방지
+    type Vec3 = { x: number; y: number; z: number };
+    type FGFit = {
+      zoomToFit?: (ms?: number, padding?: number, filter?: (n: GraphNode) => boolean) => void;
+      cameraPosition?: (pos?: Vec3, lookAt?: Vec3, ms?: number) => void;
+    };
+    // dag 는 아웃라이어가 bbox 를 폭파시킨다: 깊은 호출 체인이 레벨 ×
+    // dagLevelDistance(120) 로 수만 유닛까지 뻗어, 전체-bbox fit 은
+    // 본체 밀집부를 티끌로 만든다(스크린샷 검증). 3~97 퍼센타일 x 범위의
+    // 노드만 프레이밍해 밀집부를 화면에 채운다.
+    const fitDense = () => {
+      const fg = fgRef.current as FGFit | null;
+      if (!fg?.zoomToFit) return;
+      const nodes = (graphDataRef.current?.nodes ?? []) as Array<GraphNode & { z?: number }>;
+      if (nodes.length <= 50) { fg.zoomToFit(500, 60); return; }
+      // 3축 각각 3~97 퍼센타일 범위 계산 — dag 는 x 를 구속하지만 y/z 는
+      // 반발력만 받아 소수 노드가 수직으로 폭주한다(실측: x 는 ±960 인데
+      // 전체 bbox fit 이 티끌로 보임 = y/z 아웃라이어). 세 축 모두의
+      // 밀집 범위 교집합에 드는 노드만 프레이밍한다.
+      const range = (get: (n: GraphNode & { z?: number }) => number | undefined) => {
+        const vs = nodes.map(get).filter((v): v is number => typeof v === 'number').sort((a, b) => a - b);
+        if (!vs.length) return null;
+        return [vs[Math.floor(vs.length * 0.03)], vs[Math.floor(vs.length * 0.97)]] as const;
+      };
+      const rx = range(n => n.x), ry = range(n => n.y), rz = range(n => n.z);
+      fg.zoomToFit(500, 60, (n: GraphNode & { z?: number }) =>
+        (!rx || (typeof n.x === 'number' && n.x >= rx[0] && n.x <= rx[1])) &&
+        (!ry || (typeof n.y === 'number' && n.y >= ry[0] && n.y <= ry[1])) &&
+        (!rz || (n.z == null || (n.z >= rz[0] && n.z <= rz[1]))));
+    };
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    if (layoutMode === 'dag') {
+      // 카메라를 정면(+z)으로 정렬 — lr 계층 벽을 측면에서 보면 세로
+      // 슬랩으로 보인다. 이후 재배치가 진행/안정되는 시점에 두 번 fit.
+      timers.push(setTimeout(() => {
+        (fgRef.current as FGFit | null)?.cameraPosition?.(
+          { x: 0, y: 0, z: 900 }, { x: 0, y: 0, z: 0 }, 300);
+      }, 1100));
+      timers.push(setTimeout(fitDense, 1800));
+      timers.push(setTimeout(fitDense, 3400));
+    } else {
+      timers.push(setTimeout(fitDense, 1500));
+      timers.push(setTimeout(fitDense, 3200));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [layoutMode]);
 
   // M2: BFS-ripple — when a fresh focusDistance lands (after a node
   // selection / trace) pulse the focused subgraph outward from dist=0,
@@ -965,7 +1089,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // routinely have mutual recursion); the edges themselves still render,
   // just without participating in the level computation.
   // (anchorId is subscribed above for the graphData split — P2.)
-  const dagMode = anchorId ? 'lr' : undefined;
+  // 전역 흐름 모드(layoutMode==='dag')에서도 좌→우 계층을 적용한다.
+  const dagMode = (anchorId || layoutMode === 'dag') ? 'lr' : undefined;
   // Scale cooldown with node count: 80 ticks suffices for the 400-node
   // boot seed, but the new 30K-node production-only boot needs more
   // time to settle. cooldownTime caps the wall-clock budget so users

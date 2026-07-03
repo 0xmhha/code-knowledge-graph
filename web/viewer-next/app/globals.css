@@ -1184,6 +1184,34 @@ html, body {
    via localStorage (ckg.canvasLegend.open). Section-level open state is
    not persisted — opening the legend always shows both sections so
    users see all the symbols at a glance. */
+/* 계층(흐름) 레이아웃 축 라벨 — canvas-host 하단 중앙 오버레이.
+   "이 뷰는 무슨 질문에 답하는가"(호출 방향)를 화면에 명시한다.
+
+   셀렉터를 `.canvas-host > .dag-axis-hint` 로 쓴 이유(중요): 위쪽의
+   `.canvas-host > div { width:100%; height:100% }` (force-graph 래퍼용)
+   가 특이도 (0,1,1) 로 이 오버레이에도 적용돼, 작은 필이 캔버스 전체를
+   덮는 78% 어둠 베일이 됐었다(user 가 "블러 레이어"로 관찰 — 하단
+   border 라인 아래 scene-nav-info 영역만 정상으로 보이던 원인).
+   (0,2,0) 특이도 + 명시적 크기로 그 강제 규칙을 무효화한다. */
+.canvas-host > .dag-axis-hint {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 14px;
+  width: max-content;
+  height: max-content;
+  z-index: 5;
+  pointer-events: none;
+  font-size: 12px;
+  color: #cfd0d3;
+  background: rgba(15, 17, 20, 0.78);
+  border: 1px solid #2a2c30;
+  border-radius: 6px;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+.dag-axis-hint .dag-axis-sub { color: #8a8d93; font-size: 11px; }
+
 /* Bottom-right tip box. width/height come from inline style (state) so
    the user-driven resize wins over the rule. The corner resizer is at
    the top-left because the box anchors at the bottom-right — dragging

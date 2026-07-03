@@ -24,8 +24,10 @@ export default function TopBar({
 }: Props) {
   const viewMode = useStore(s => s.viewMode);
   const colorMode = useStore(s => s.colorMode);
+  const layoutMode = useStore(s => s.layoutMode);
   const setViewMode = useStore(s => s.setViewMode);
   const setColorMode = useStore(s => s.setColorMode);
+  const setLayoutMode = useStore(s => s.setLayoutMode);
   const excludeTests = useStore(s => s.excludeTests);
   const setExcludeTests = useStore(s => s.setExcludeTests);
   const nodeLimit = useStore(s => s.nodeLimit);
@@ -84,6 +86,16 @@ export default function TopBar({
         }}
       >
         {colorMode === 'type' ? 'TYPE' : colorMode === 'lang' ? 'LANG' : 'COMMUNITY'}
+      </button>
+      <button
+        title="레이아웃 = 던지는 질문 — 군집(force): 무엇끼리 뭉치나 / 흐름(계층): 무엇이 무엇을 부르나 (좌→우)"
+        onClick={() => {
+          const next = layoutMode === 'force' ? 'dag' : 'force';
+          setLayoutMode(next);
+          try { localStorage.setItem('ckg.layoutMode', next); } catch { /* ignore */ }
+        }}
+      >
+        {layoutMode === 'force' ? '군집' : '흐름→'}
       </button>
       <button
         type="button"

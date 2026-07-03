@@ -86,6 +86,11 @@ interface State {
   // the loaded nodes; the canvas tints these reddish WITHOUT changing
   // the view (no visibleIds commit). Cleared when the query empties.
   searchHighlightIds: Set<NodeId>;
+  // layoutMode: "레이아웃 = 데이터에 던지는 질문" 전환.
+  //   force — 군집 구조 (무엇끼리 뭉치나; 기본)
+  //   dag   — 호출·의존 흐름 (무엇이 무엇을 부르나; 좌→우 계층)
+  // anchorId 기반 dagMode(내비게이션 시 국소 DAG)와 별개의 전역 모드.
+  layoutMode: 'force' | 'dag';
   anchorId: NodeId | null;
   depth: number;
 
@@ -183,6 +188,7 @@ interface State {
   setSearchResults: (rs: GraphNode[]) => void;
   setSearchQuery: (q: string) => void;
   setSearchHighlightIds: (ids: Set<NodeId>) => void;
+  setLayoutMode: (m: 'force' | 'dag') => void;
   setAnchor: (id: NodeId | null, depth: number) => void;
   setViewMode: (m: ViewMode) => void;
   setColorMode: (m: ColorMode) => void;
@@ -297,6 +303,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   searchResults: [],
   searchQuery: '',
   searchHighlightIds: new Set(),
+  layoutMode: 'force',
   anchorId: null,
   depth: 0,
   viewMode: '3d',
@@ -417,6 +424,7 @@ export const useStore = create<State>()(subscribeWithSelector((set, get) => ({
   setSearchResults: (rs) => set({ searchResults: rs }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setSearchHighlightIds: (ids) => set({ searchHighlightIds: ids }),
+  setLayoutMode: (m) => set({ layoutMode: m }),
   setAnchor: (id, depth) => set({ anchorId: id, depth }),
   setViewMode: (m) => set({ viewMode: m }),
   setColorMode: (m) => set({ colorMode: m }),

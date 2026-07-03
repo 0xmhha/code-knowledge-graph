@@ -58,17 +58,26 @@ export const ALPHA_BY_CONF: Record<string, number> = {
 // - Hue spread uses the 137.5° golden angle so adjacent IDs land on
 //   visually distinct hues (the same trick used by D3's interpolateRainbow
 //   variants).
-// - Saturation/Lightness fixed in a band that reads well on dark bg.
+// - S/L: 55%/55% 는 2D 캔버스에선 읽혔지만 3D 에서 어두웠다 — Lambert
+//   재질은 조명 각도에 따라 원색보다 어둡게 렌더되므로, 다크 배경에서
+//   커뮤니티 색이 배경에 묻혔다(user feedback). 72%/66% 로 상향해 조명
+//   감쇠 후에도 밝은 색으로 남게 한다. null 폴백도 0x888888 → 밝은 회색.
 export function communityColorHex(communityId: number | undefined | null): number {
-  if (communityId == null) return 0x888888;
+  if (communityId == null) return 0xb0b3c6;
   const hue = (communityId * 137.508) % 360;
-  return hslToRgbHex(hue / 360, 0.55, 0.55);
+  return hslToRgbHex(hue / 360, 0.72, 0.66);
 }
 
 export function communityColorCss(communityId: number | undefined | null): string {
-  if (communityId == null) return '#888888';
+  if (communityId == null) return '#b0b3c6';
   const hue = ((communityId * 137.508) % 360 + 360) % 360;
-  return `hsl(${hue.toFixed(0)} 55% 55%)`;
+  return `hsl(${hue.toFixed(0)} 72% 66%)`;
+}
+
+// typeColorCss: CanvasLegend 등 UI 가 TYPE 팔레트를 노드 렌더와 동일한
+// 소스에서 읽게 하는 헬퍼 — 범례 색과 캔버스 색이 드리프트하지 않는다.
+export function typeColorCss(type: string): string {
+  return hexCss(TYPE_COLOR_HEX[type] ?? FALLBACK_HEX);
 }
 
 export function nodeColorHex(node: GraphNode, mode: ColorMode): number {
