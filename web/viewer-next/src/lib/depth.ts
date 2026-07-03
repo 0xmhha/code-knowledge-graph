@@ -79,7 +79,11 @@ export async function recomputeVisible(api: IAPI): Promise<CommitGraph> {
     for (let i = 0; i < ids.length; i += BATCH) {
       const slice = ids.slice(i, i + BATCH);
       const fresh = await api.edges(slice);
-      if (fresh.length) collected.push(...fresh);
+      // NOT push(...fresh): spread passes every element as a call
+      // argument, and a 5K-id batch can return 100K+ edges — enough to
+      // blow the call stack (RangeError: Maximum call stack size
+      // exceeded). A plain loop appends without stack growth.
+      for (const e of fresh) collected.push(e);
     }
     if (collected.length) s.addEdges(collected);
 
