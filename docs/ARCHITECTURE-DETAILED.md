@@ -870,12 +870,12 @@ store.Search(query, limit=10)
 ### 15.1 Development Loop
 
 ```bash
-make build
+make build-full
 ckg build --src=<repo> --out=/tmp/ckg
 ckg serve --graph=/tmp/ckg --port=8080 --open
 ```
 
-**Typical cycle**: edit code → `make build` → `ckg build` (1-2 min) → reload browser.
+**Typical cycle**: edit code → `make build-full` → `ckg build` (1-2 min) → reload browser.
 
 ### 15.2 Local Single-User
 

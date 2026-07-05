@@ -21,7 +21,7 @@ an MCP-enabled LLM, or a 3D web viewer.
 ```bash
 git clone https://github.com/0xmhha/code-knowledge-graph
 cd code-knowledge-graph
-make build
+make build-full   # viewer + binary; `make build` = binary only (no 3D viewer UI)
 
 # 1. Build a graph from any code path
 ./bin/ckg build --src=/path/to/repo --out=/tmp/ckg

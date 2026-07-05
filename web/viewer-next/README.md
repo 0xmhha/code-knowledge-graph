@@ -12,13 +12,14 @@ Next.js 15 + TypeScript + `react-force-graph-{2d,3d}` 기반 코드 지식 그�
 
 ## 1. 정상 경로 (Prod) — 가장 흔한 사용
 
-`make build`는 `make viewer`를 의존성으로 가져, viewer-next를 정적 export한 결과를
+`make build-full`은 `make viewer`를 의존성으로 가져, viewer-next를 정적 export한 결과를
 `internal/server/web_assets/`로 복사한 뒤 Go 바이너리에 embed한다.
-즉 **`make build` 1회면 backend + viewer가 한 바이너리**에 들어간다.
+즉 **`make build-full` 1회면 backend + viewer가 한 바이너리**에 들어간다.
+(`make build`는 Go 바이너리만 빌드하므로 embed된 viewer는 stub이다.)
 
 ```bash
 # 0. 한 번만: ckg + viewer 한꺼번에 빌드
-make build
+make build-full
 # → ./bin/ckg
 
 # 1. 분석 대상 프로젝트의 그래프 생성
@@ -36,9 +37,9 @@ make build
 ./bin/ckg quickstart --src=/path/to/project --out=/tmp/graph --port=8080
 ```
 
-> **viewer를 수정했다면 반드시 `make build` 다시 실행.** 바이너리에 embed된
+> **viewer를 수정했다면 반드시 `make build-full` 다시 실행.** 바이너리에 embed된
 > viewer는 컴파일 시점에 고정된다. ckg 코드는 그대로고 viewer만 수정한 경우엔
-> `make viewer && make build-no-viewer` 조합도 같은 결과를 더 빠르게 만든다.
+> `make viewer && make build` 조합도 같은 결과를 더 빠르게 만든다.
 
 ---
 
@@ -131,7 +132,7 @@ npm run test:smoke    # Playwright 스모크
 production 통합 검증:
 
 ```bash
-make build
+make build-full
 ./bin/ckg serve --graph=/some/graph-out --open
 ```
 
@@ -141,7 +142,7 @@ make build
 
 | 증상 | 원인 | 해결 |
 |---|---|---|
-| viewer를 고쳤는데 화면이 그대로 | embed된 viewer는 컴파일 시점에 고정 | `make build` 다시 / 또는 §2 `CKG_DEV_VIEWER_DIR` |
+| viewer를 고쳤는데 화면이 그대로 | embed된 viewer는 컴파일 시점에 고정 | `make build-full` 다시 / 또는 §2 `CKG_DEV_VIEWER_DIR` |
 | `npm run dev`에서 `/api/* → 500` | backend(ckg serve) 안 떠 있음 또는 trailingSlash 충돌 | §2 경로로 전환 권장 |
 | `ckg serve` 후 빈 캔버스 | `--graph` 디렉토리에 `graph.db` 없음 | `ckg build`부터 |
 | "1 Issue" 좌하단 빨간 배지 | `/api/*` 호출 실패 (manifest/edges/nodes 중 하나) | 콘솔 / 서버 로그 확인 |
