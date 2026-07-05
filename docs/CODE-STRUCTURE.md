@@ -579,7 +579,7 @@ G6 v4 ──► C1 ──► B3                                ✅ (B3 진입 �
 1. **subagent stall**: 큰 task는 token budget 명시(150-200K), real-corpus parity check 강제, 측정 결과 받기 전 commit 금지
 2. **gopls 캐시 지연**: `BrokenImport`/`UndeclaredName` IDE 경고는 false positive, `go test ./...` 그린이면 무시
 3. **commit 컨벤션**: NO Co-Authored-By 헤더, NO emoji, Conventional Commits English subject ≤70 chars, *why* 중심
-4. **Viewer build coupling**: `make build` 시 stub-restore 메커니즘으로 `git status` clean 유지
+4. **Viewer build coupling**: `make build-full` 시 stub-restore 메커니즘으로 `git status` clean 유지 (`make build`는 Go 바이너리만)
 5. **partial-cache D4**: mixed dirty/cached → cold fallback (correctness > speed). G6 v4(`ORDER BY start_line`) + C1(reverse-ref) 후 cold vs partial diff = 0 ✅
 6. **Heredoc commit message**: perl regex 같은 escape-prone tooling 금지 (이전에 archive/WORK-PLAN-2026-05-04.md 망친 사고 있음)
 
@@ -648,7 +648,7 @@ require (
 cd <repo root>
 git log --oneline -10
 go test ./...                               # 18 packages PASS
-make build                                  # Next.js viewer + ckg binary
+make build-full                             # Next.js viewer + ckg binary
 ./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
 ./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open
 ./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity

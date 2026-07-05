@@ -1,4 +1,4 @@
-.PHONY: all build viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update
+.PHONY: all build build-full build-no-viewer viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update
 
 GO ?= go
 
@@ -18,7 +18,16 @@ viewer:
 	mkdir -p internal/server/web_assets
 	cp -R web/viewer-next/out/. internal/server/web_assets/
 
-build: viewer
+# build: Go binary only. The viewer UI is embedded at compile time via
+# go:embed (internal/server/viewer.go), so a binary from this target
+# serves whatever is currently in internal/server/web_assets/ — the
+# tracked stub unless `make viewer` (or `make build-full`) ran before.
+# Use `make build-full` for a release-grade binary with the real viewer.
+build:
+	$(GO) build -o bin/ckg ./cmd/ckg
+
+# build-full: Next.js viewer + Go binary (the old `make build`).
+build-full: viewer
 	$(GO) build -o bin/ckg ./cmd/ckg
 	@# The binary already embedded the real Next.js index.html at compile
 	@# time, so restore the tracked stub so `git status` stays clean. No-op
@@ -32,8 +41,8 @@ build: viewer
 	      || echo "warn: could not restore stub web_assets/index.html — run 'git checkout -- internal/server/web_assets/index.html' manually"; \
 	fi
 
-build-no-viewer:
-	$(GO) build -o bin/ckg ./cmd/ckg
+# Back-compat alias (older docs/scripts): identical to `build`.
+build-no-viewer: build
 
 test:
 	$(GO) test ./...

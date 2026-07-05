@@ -18,8 +18,8 @@ read it before any design discussion. Doc index: **[docs/DOC-MAP.md](docs/DOC-MA
 
 | Task | Command | Notes |
 |---|---|---|
-| Build (with viewer) | `make build` | builds Next.js viewer + `bin/ckg`; restores tracked stub so `git status` stays clean |
-| Build (fast, no viewer) | `make build-no-viewer` | use this in iteration / when not touching the viewer |
+| Build (ckg only, default) | `make build` | Go binary only; embedded viewer stays the stub. `build-no-viewer` is a back-compat alias |
+| Build (with viewer) | `make build-full` | builds Next.js viewer + `bin/ckg`; restores tracked stub so `git status` stays clean. Required for a working `ckg serve` viewer |
 | Test | `make test` (= `go test ./...`) | |
 | Test + race + coverage | `make test-race` | what to run before claiming concurrency-safe |
 | Lint | `make lint` | = `go vet ./...` + `fmt-check` + viewer eslint |
@@ -113,4 +113,5 @@ Rules:
 - Don't commit or push unless asked. If on `main`, branch first.
 - Keep PRs small; concurrent sessions edit ckg/ckv/cks — sync at phase
   boundaries to avoid rebase churn.
-- Co-author trailer on commits: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
+- No commit trailers — do NOT add `Co-Authored-By` (matches git history and
+  the commit convention in docs/CODE-STRUCTURE.md).
