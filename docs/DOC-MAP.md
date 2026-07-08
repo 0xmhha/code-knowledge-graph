@@ -54,6 +54,7 @@ Tier 1 wins.
 |---|---|
 | [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
 | [coordination-response-ckg-2026-06-29.md](coordination-response-ckg-2026-06-29.md) | CKG → CKV 협의 회신: canonical_id join key (=canonical_id), population gate >= 1.19 정정, BM25 소유권, flow-corpus control-flow 제공 |
+| [retire-ckg-node-id.md](retire-ckg-node-id.md) | [포인터] `ckg_node_id` 은퇴 → `canonical_id` 단일화 (마스터: cks `docs/retire-ckg-node-id.md`). CKG는 코드 변경 없음 — canonical_id 커버리지만 선택 과제 |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
 | [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | North-star → capability gap mapping (requirements reference) |
