@@ -26,6 +26,7 @@ func TestManifestRoundTrip(t *testing.T) {
 		StalenessMethod: "git",
 		Languages:       map[string]int{"go": 10},
 		Stats:           map[string]int{"nodes": 100, "edges": 200},
+		GraphDigest:     "4be26516f2091d3494051961947cf89e7ee7faaa2d95d116f18b4788d345cfbe",
 	}
 	if err := store.SetManifest(m); err != nil {
 		t.Fatalf("SetManifest: %v", err)
@@ -63,6 +64,11 @@ func TestManifestRoundTrip(t *testing.T) {
 	}
 	if got.Stats["nodes"] != 100 || got.Stats["edges"] != 200 {
 		t.Errorf("Stats = %+v, want {nodes:100, edges:200}", got.Stats)
+	}
+	// graph_digest must survive the in-db manifest round-trip — CKV/CKS read it
+	// via `SELECT value FROM manifest WHERE key='graph_digest'`.
+	if got.GraphDigest != m.GraphDigest {
+		t.Errorf("GraphDigest = %q, want %q", got.GraphDigest, m.GraphDigest)
 	}
 }
 

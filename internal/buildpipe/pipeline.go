@@ -386,20 +386,25 @@ func runCold(opt Options, log *slog.Logger,
 	// (7) persist — cold rebuild wipes graph.db so we don't accumulate stale
 	// rows. Incremental path lives in incremental.go and reuses prior rows.
 	log.Debug("persist.start", "nodes", len(g.Nodes), "edges", len(g.Edges))
-	store, err := openColdStore(opt.OutDir, opt.DBDSN)
+	store, commitCold, err := openColdStore(opt.OutDir, opt.DBDSN)
 	if err != nil {
 		return persist.Manifest{}, err
 	}
-	defer func() { _ = store.Close() }()
+	committed := false
+	defer func() {
+		if !committed { // error path: close (and discard) the temp store
+			_ = store.Close()
+		}
+	}()
 	if err := persistColdArtifacts(store, opt.SrcRoot, g, pkgTree, topicTree, hunkBlobs); err != nil {
 		return persist.Manifest{}, err
 	}
 	// G6 v3 (schema 1.5): persist Pass 1 pending refs so the next partial
 	// build can replay Pass 2 over a merged dirty + cached input set without
 	// re-parsing cached files. INSERT after persistColdArtifacts so node FKs
-	// are satisfied. The cold path always wipes graph.db beforehand
-	// (openColdStore.os.Remove), so the table starts empty — IGNORE on the PK
-	// in InsertPendingRefs handles the rare emit-twice case.
+	// are satisfied. The cold path builds into a fresh temp DB via openColdStore,
+	// so the table starts empty — IGNORE on the PK in InsertPendingRefs handles
+	// the rare emit-twice case.
 	if err := store.InsertPendingRefs(allPending); err != nil {
 		return persist.Manifest{}, fmt.Errorf("persist pending_refs: %w", err)
 	}
@@ -478,6 +483,12 @@ func runCold(opt Options, log *slog.Logger,
 	if err := writeManifestJSON(filepath.Join(opt.OutDir, "manifest.json"), m); err != nil {
 		return persist.Manifest{}, err
 	}
+	// Commit the cold store: close + atomically rename graph.db.building over
+	// graph.db (SQLite), so a concurrent reader never sees a partial DB (Q2).
+	if err := commitCold(); err != nil {
+		return persist.Manifest{}, err
+	}
+	committed = true
 	log.Info("build complete",
 		"nodes", len(g.Nodes), "edges", len(g.Edges),
 		"pkg_tree_edges", len(pkgTree.Edges),
@@ -485,25 +496,62 @@ func runCold(opt Options, log *slog.Logger,
 	return m, nil
 }
 
-// openColdStore wipes the backing store and re-opens it for a cold rebuild.
-// When dbDsn is set, the store is a PostgreSQL database (wipe via TRUNCATE);
-// otherwise it is a local SQLite file (wipe via os.Remove).
-func openColdStore(outDir, dbDsn string) (persist.Store, error) {
+// openColdStore prepares a store for a cold rebuild and returns a commit func
+// that must be called on success. For SQLite (Q2, ADR reindex-migration
+// 2026-07-10) the build writes to a temporary "graph.db.building" file; commit
+// closes the store — which checkpoints and removes the WAL/SHM sidecars on the
+// last connection — then atomically renames it over the live graph.db. This
+// removes the multi-second window in which the old destructive `os.Remove(dbPath)
+// → rewrite` left graph.db absent or half-written for a concurrent reader
+// (e.g. `ckg serve`). The fully-atomic cross-file boundary is still the
+// versioned-dir + `current` symlink swap owned by the build orchestration; this
+// makes even a naive same-dir rebuild safe.
+//
+// When dbDsn is set the store is a PostgreSQL database wiped in place via
+// TRUNCATE; commit is a plain Close (pg atomicity is out of scope here).
+func openColdStore(outDir, dbDsn string) (persist.Store, func() error, error) {
 	if dbDsn != "" {
-		return persist.OpenPostgresCold(dbDsn)
+		store, err := persist.OpenPostgresCold(dbDsn)
+		if err != nil {
+			return nil, nil, err
+		}
+		return store, store.Close, nil
 	}
 	dbPath := filepath.Join(outDir, "graph.db")
-	_ = os.Remove(dbPath)
-	store, err := persist.Open(dbPath)
+	tmpPath := dbPath + ".building"
+	removeSQLiteFiles(tmpPath) // clear artifacts from an aborted prior build
+	store, err := persist.Open(tmpPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := store.Migrate(); err != nil {
 		_ = store.Close()
-
-		return nil, err
+		return nil, nil, err
 	}
-	return store, nil
+	commit := func() error {
+		// Close first so WAL is checkpointed into the main file and -wal/-shm
+		// are dropped — the temp file becomes a complete standalone DB.
+		if err := store.Close(); err != nil {
+			return fmt.Errorf("close cold store before rename: %w", err)
+		}
+		// Rename replaces the live file atomically (same directory / filesystem).
+		if err := os.Rename(tmpPath, dbPath); err != nil {
+			return fmt.Errorf("rename %s -> graph.db: %w", filepath.Base(tmpPath), err)
+		}
+		// Drop any stale sidecars left by a prior WAL-mode graph.db so a fresh
+		// reader of the renamed file never pairs it with a mismatched -wal.
+		_ = os.Remove(dbPath + "-wal")
+		_ = os.Remove(dbPath + "-shm")
+		return nil
+	}
+	return store, commit, nil
+}
+
+// removeSQLiteFiles deletes a SQLite DB file together with its WAL/SHM sidecars.
+func removeSQLiteFiles(path string) {
+	_ = os.Remove(path)
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
 }
 
 // openStore opens the backing store for read/write (incremental / short-circuit
