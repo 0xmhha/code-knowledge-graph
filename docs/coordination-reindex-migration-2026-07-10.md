@@ -95,6 +95,34 @@
    + `current` symlink(오케스트레이션 소관).
 4. **Q3/Q4/Q5**: 구현 불요 — manifest 계약 + `ckg audit`를 검증/신호 표면으로 문서화(완료).
 
+### in-db manifest 반영 (CKV end-to-end 요구 #1, 2026-07-10)
+
+CKV `ReadCoords`는 `graph_digest`를 **graph.db 안 manifest 테이블**에서 읽는다
+(`SELECT value FROM manifest WHERE key='graph_digest'`). 초기 구현은 struct+manifest.json만
+채웠으므로 in-db row가 없었음 → `SetManifest` row 목록 + `GetManifest` 재조립에 `graph_digest`
+추가(`internal/persist/manifest.go`), round-trip 테스트로 잠금. **CKV 정확 쿼리로 반환 확인.**
+
+## 정본 그래프 공표 (digest 포함, CKV end-to-end 요구 #3, 2026-07-10)
+
+정본 pr-77-2를 digest 든 채로 재생성·검증 완료. **CKV가 이 그래프에 인덱스 빌드 → sources.ckg.
+graph_digest == 아래 값 → CheckAlignment()==ok** 를 실증하면 된다.
+
+```
+graph.db 경로 : /Users/.../knowledge-data/pr-77-2/graph.db
+graph_digest  : 4be26516f2091d3494051961947cf89e7ee7faaa2d95d116f18b4788d345cfbe
+schema_version: 1.23
+src_commit    : 0bf2f4d1bfeb6605006d556957ef8c045d8f8ed8   (= 0bf2f4d1b)
+node / edge   : 183121 / 1603496
+build         : ckg build --src=analysis-test-3 --lang=auto \
+                  --files-from=eval/stablenet/stablenet-files-with-tests.json  (cold)
+읽는 법        : sqlite3 graph.db "SELECT value FROM manifest WHERE key='graph_digest';"
+```
+
+- **결정성 확인(CKV 요구 #2)**: 동일 커밋+소스+필터로 **2회 cold 빌드 → 동일 digest** 실측
+  (`4be26516…` 재현). file-sha와 달리 재빌드/머신 무관.
+- **원자성 확인(Q2)**: 재생성 중 `graph.db.building`에만 기입, 완료 후 `graph.db`만 잔존
+  (`.building/-wal/-shm` 정리됨) — serve가 반쪽 파일을 보지 않음.
+
 ## CKV 수용 회신 → CKG 확정안 (2026-07-10, round 2)
 
 CKV가 6문항 회신 전부 수용(Q1 파일-sha 폐기·논리 digest 채택, Q6 "증분≈cold" 철회) +
