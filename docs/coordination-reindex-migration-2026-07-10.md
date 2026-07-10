@@ -69,10 +69,25 @@
 - **권고**: **측정용 정본 그래프 = 항상 cold**(`--no-cache` 또는 새 out-dir). 증분은 서비스
   신선도 유지용. 헤더 주석의 "NOT implemented" 문구는 정정 필요(구현됨).
 
-## 후속 (CKG action items — 협의 완료 후 구현)
-1. **Q1**: manifest에 `graph_digest`(논리 다이제스트) 추가. schema/manifest 변경이므로 back-compat 검토.
-2. **Q2**: cold rebuild를 temp+rename 또는 버전-디렉터리+symlink로 원자화.
-3. **Q6**: `incremental.go` 헤더 주석 정정 + "측정용=cold" 계약 문서화.
+## 협의 종료 (2026-07-10)
+
+**3자 협의 종료. CKV가 ①② 확정안 모두 동의 → CKG Q1·Q2·Q6 착수 가능.**
+- ① temporal 제외 = 합의. CKV는 temporal 미소비 + temporal-only 재빌드(코드 불변) 시 digest
+  불변이라 assert false-positive 방지. `temporal_digest` 불요.
+- ② `<ver>=<short-commit>-<graph_digest[:8]>` = 합의. **비차단 노트(문서화)**: 같은 `<ver>`의
+  vector-db는 임베딩 identity(model/dim)에도 의존 — 흔한 단일 모델은 OK(vector-db manifest +
+  CKS open 게이트 PR#12가 임베딩 identity assert). **같은 커밋에 다중 임베딩 모델 공존이
+  필요해질 때만** `<ver>`에 `-<emb[:8]>` 추가. 현재는 불필요(deferred).
+- **forward-compat**: CKV `ckgalign.ReadCoords`가 이미 CKG manifest의 `graph_digest`를 읽어
+  `sources.ckg.graph_digest`에 기록(현재 빈 값). **CKG가 공표하면 CKV 추가 코드 없이 자동 채워짐** —
+  즉 Q1 공표가 CKV 소비의 트리거. assert는 commit+schema로 시작, digest 오면 강화.
+
+## 후속 (CKG action items — 착수 가능)
+1. **Q6** (trivial, 선행): `incremental.go` 헤더 주석 정정(C1 이미 랜딩) + "정본 그래프=cold" 계약 명문화. schema 무관.
+2. **Q1** (주 산출물): manifest에 `graph_digest`(§① 정의) + `node_count/edge_count` 추가·공표.
+   **additive omitempty → manifest SchemaVersion bump 불요**(구 리더는 무시, 구 그래프는 재빌드 시 채워짐). cache 키도 불변(추출 데이터 무변경).
+3. **Q2**: cold rebuild가 불변 버전 디렉터리(`@<ver>/graph-db`)에 기입하도록 — `os.Remove` 대신
+   temp+rename/버전 디렉터리. `current` symlink swap은 오케스트레이션 소관.
 4. **Q3/Q4/Q5**: 구현 불요 — manifest 계약 + `ckg audit`를 검증/신호 표면으로 문서화.
 
 ## CKV 수용 회신 → CKG 확정안 (2026-07-10, round 2)
