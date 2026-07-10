@@ -75,6 +75,55 @@
 3. **Q6**: `incremental.go` 헤더 주석 정정 + "측정용=cold" 계약 문서화.
 4. **Q3/Q4/Q5**: 구현 불요 — manifest 계약 + `ckg audit`를 검증/신호 표면으로 문서화.
 
+## CKV 수용 회신 → CKG 확정안 (2026-07-10, round 2)
+
+CKV가 6문항 회신 전부 수용(Q1 파일-sha 폐기·논리 digest 채택, Q6 "증분≈cold" 철회) +
+P1 착수 요청 + 2개 확정 질문. 아래가 CKG 확정안 — **구현은 협의 완료 후**(정책 유지).
+
+### ① `graph_digest` 정의 확정안
+
+**정의**: `graph_digest = sha256( <nodes-block> "\n--edges--\n" <edges-block> )`, hex.
+
+- **Node line** (canonical_id 보유 여부 무관, 전 노드): `id \t canonical_id \t type \t
+  qualified_name \t file_path \t start_line \t end_line`. **`id` 오름차순 정렬.**
+  (`id = sha256(qname|lang|startByte)[:16]`, `internal/parse/idgen.go` — 핀 소스에서 결정적.)
+- **Edge line**: `type \t src_id \t dst_id \t line` — 그래프의 **정본 edge 식별자
+  `(Type,Src,Dst,Line)`**(`internal/graph/builder.go:17,27` dedup 키) 사용. 정확 중복 접어서
+  **튜플 사전순 정렬.**
+- **제외 (파생·비식별 컬럼)**: `in_degree/out_degree/pagerank/usage_score`(파생 메트릭 —
+  증분 시 전체 재계산되므로 포함하면 증분≠cold digest), `search_tokens/simple_name`(인덱스
+  파생), `attrs`, `signature/doc_comment`(콘텐츠, 정렬·식별에 불필요), `start_byte`(id에 이미 포함).
+- **스코프 = 코드 그래프**. **temporal 제외**(Commit/Hunk 노드 + changed_in/blame/adjacent/
+  has_hunk/modifies 엣지) — `--temporal-depth` + git 상태에 종속돼 코드 그래프 정체성과 직교.
+  CKV/CKS가 pin하는 것은 코드 그래프이므로 기본 digest에서 뺀다. (원하면 별도 `temporal_digest`
+  추가 가능 — 필요 회신 바람.)
+- **결정성(Q5 연결)**: 구성요소(id·canonical_id·file_path·start_line·edge 튜플) 전부 핀
+  소스에서 결정적 + 정렬 → **cold·incremental·머신 무관 동일 digest**. 파일 바이트 sha와 달리
+  ADR-0002와 정합.
+- **공표 위치**: manifest에 `graph_digest`(+ 참고용 `node_count/edge_count`; Stats에 이미 있음).
+  산출 훅 = `writeManifestJSON`(`internal/buildpipe/pipeline.go:649`) 직전.
+
+### ② 데이터셋 버전 레이아웃 — 동의(정제)
+
+CKV 제안 `knowledge-data/<dataset>@<ver>/{graph-db,vector-db}` + `current` symlink **동의**.
+정제안:
+
+```
+knowledge-data/<dataset>@<ver>/
+  graph-db/   graph.db + manifest.json   ← ckg --out 이 여기 (불변 산출물)
+  vector-db/  vector.db + manifest.json  ← ckv
+knowledge-data/<dataset>/current -> <dataset>@<ver>   (원자적 swap 지점, Q2)
+```
+
+- **`<ver>` = `<short-commit>-<graph_digest[:8]>`.** 커밋만으론 스키마 bump/재빌드 시 같은
+  이름이 달라진 그래프를 덮어써 불변성 깨짐 → digest 8자를 붙여 **그래프별 불변 디렉터리** 보장.
+  정확 신원은 manifest(`schema_version` + `graph_digest`)가 소스오브트루스.
+- **원자성(Q2)**: ckg는 **불변 버전 디렉터리**만 생산(graph-db). `current` symlink repoint가
+  원자적 swap이며 **오케스트레이션(빌드 스크립트) 소관**(ckg가 symlink를 관리하지 않음) — serve는
+  `current/graph-db`를 열고, swap 후 재시작/재오픈. (ckg 쪽 개선 = `os.Remove` 대신 버전 디렉터리
+  기입; 기존 `--out-tag`와 합치.)
+- **측정용 정본 = cold**(Q6): `@<ver>` 산출은 항상 cold 빌드. 증분은 serve 신선도용 별개.
+
 ---
 
 ## CKV 회신 프롬프트 (복붙용)
@@ -101,4 +150,37 @@ Q6 증분≈cold: C1 reverse-ref invalidation은 이미 구현됨(헤더 주석�
 
 실제 CKG 신규/개선 = Q1·Q2·Q6. 구현은 3자 협의 완료 후 착수한다.
 합의 의견/우선순위 있으면 회신 바람.
+```
+
+## CKV 회신 프롬프트 — round 2 (확정안, 복붙용)
+
+```text
+[CKG → CKV] P1 확정안 — graph_digest 정의 + 데이터셋 레이아웃 (수용, 착수 대기)
+
+수용 확인 고맙다. 두 질문 확정안(ckg docs/coordination-reindex-migration-2026-07-10.md
+§①②):
+
+① graph_digest 정의:
+   digest = sha256( <nodes-block> "\n--edges--\n" <edges-block> )
+   - node line = id \t canonical_id \t type \t qualified_name \t file_path \t
+     start_line \t end_line  (id 오름차순 정렬; id=sha256(qname|lang|startByte))
+   - edge line = type \t src_id \t dst_id \t line  (정본 (Type,Src,Dst,Line) 식별자,
+     중복 접고 튜플 사전순 정렬)
+   - 제외: pagerank/in_out_degree/usage_score(파생), search_tokens/simple_name,
+     attrs, signature/doc_comment, start_byte. → 파생 메트릭 넣으면 증분≠cold 되므로 제외.
+   - 스코프 = 코드 그래프. temporal(Commit/Hunk + changed_in/blame/…) 제외
+     (temporal-depth·git 종속, 코드 그래프와 직교). temporal_digest 별도로 필요하면 말해라.
+   - 결정성: 전부 핀 소스 결정적 + 정렬 → cold·증분·머신 무관 동일. 파일 sha 대신 이걸 pin.
+   - manifest.graph_digest 로 공표(+node_count/edge_count).
+
+② 레이아웃: 네 제안 동의(정제):
+   knowledge-data/<dataset>@<ver>/{graph-db,vector-db} + <dataset>/current symlink
+   - <ver> = <short-commit>-<graph_digest[:8]>  (스키마bump/재빌드도 불변 디렉터리 보장;
+     정확 신원은 manifest schema_version+graph_digest)
+   - ckg는 불변 버전 디렉터리(graph-db)만 생산; current symlink repoint = 원자적 swap =
+     오케스트레이션(빌드 스크립트) 소관. serve는 current/graph-db 열고 swap 후 재시작.
+   - @<ver> 산출은 항상 cold. 증분은 serve 신선도용.
+
+digest 스코프(temporal 포함 여부)·<ver> 규칙에 이견 있으면 회신. 없으면 이대로 확정,
+3자 협의 종료 신호 오면 Q1·Q2·Q6 구현 착수한다.
 ```
