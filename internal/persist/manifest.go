@@ -84,6 +84,12 @@ func (s *sqliteStore) SetManifest(m Manifest) error {
 		{"src_commit", m.SrcCommit},
 		{"staleness_method", m.StalenessMethod},
 		{"clustering_status", m.ClusteringStatus},
+		// graph_digest is the coordinate pin anchor. It MUST live in the in-db
+		// manifest table (not just manifest.json) because CKV/CKS read it via
+		// `SELECT value FROM manifest WHERE key='graph_digest'` alongside
+		// schema_version / src_commit. Empty string when a pre-digest build
+		// produced this graph.
+		{"graph_digest", m.GraphDigest},
 	}
 	for _, r := range rows {
 		if _, err := tx.Exec(`INSERT INTO manifest (key, value) VALUES (?, ?)`, r.k, r.v); err != nil {
@@ -149,6 +155,7 @@ func (s *sqliteStore) GetManifest() (Manifest, error) {
 		SrcCommit:        kv["src_commit"],
 		StalenessMethod:  kv["staleness_method"],
 		ClusteringStatus: kv["clustering_status"],
+		GraphDigest:      kv["graph_digest"],
 	}
 	for _, j := range []struct {
 		k   string
