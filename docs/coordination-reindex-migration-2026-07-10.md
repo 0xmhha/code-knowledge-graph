@@ -82,13 +82,18 @@
   `sources.ckg.graph_digest`에 기록(현재 빈 값). **CKG가 공표하면 CKV 추가 코드 없이 자동 채워짐** —
   즉 Q1 공표가 CKV 소비의 트리거. assert는 commit+schema로 시작, digest 오면 강화.
 
-## 후속 (CKG action items — 착수 가능)
-1. **Q6** (trivial, 선행): `incremental.go` 헤더 주석 정정(C1 이미 랜딩) + "정본 그래프=cold" 계약 명문화. schema 무관.
-2. **Q1** (주 산출물): manifest에 `graph_digest`(§① 정의) + `node_count/edge_count` 추가·공표.
-   **additive omitempty → manifest SchemaVersion bump 불요**(구 리더는 무시, 구 그래프는 재빌드 시 채워짐). cache 키도 불변(추출 데이터 무변경).
-3. **Q2**: cold rebuild가 불변 버전 디렉터리(`@<ver>/graph-db`)에 기입하도록 — `os.Remove` 대신
-   temp+rename/버전 디렉터리. `current` symlink swap은 오케스트레이션 소관.
-4. **Q3/Q4/Q5**: 구현 불요 — manifest 계약 + `ckg audit`를 검증/신호 표면으로 문서화.
+## 후속 (CKG action items) — ✅ Q1·Q2·Q6 구현 완료 (2026-07-10)
+
+1. **Q6 ✅**: `incremental.go` 헤더 주석 정정(C1 랜딩 반영) + "정본 그래프=cold" 계약 명문화.
+2. **Q1 ✅**: `ComputeGraphDigest`(`internal/buildpipe/graph_digest.go`, §① 정의) →
+   `manifest.GraphDigest`(omitempty, `internal/persist/manifest.go`), `buildManifestSkeleton`에서
+   산출(cold·incremental 공유). node/edge count는 `Stats`에 기존 노출. **manifest SchemaVersion
+   bump 없음**(additive). 테스트: 결정성/파생-메트릭 제외/temporal 제외/identity 민감(`graph_digest_test.go`).
+   실증: go-stablenet(pr-77-2 스코프) 재빌드 2회 동일 digest.
+3. **Q2 ✅**: `openColdStore`가 `graph.db.building`에 빌드 후 close(WAL checkpoint)→`os.Rename`으로
+   원자적 교체(`pipeline.go`). `os.Remove`의 멀티초 파괴 창 제거. 완전 원자 경계는 여전히 버전-디렉터리
+   + `current` symlink(오케스트레이션 소관).
+4. **Q3/Q4/Q5**: 구현 불요 — manifest 계약 + `ckg audit`를 검증/신호 표면으로 문서화(완료).
 
 ## CKV 수용 회신 → CKG 확정안 (2026-07-10, round 2)
 
