@@ -216,18 +216,25 @@ test.describe('Track A: cache-bust verification', () => {
     // shipped. We want to verify the served bundle, not the runtime
     // DOM, so go straight to the source.
     const html = await (await page.request.get(`${baseURL}/`)).text();
-    const chunkPaths = [...html.matchAll(/src="([^"]*\/_next\/static\/chunks\/app\/page[^"]+)"/g)]
-      .map(m => m[1]);
-    expect(chunkPaths.length, 'app page chunk linked').toBeGreaterThan(0);
-    // Pull the page chunk and look for a string that only exists in
-    // commit 1543f74's source — the migration sentinel (ckg.edgeFiltersV /
-    // v2) and the Home-reset literal ("ckg.panelOpen") are good markers.
-    const r = await page.request.get(chunkPaths[0]);
-    const body = await r.text();
-    // Either bundler kept the literal or minified it; both are still
-    // greppable strings inside the JS.
-    expect(body, 'bundle contains ckg.edgeFiltersV migration key').toContain('ckg.edgeFiltersV');
-    expect(body, 'bundle contains v2 migration sentinel').toContain('v2');
-    expect(body, 'bundle wires the topbar-home class').toContain('topbar-home');
+    // Next 16 (Turbopack) splits app code across many hashed chunks at
+    // /_next/static/chunks/<hash>.js — there is no single app/page chunk
+    // like the Next 15 webpack build produced. Fetch every JS chunk the
+    // HTML links and search the concatenation, so this check stays
+    // agnostic to how the bundler names or splits chunks.
+    const chunkPaths = [...new Set(
+      [...html.matchAll(/src="([^"]*\/_next\/static\/chunks\/[^"]+\.js)"/g)].map(m => m[1]),
+    )];
+    expect(chunkPaths.length, 'page chunks linked').toBeGreaterThan(0);
+    // Concatenate the served bundle and look for strings that only exist
+    // in this project's source — the migration sentinel (ckg.edgeFiltersV /
+    // v2) and the topbar-home class. Their presence proves the served
+    // bundle is the current build, not a stale cache.
+    const bodies = await Promise.all(
+      chunkPaths.map(async (p) => (await page.request.get(p)).text()),
+    );
+    const bundle = bodies.join('\n');
+    expect(bundle, 'bundle contains ckg.edgeFiltersV migration key').toContain('ckg.edgeFiltersV');
+    expect(bundle, 'bundle contains v2 migration sentinel').toContain('v2');
+    expect(bundle, 'bundle wires the topbar-home class').toContain('topbar-home');
   });
 });
