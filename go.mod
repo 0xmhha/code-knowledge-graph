@@ -2,7 +2,7 @@ module github.com/0xmhha/code-knowledge-graph
 
 go 1.25.5
 
-toolchain go1.25.9
+toolchain go1.25.12
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1
