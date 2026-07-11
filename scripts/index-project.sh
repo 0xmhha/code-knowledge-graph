@@ -23,6 +23,21 @@
 #   NO_CACHE       1 = clean full rebuild (--no-cache)   (default: 1)
 #   FAIL_ON_PARSE  1 = abort if any file fails to parse  (default: 1)
 #   CKG_BIN        path to the ckg binary                (default: <repo>/bin/ckg)
+#   MAIN_PKG       Go main package(s) to scope the graph to what the *binary*
+#                  actually compiles, e.g. "./cmd/gstable". When set, the parsed
+#                  symbol set is restricted to `go list -deps <MAIN_PKG>`
+#                  in-module packages (+ their related _test.go) via --files-from.
+#                  Empty = index the whole `go build ./...` set. (default: empty)
+#   SOL_INCLUDE    when MAIN_PKG is set, glob(s) (comma-separated) for the
+#                  production Solidity to keep      (default: systemcontracts/**/*.sol)
+#   EXTRA_EXCLUDE  when MAIN_PKG is set, extra exclude glob(s) (comma-separated)
+#                  applied on top of the include set; exclude trumps include.
+#                  e.g. "systemcontracts/solidity/test/**" to drop test mocks.
+#                  (default: empty)
+#
+# Note: --files-from restricts the *parsers* only. The temporal (git-history)
+# pass still records Hunk nodes for files in commit history, including files
+# deleted from the current tree — that is change history, not build code.
 #
 # Output dir: $OUT_ROOT/.ckg-<name>, suffixed with the source's short commit
 # SHA when <src> is a git repo (via ckg --out-tag=auto-commit-hash), so each
@@ -48,6 +63,9 @@ LANG_SET="${LANG_SET:-go,sol}"
 OUT_ROOT="${OUT_ROOT:-$REPO_ROOT}"
 NO_CACHE="${NO_CACHE:-1}"
 FAIL_ON_PARSE="${FAIL_ON_PARSE:-1}"
+MAIN_PKG="${MAIN_PKG:-}"
+SOL_INCLUDE="${SOL_INCLUDE:-systemcontracts/**/*.sol}"
+EXTRA_EXCLUDE="${EXTRA_EXCLUDE:-}"
 
 [ -x "$CKG_BIN" ] || { echo "ERROR: ckg binary not found/executable at $CKG_BIN (run 'make build')" >&2; exit 1; }
 [ -d "$SRC" ] || { echo "ERROR: src not found: $SRC" >&2; exit 1; }
@@ -55,6 +73,30 @@ FAIL_ON_PARSE="${FAIL_ON_PARSE:-1}"
 OUT="$OUT_ROOT/.ckg-$NAME"
 
 args=(build --src="$SRC" --out="$OUT" --lang="$LANG_SET")
+
+# Optional: scope the parsed symbol set to what the given binary compiles.
+# Generates a --files-from JSON from `go list -deps <MAIN_PKG>` (in-module
+# packages only) plus the production Solidity globs. Deterministic per commit.
+if [ -n "$MAIN_PKG" ]; then
+	command -v go >/dev/null 2>&1 || { echo "ERROR: MAIN_PKG set but 'go' not on PATH" >&2; exit 1; }
+	MODPATH="$(cd "$SRC" && go list -m 2>/dev/null | head -1)"
+	[ -n "$MODPATH" ] || { echo "ERROR: MAIN_PKG set but $SRC is not a Go module" >&2; exit 1; }
+	FILTER_FILE="$OUT_ROOT/.ckg-$NAME.files.json"
+	# shellcheck disable=SC2086
+	( cd "$SRC" && go list -deps $MAIN_PKG 2>/dev/null ) \
+		| grep "^$MODPATH" | sed "s#^$MODPATH/\{0,1\}##" | sort -u \
+		| MODPATH="$MODPATH" SOL_INCLUDE="$SOL_INCLUDE" EXTRA_EXCLUDE="$EXTRA_EXCLUDE" python3 -c '
+import sys, os, json
+dirs = [l.strip() for l in sys.stdin]
+inc = sorted({("*.go" if d == "" else d + "/*.go") for d in dirs})
+inc += [g.strip() for g in os.environ["SOL_INCLUDE"].split(",") if g.strip()]
+exc = [g.strip() for g in os.environ.get("EXTRA_EXCLUDE", "").split(",") if g.strip()]
+json.dump({"include": inc, "exclude": exc}, open(sys.argv[1], "w"), indent=1)
+print(f"binary-scoped filter: {len(inc)} include, {len(exc)} exclude patterns", file=sys.stderr)
+' "$FILTER_FILE"
+	echo "== files-from: $FILTER_FILE ($(grep -c '"' "$FILTER_FILE" 2>/dev/null) lines) =="
+	args+=(--files-from="$FILTER_FILE")
+fi
 
 FINAL_OUT="$OUT"
 if git -C "$SRC" rev-parse --git-dir >/dev/null 2>&1; then
