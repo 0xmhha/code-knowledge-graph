@@ -97,9 +97,9 @@ collapses to: **(R-Build) + (R-Query) + (R-Accuracy at 100%)**.
 | Surface | Single keyword | Multi-keyword OR | Multi-keyword AND |
 |---|---|---|---|
 | MCP `find_symbol` | ✅ (qname exact or suffix match; `language` filter pushdown) | n/a — name-based, not keyword | n/a |
-| MCP `search_text` | ✅ (FTS5 + auto-prefix; CJK substring fallback) | ✅ **implicit** via `rewriteFTSQuery` (multi-token → OR-joined prefix tags, `internal/persist/sqlite.go:736`) | ❌ **NOT EXPOSED** — `rewriteFTSQuery` always ORs; no `mode` param on the tool |
+| MCP `search_text` | ✅ (FTS5 + auto-prefix; CJK substring fallback) | ✅ default (multi-token OR-joined prefix tags) | ✅ **EXPOSED** — `mode="and"` param (`pkg/mcphandlers/handlers.go:176,185`) → `filterHitsByAllTokens` (`internal/persist/sqlite_fts.go:79-82`) |
 | MCP `evidence_for_intent` | ✅ (BM25 over subject/patch/modifies-qnames virtual doc) | ✅ (BM25 ranks intersection-of-meaning candidates) | ✅ via `Mode: "and"` (`pkg/evidence/cache.go:119`, `filterByAllTokensPresent`) — but **this is for evidence/PR retrieval**, not generic code search |
-| HTTP `/api/search` | ✅ | ✅ implicit OR | ❌ no mode toggle |
+| HTTP `/api/search` | ✅ | ✅ default OR | ✅ via `SearchFTSOptions{Mode:"and"}` (same store path as the MCP tool) |
 | HTTP `/api/evidence?mode=and\|or` | ✅ | ✅ | ✅ (BM25 → AND post-filter); `mode=or` is the default |
 | `pkg/store.Reader.SearchFTS` | ✅ + `SearchFTSOptions{Language}` | ✅ via power-user mode (raw FTS5 query containing `AND`/`OR`/`*`/`"`) | ✅ via power-user mode (caller writes `foo AND bar`) |
 | `pkg/store.Reader.FindSymbol` | ✅ + `FindSymbolOptions{Language, Kinds[]}` | n/a | n/a |
@@ -108,30 +108,33 @@ collapses to: **(R-Build) + (R-Query) + (R-Accuracy at 100%)**.
 
 | Gap | Impact | Recommended work | Priority |
 |---|---|---|---|
-| **MCP `search_text` does not expose AND/OR mode** | The single most likely call path from a coding agent is `search_text("foo bar baz")`. Today this OR-joins, which over-recalls. The user's spec demands AND/OR control at the query interface. | Add `mode` parameter to `registerSearchText` (`internal/mcp/tools.go:133`): `mode = "or"` (default, current behaviour) / `mode = "and"` (post-filter: all tokens present). Route through a new `Store.SearchWithMode(q, limit, mode)` or reuse `BuildPack(Mode:"and")` lifted into a thin code-search wrapper. Estimate: ~80 LOC + 2 tests. | **P0** (direct user-listed requirement) |
-| `pkg/store` lacks an idiomatic AND/OR query API | External consumers (cks) hitting `pkg/store.Reader.SearchFTS` have to build FTS5 syntax manually (`"foo AND bar"`) to get AND. ckv R13 (3-leg BM25 import) will be tripping on this. | Add `pkg/store.SearchOptions{Mode: "or"\|"and", Language, Limit}` and a `Reader.SearchKeywords(tokens []string, opts) ([]SearchHit, error)` helper that wraps the FTS5 syntax. Document the contract in `pkg/store/store.go`. Estimate: ~80 LOC including external-import test (overlaps with ckg-NEW-9). | **P0** |
-| Multi-keyword retrieval fixtures absent | The 5 R0x fixtures all probe single-keyword or single-symbol tools. Without multi-keyword AND/OR fixtures, the 100% accuracy goal is unmeasurable for the user-listed query mode. | Add 4-6 retrieval fixtures under `eval/retrieval/`: e.g. `R06-search-and-vault-deposit.yaml` (AND mode), `R07-search-or-vault-handler.yaml` (OR mode), `R08-search-cjk-mixed.yaml`. Couple with ckg-NEW-5's 12 stable-net fixture mirror so coverage scales. Estimate: YAML only, ~30 min per fixture. | **P0** |
+| ~~MCP `search_text` does not expose AND/OR mode~~ | **✅ DONE (verified 2026-07-10).** `search_text` takes `mode="or"` (default) / `mode="and"` — `pkg/mcphandlers/handlers.go:176,185`; AND post-filter is `filterHitsByAllTokens` (`internal/persist/sqlite_fts.go:79-82`, mirrored in `postgres_store.go:1131`). | — | ~~P0~~ → done |
+| ~~`pkg/store` lacks an idiomatic AND/OR query API~~ | **✅ DONE (verified 2026-07-10).** `pkg/store` exposes `SearchFTSOptions{Mode, Language, NodeKinds}` (`pkg/store/store.go:53-55` → `persist.SearchFTSOptions`) and `Reader.SearchWithOpts(q, limit, opts)`; external consumers pass `Mode:"and"` instead of hand-building FTS5 syntax. | — | ~~P0~~ → done |
+| ~~Multi-keyword retrieval fixtures absent~~ | **✅ DONE (verified 2026-07-10).** `eval/retrieval/` carries `R06`(OR), `R07`(three-token AND), `R08`/`R09`(language filter), `R10`(strict-go AND), `R14`(statement opt-in). | — | ~~P0~~ → done |
 | Korean / CJK query graceful degradation untested | `Search()` routes non-ASCII through `SearchSubstr` LIKE-based path. Behaviour on mixed Korean + English (the real cks-via-ckv input shape) untested. ckg-NEW-1 lives here. | Add `TestFTS5Query_KoreanInput_Graceful` covering the 3 mix patterns from `CKS-INTEGRATION-2026-05-23 §3.1`. Estimate: ~80 LOC test only (no behavioural change unless a panic is found). | P1 |
 
 ## 4. R-Accuracy: keyword query at 100%
 
 ### 4.1 Current accuracy baseline
 
-Source: `eval/baseline/retrieval.json` (committed 2026-05-20, EV1 Phase 2).
+Source: `eval/baseline/retrieval.json` (current; the 2026-05-20 EV1 Phase 2
+snapshot below is superseded by the AND-mode fixtures).
 
-| Fixture | Tool | Recall | Precision | F1 | Pass |
-|---|---|---|---|---|---|
-| R01-find-callers-vault-deposit | find_callers | 1.00 | 1.00 | 1.00 | ✅ |
-| R02-find-callees-handle-deposit | find_callees | 1.00 | 1.00 | 1.00 | ✅ |
-| R03-find-callers-service-new | find_callers | 1.00 | 1.00 | 1.00 | ✅ |
-| R04-find-symbol-vault | find_symbol | 1.00 | 1.00 | 1.00 | ✅ |
-| R05-search-text-deposit | search_text | **1.00** | **0.00** | **0.00** | ⚠️ passed (P-gate is 0.0) |
-| **Aggregate** |  | **1.00** | **0.60** | **0.75** | 5/5 |
+| Fixture | Tool | Recall | Precision | Pass |
+|---|---|---|---|---|
+| R01-find-callers-vault-deposit | find_callers | 1.00 | 1.00 | ✅ |
+| R04-find-symbol-vault | find_symbol | 1.00 | 1.00 | ✅ |
+| R05-search-text-vault-deposit-and-go | search_text (AND) | **1.00** | **1.00** | ✅ |
+| R07-search-text-three-token-and | search_text (AND) | 1.00 | 1.00 | ✅ |
+| R10-search-text-deposit-strict-go | search_text (AND) | 1.00 | 1.00 | ✅ |
+| R06-search-text-vault-or-deposit-go | search_text (OR) | 1.00 | 0.94 | ✅ |
 
-The four symbol/edge tools hit 100% R/P on synthetic data. `search_text`
-returns the expected symbol *plus* additional candidates (precision shortfall);
-this is intentional under `recall_min=1.0, precision_min=0.0` but means
-the *user-listed 100% precision goal* is not yet met for keyword search.
+**Update (2026-07-10):** the "precision shortfall" that once blocked the
+*user-listed 100% precision goal* is closed for keyword search. With `mode="and"`
+the AND fixtures (R05/R07/R10) hit **R=P=1.00** — the AND post-filter
+(`filterHitsByAllTokens`) drops the over-recall that the OR default produces. OR
+mode intentionally trades precision for recall (R06 P≈0.94), which is the correct
+default for exploratory queries. The keyword-search accuracy gap is resolved.
 
 ### 4.2 What "100% accuracy on the user benchmark" requires
 

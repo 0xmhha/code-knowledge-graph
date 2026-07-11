@@ -5,11 +5,22 @@
 //   - runIncremental: parse only dirty files, reload cached node sets from DB,
 //     then rerun Pass 2 / cluster / score across the merged graph.
 //
-// Phase 1 simplifications (per spec, deferred to C1+):
+// C1 reverse-reference invalidation: IMPLEMENTED. runIncremental queries
+// store.ReverseDepsForFiles (sqlite_reader.go / postgres_store.go) so cached
+// files whose pending_refs target a dirty/removed file get their refs
+// re-resolved, while unaffected files keep their DB edges — see the runIncremental
+// flow comment. Pass 2 Resolve still sees the full per-language node set (that
+// part is intentional, not a gap).
+//
+// Remaining Phase 1 simplifications (per spec):
 //   - PageRank/Leiden recompute on ANY dirt (no <1% change-ratio shortcut).
 //   - Cross-language Sol↔TS link rebuilt whenever any TS or Sol file is dirty.
-//   - Reverse-reference index for partial Pass 2 invalidation: NOT implemented
-//     (Phase 2, C1's job). Pass 2 Resolve always sees the full per-language node set.
+//
+// Determinism note (ADR-0002): incremental aims for the same logical graph
+// (nodes/edges/canonical_id) as a cold rebuild, but the guaranteed-identical
+// artifact is the cold build. **Canonical measurement graphs must always be
+// built cold** (--no-cache or a fresh out dir); incremental is for serve
+// freshness only.
 package buildpipe
 
 import (
@@ -826,6 +837,7 @@ func buildManifestSkeleton(opt Options, goCount, tsCount, solCount, protoCount i
 			"edges":          len(g.Edges),
 			"pkg_tree_edges": len(pkgTree.Edges),
 		},
+		GraphDigest:      ComputeGraphDigest(g.Nodes, g.Edges),
 		ParseErrorsCount: parseErrs,
 		ClusteringStatus: "ok",
 	}

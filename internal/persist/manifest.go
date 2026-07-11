@@ -33,6 +33,15 @@ type Manifest struct {
 	ParseErrorsCount    int            `json:"parse_errors_count"`
 	UnresolvedRefsCount int            `json:"unresolved_refs_count"`
 	ClusteringStatus    string         `json:"clustering_status"` // "ok" | "pkg_only"
+	// GraphDigest is a deterministic, build-invariant hash of the CODE graph —
+	// the coordinate pin anchor CKV/CKS use to assert they are aligned to the
+	// same graph (see docs/coordination-reindex-migration-2026-07-10.md § Q1).
+	// It hashes id-sorted node identity lines + sorted (Type,Src,Dst,Line) edge
+	// lines, EXCLUDING derived metrics (pagerank/degrees) and temporal
+	// (Commit/Hunk) nodes/edges, so it is identical across cold/incremental
+	// builds and machines (ADR-0002). Additive + omitempty: pre-digest manifests
+	// decode it as "" and old readers ignore it — no SchemaVersion bump.
+	GraphDigest string `json:"graph_digest,omitempty"`
 	// Files is the per-file incremental-cache record (A3 Phase 1, schema 1.2).
 	// Each entry tracks the SHA256 + cache key of one source file plus the
 	// node/edge IDs it produced, enabling subsequent builds to skip parsing
@@ -75,6 +84,12 @@ func (s *sqliteStore) SetManifest(m Manifest) error {
 		{"src_commit", m.SrcCommit},
 		{"staleness_method", m.StalenessMethod},
 		{"clustering_status", m.ClusteringStatus},
+		// graph_digest is the coordinate pin anchor. It MUST live in the in-db
+		// manifest table (not just manifest.json) because CKV/CKS read it via
+		// `SELECT value FROM manifest WHERE key='graph_digest'` alongside
+		// schema_version / src_commit. Empty string when a pre-digest build
+		// produced this graph.
+		{"graph_digest", m.GraphDigest},
 	}
 	for _, r := range rows {
 		if _, err := tx.Exec(`INSERT INTO manifest (key, value) VALUES (?, ?)`, r.k, r.v); err != nil {
@@ -140,6 +155,7 @@ func (s *sqliteStore) GetManifest() (Manifest, error) {
 		SrcCommit:        kv["src_commit"],
 		StalenessMethod:  kv["staleness_method"],
 		ClusteringStatus: kv["clustering_status"],
+		GraphDigest:      kv["graph_digest"],
 	}
 	for _, j := range []struct {
 		k   string

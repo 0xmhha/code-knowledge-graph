@@ -64,36 +64,27 @@ Expected outcome (cycle 9 baseline): α score ~0.4, β ~0.75, γ ~0.69, δ ~0.83
 
 | Repo | Path | ckg dependency | Notes |
 |---|---|---|---|
-| **ckg** (this) | `~/Work/github/tools/code-knowledge-graph` | self | 0 commits ahead of origin |
-| **cks** | `~/Work/github/tools/code-knowledge-system` | `v0.0.0-20260513121714-85391f87b404` (2026-05-13) | 9-day outdated; cks build is clean (uses 2-arg SearchFTS adapter); FTS bug **does not affect cks** at runtime (see §6) |
-| **ckv** | `~/Work/github/tools/code-knowledge-vector` | (separate session active) | do not modify from this session |
-| **stablenet (target corpus)** | `~/Work/github/stable-net/go-stablenet-latest` | — | graphify-out/ + `/tmp/ckg-stablenet/graph.db` (313 MB, 210K nodes, 708K edges, built 2026-05-21) |
+| **ckg** (this) | `~/Work/github/code-knowledge-graph` | self | schema 1.23; canonical_id chain complete |
+| **cks** | `~/Work/github/code-knowledge-system` | tracks ckg/ckv origin HEADs (bumped) | `e456698` carries canonical_id through to `contract.Hit`; B7 join fixtures added |
+| **ckv** | `~/Work/github/code-knowledge-vector` | (separate session active) | do not modify from this session; `#16` added ollama/bge-m3 default + Qwen3 options |
+| **stablenet (target corpus)** | `~/Work/github/test/analysis-test-3` (@ `0bf2f4d1b`) | — | canonical graph = `~/Work/github/knowledge-data/pr-77-2/graph.db` (schema 1.23, 183,121 nodes; built with `stablenet-files-with-tests.json`) |
 
 ## 5. Next-action priority queue
 
-Post-Lane X (2026-05-26): the capability-first lane closed the user-articulated
-first-step goal. The queue below is what to do *after* the Lane X commit
-lands.
+> The 2026-05 Lane X / ckg-NEW queue is retired — those items (mcphandlers
+> surface, node_prs, search_text AND/OR + precision) all landed. The current,
+> code-verified remaining list is **`docs/REMAINING-WORK-2026-07-10.md`**.
 
-| ID | Action | Estimate | Trigger |
-|---|---|---|---|
-| **T-14 (parallel surface)** | ✅ Done. `pkg/mcphandlers/` created with the 8 Register*, `RegisterAll`, and `NewLLMSafeReader`. internal/mcp kept intact as the production path; cks can now `import .../pkg/mcphandlers` without internal/ access. Smoke tests cover the cks-side wiring pattern. | — | — |
-| **T-14b (cleanup)** | ✅ Done. Deleted the 5 duplicate handler files from internal/mcp (tools/get_context/impact/evidence/h3_filter); moved the 9 handler-related test files into pkg/mcphandlers/ via `git mv`. internal/mcp now carries only `server.go::Run` (delegates to mcphandlers.RegisterAll), `bench.go::NewBenchHandlers`, and the e2e + Run smoke tests. | — | — |
-| **ckg-NEW-2/3/4** | ✅ Done. `pkg/types.PRRef` + `Node.RecentPRs` (omitempty), `node_prs` SQL table (schema 1.11 → 1.12), `internal/buildpipe.ScanPRHistory` (git log + `(#NNN)` regex + patch line-range overlap + remote.origin.url → owner/repo), `Reader.GetNodePRs(nodeID, cutoff time.Time)` with strict-before temporal slicing. Cold build self-emits node_prs from `git log`; non-git trees gracefully return empty. | — | — |
-| **ckg-NEW-9** | `pkg/bm25` external-import stability — `pkg/bm25/example_external_test.go` + SemVer doc in `pkg/bm25/doc.go` | 1 h | bundle with ckg-NEW-2/3/4 |
-| **search_text precision tightening** | ✅ Done. SearchFTSOptions.NodeKinds whitelist with a default symbol-only filter strips statement (IfStmt/LoopStmt/CallSite/ReturnStmt/SwitchStmt/AwaitPoint), meta (Commit/Hunk), and path-only (Import/Export) nodes at the SQL layer. R05/R06/R07/R08/R10 expecteds narrowed accordingly; `pkg/types.NodeType.IsSymbol` + `types.SymbolNodeTypes` are the canonical classification; cks/ckv can opt out by passing `node_kinds=types.AllNodeTypes()`. CamelCase tokeniser stays deferred (would lift the HandleDeposit limitation R10 documents). | — | — |
-| **ckg-NEW-5/8** | 12 ckv-fixture mirror task YAMLs + Stage B harness over the synthetic→stable-net corpus | 3-4 h | cks-side import smoke done |
-| **Defer** | CKG-3 (Option C dir-routing), EV1 Phase 3 CI (user-manual snippet ready), W-A/W-B/W-C resume, HANDOFF T-12/T-13 (now fixture-covered by R11/R12 + the Stream B design slots) | — | per CKS-INTEGRATION §3.4 / §8 |
+Live remaining work (see that doc for `file:line` evidence):
 
-The Stream A follow-ups (C prompt-V2 / D smartContext audit / E LLM-task
-expansion) are still valid but downgraded to *post Stream C* — the Stream
-C work measures over the same fixture set and decides whether Stream A
-improvements move the needle.
-
-Cross-project items (separate sessions):
-- cks-side methodology transfer (this series → cks's own evaluation)
-- ckv evaluation work (separate session active)
-- cks integration ckg-NEW-1..9 (per `CKS-INTEGRATION-2026-05-23.md`)
+- **Doc-only, no code**: the symbol-identity/canonical_id effort and the
+  keyword-search AND/OR capability are done; a few status docs were stale and are
+  being corrected in place.
+- **Optional / independent**: `canonical_id` coverage widening
+  (`goCanonicalID`), per the `retire-ckg-node-id.md` pointer — not required.
+- **Deferred slots**: `awaits` (W-B) / `overrides` (W-C) detectors.
+- **Other sessions**: CKV re-align + match-rate on the `pr-77-2` canonical graph;
+  coding-agent D-5.
 
 ## 6. What was just found (B-Phase 1 cks audit, 2026-05-23)
 
