@@ -1,6 +1,6 @@
 # Continuity — cross-session / cross-machine entry point
 
-> Updated 2026-06-30. *Single entry point* for a new session or new machine
+> Updated 2026-07-11. *Single entry point* for a new session or new machine
 > picking up the ckg work. Deliberately short — every section links to the
 > authoritative source. **For project purpose read `docs/VISION.md`; for the
 > doc map read `docs/DOC-MAP.md`; "what is true now" = code + git.**
@@ -73,18 +73,22 @@ Expected outcome (cycle 9 baseline): α score ~0.4, β ~0.75, γ ~0.69, δ ~0.83
 
 > The 2026-05 Lane X / ckg-NEW queue is retired — those items (mcphandlers
 > surface, node_prs, search_text AND/OR + precision) all landed. The current,
-> code-verified remaining list is **`docs/REMAINING-WORK-2026-07-10.md`**.
+> code-verified remaining list is **`docs/REMAINING-WORK-2026-07-11.md`**.
 
 Live remaining work (see that doc for `file:line` evidence):
 
-- **Doc-only, no code**: the symbol-identity/canonical_id effort and the
-  keyword-search AND/OR capability are done; a few status docs were stale and are
-  being corrected in place.
+- **Done since the last snapshot (do not re-open)**: the graph-digest pin anchor
+  (Q1), atomic cold rebuild (Q2), and the incremental-comment fix (Q6) all landed
+  in #53; the `awaits`/`overrides` detectors are **emitted** (verified in a built
+  graph), not deferred slots.
 - **Optional / independent**: `canonical_id` coverage widening
-  (`goCanonicalID`), per the `retire-ckg-node-id.md` pointer — not required.
-- **Deferred slots**: `awaits` (W-B) / `overrides` (W-C) detectors.
-- **Other sessions**: CKV re-align + match-rate on the `pr-77-2` canonical graph;
-  coding-agent D-5.
+  (`goCanonicalID`) — intentionally deferred (would bump the schema and re-sha the
+  published graph for near-zero yield); per the `retire-ckg-node-id.md` pointer,
+  not required.
+- **Actually open (CKG)**: Korean/CJK query graceful-degradation test (P1,
+  test-only); `internal/mcp` → `pkg/mcphandlers` shim migration (T-14b, low).
+- **Other sessions**: CKV re-align + match-rate on the `pr-77-2` canonical graph
+  (now that `graph_digest` is published); coding-agent D-5.
 
 ## 6. What was just found (B-Phase 1 cks audit, 2026-05-23)
 

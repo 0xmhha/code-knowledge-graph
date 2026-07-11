@@ -77,8 +77,8 @@ collapses to: **(R-Build) + (R-Query) + (R-Accuracy at 100%)**.
 |  | blame | File node → most recent commit | ✅ |
 |  | has_hunk / adjacent (H1, schema 1.8) | unified-diff @@ headers per commit | ✅ |
 |  | modifies (H2, schema 1.8) | hunk interval overlap with 13 whitelisted CodeNode kinds | ✅ |
-| **Slot-only (1.10)** | awaits (W-B) | not emitted; TS detector Phase 5 | ❌ slot |
-|  | overrides (W-C) | not emitted; Sol detector Phase 5 | ❌ slot |
+| **Emitted (was 1.10 slot)** | awaits (W-B) | ✅ emitted since `0866ef0` (2026-05-11): `internal/parse/typescript/async.go:120` (`emitAwaitPoint`), wired at `declarations.go:92`. Verified: a build of async TS yields `awaits` edges. | ✅ |
+|  | overrides (W-C) | ✅ emitted since `be80e3d` (2026-05-18): `internal/parse/solidity/overrides.go:200` + `resolve.go:1173`. Verified: a build of a Sol `override` yields `overrides` edges. | ✅ |
 
 ### 2.3 R-Build gaps
 

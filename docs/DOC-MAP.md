@@ -55,7 +55,7 @@ Tier 1 wins.
 | [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
 | [coordination-response-ckg-2026-06-29.md](coordination-response-ckg-2026-06-29.md) | CKG → CKV 협의 회신: canonical_id join key (=canonical_id), population gate >= 1.19 정정, BM25 소유권, flow-corpus control-flow 제공 |
 | [retire-ckg-node-id.md](retire-ckg-node-id.md) | [포인터] `ckg_node_id` 은퇴 → `canonical_id` 단일화 (마스터: cks `docs/retire-ckg-node-id.md`). CKG는 코드 변경 없음 — canonical_id 커버리지만 선택 과제 |
-| [REMAINING-WORK-2026-07-10.md](REMAINING-WORK-2026-07-10.md) | 문서 vs 코드 대조로 추린 미완료·오류만: CAPABILITY-AUDIT의 P0 3건은 이미 구현(stale 정정 대상), 실제 열린 항목은 미push 커밋 + 선택 과제 |
+| [REMAINING-WORK-2026-07-11.md](REMAINING-WORK-2026-07-11.md) | 문서 vs 코드 대조로 추린 미완료·오류만 (supersedes -07-10): B1/Q1/Q2/Q6 완료 확인, awaits/overrides 방출 정정, 실제 열린 항목은 Korean/CJK 테스트(P1)·Stage B harness·shim 이전 |
 | [coordination-reindex-migration-2026-07-10.md](coordination-reindex-migration-2026-07-10.md) | CKG → CKV 회신(재인덱싱·마이그레이션·무중단 6문항): Q1 graph 다이제스트 신규·Q2 cold 원자성 개선·Q6 증분 주석 정정이 실작업; Q3/Q4/Q5는 충족. 구현은 협의 완료 후 |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
