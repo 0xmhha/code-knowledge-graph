@@ -55,9 +55,11 @@ test.describe('Track A: 7 viewer complaints', () => {
     await page.locator('.topbar button', { hasText: /^(2D|3D)$/ }).first().click();
     await page.waitForFunction((prev) => localStorage.getItem('ckg.viewMode') !== prev, initialMode);
 
-    // Click LANG/COMMUNITY toggle and verify state change.
+    // Click color-mode toggle and verify state change. The button is a
+    // three-way cycle (TYPE → LANG → COMMUNITY) whose boot label is TYPE,
+    // so match any of the three labels — not just LANG/COMMUNITY.
     const initialColor = await page.evaluate(() => localStorage.getItem('ckg.colorMode'));
-    await page.locator('.topbar button', { hasText: /^(LANG|COMMUNITY)$/ }).first().click();
+    await page.locator('.topbar button', { hasText: /^(TYPE|LANG|COMMUNITY)$/ }).first().click();
     await page.waitForFunction((prev) => localStorage.getItem('ckg.colorMode') !== prev, initialColor);
 
     // Click Detail toggle: panel hide/show.
