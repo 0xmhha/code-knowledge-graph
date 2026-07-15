@@ -1,0 +1,7 @@
+id: MCKV12-exact-validate-email-go
+description: |
+  Mirror of ckv fixture q35 (exact intent -> function, Go): "validate an email
+  address structurally" -> ValidateEmail. Suffix find_symbol on the simple name.
+probe: { tool: find_symbol, args: { name: "ValidateEmail", exact: false } }
+expected: { symbols: [ "sample.ValidateEmail" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

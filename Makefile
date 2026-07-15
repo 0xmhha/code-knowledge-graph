@@ -1,4 +1,4 @@
-.PHONY: all build build-full build-no-viewer viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update
+.PHONY: all build build-full build-no-viewer viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update eval-ckv-mirror
 
 GO ?= go
 
@@ -153,6 +153,19 @@ eval-baseline-update:
 	@cp -R eval/results/latest eval/baseline
 	@echo "eval/baseline/ refreshed from eval/results/latest/"
 	@echo "Commit the change to lock the new baseline."
+
+# eval-ckv-mirror: LLM-free keyword-retrieval eval that mirrors CKV's fixture
+# set (ckg-NEW-5, Stage B). CKV measures semantic recall over its sample corpus
+# with natural-language intents; this builds a ckg graph over the SAME vendored
+# corpus (eval/ckv-mirror/corpus, with a go.mod so the Go files type-check) and
+# probes ckg's keyword tools (find_symbol / search_text) with keyword/exact
+# queries derived from those intents — so ckg and ckv can be cross-referenced on
+# one query set. Deterministic: same corpus + fixtures -> same result.
+eval-ckv-mirror: build-no-viewer
+	@rm -rf eval/ckv-mirror/.index
+	./bin/ckg build --src=eval/ckv-mirror/corpus --out=eval/ckv-mirror/.index --lang=auto
+	./bin/ckg eval-retrieval --graph=eval/ckv-mirror/.index --fixtures=eval/ckv-mirror/fixtures \
+	    --output=eval/ckv-mirror/.index/results.json
 
 # Machine-local paths — override via environment or .env.local:
 #   STABLENET_SRC  path to go-stablenet checkout

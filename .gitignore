@@ -85,3 +85,6 @@ docs/CODE-AUDIT-*.md
 
 # stray root build artifact — always use `make build` (outputs to bin/, ignored)
 /ckg
+
+# make eval-ckv-mirror writes the regenerable graph here (corpus + fixtures are tracked)
+eval/ckv-mirror/.index/

@@ -1,0 +1,7 @@
+id: MCKV07-keyword-positive-sol
+description: |
+  Mirror of ckv fixture q22 (error-message -> keyword, Solidity): "amount must
+  be positive". Keyword "positive" -> the onlyPositive modifier.
+probe: { tool: search_text, args: { query: "positive", language: "sol", top_k: 20 } }
+expected: { symbols: [ "Token.onlyPositive" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

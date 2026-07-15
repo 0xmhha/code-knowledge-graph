@@ -1,0 +1,7 @@
+id: MCKV01-exact-server-listen-go
+description: |
+  Mirror of ckv fixture q11 (exact-symbol lookup, Go). The user pastes a
+  qualified name; ckg resolves it via find_symbol exact match.
+probe: { tool: find_symbol, args: { name: "sample.Server.Listen", exact: true } }
+expected: { symbols: [ "sample.Server.Listen" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

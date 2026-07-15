@@ -1,0 +1,6 @@
+id: MCKV04-exact-token-transfer-sol
+description: |
+  Mirror of ckv fixture q14 (exact-symbol lookup, Solidity): Token.transfer.
+probe: { tool: find_symbol, args: { name: "Token.transfer", exact: false } }
+expected: { symbols: [ "Token.transfer" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

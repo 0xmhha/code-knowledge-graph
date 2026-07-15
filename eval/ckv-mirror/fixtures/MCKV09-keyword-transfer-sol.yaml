@@ -1,0 +1,8 @@
+id: MCKV09-keyword-transfer-sol
+description: |
+  Mirror of ckv fixture q24 (short keyword, Solidity): "ERC20 transfer".
+  Keyword "transfer" over-recalls to every "transfer" bearer — the transfer
+  method AND the Transfer event. Both are valid keyword hits (recall-first).
+probe: { tool: search_text, args: { query: "transfer", language: "sol", top_k: 20 } }
+expected: { symbols: [ "Transfer", "Token.transfer" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

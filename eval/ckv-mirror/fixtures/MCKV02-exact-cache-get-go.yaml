@@ -1,0 +1,6 @@
+id: MCKV02-exact-cache-get-go
+description: |
+  Mirror of ckv fixture q12 (exact-symbol lookup, Go): Cache.Get.
+probe: { tool: find_symbol, args: { name: "sample.Cache.Get", exact: true } }
+expected: { symbols: [ "sample.Cache.Get" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }
