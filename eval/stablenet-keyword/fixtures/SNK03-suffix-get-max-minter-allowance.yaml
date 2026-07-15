@@ -1,0 +1,6 @@
+id: SNK03-suffix-get-max-minter-allowance
+description: |
+  Suffix find_symbol on a simple name — the gov master-minter max-allowance getter.
+probe: { tool: find_symbol, args: { name: "GetMaxMinterAllowance", exact: false } }
+expected: { symbols: [ "systemcontracts.GetMaxMinterAllowance" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

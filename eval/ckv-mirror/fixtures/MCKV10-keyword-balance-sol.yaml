@@ -1,0 +1,8 @@
+id: MCKV10-keyword-balance-sol
+description: |
+  Mirror of ckv fixture q31 (intent -> keyword, Solidity): "read the balance for
+  an address". Keyword "balance" -> both balanceOf declarations plus the
+  _balances mapping field — every "balance" token bearer.
+probe: { tool: search_text, args: { query: "balance", language: "sol", top_k: 20 } }
+expected: { symbols: [ "Token.balanceOf", "IToken.balanceOf", "_balances:mapping" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

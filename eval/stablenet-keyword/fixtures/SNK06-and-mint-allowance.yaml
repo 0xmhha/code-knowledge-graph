@@ -1,0 +1,15 @@
+id: SNK06-and-mint-allowance
+description: |
+  Multi-keyword AND (Go): "mint allowance" -> the gov minter max-allowance
+  cluster (constants, getter, storage slot, tests). Every "mint"+"allowance"
+  bearer in the systemcontracts package.
+probe: { tool: search_text, args: { query: "mint allowance", mode: "and", language: "go", top_k: 15 } }
+expected:
+  symbols:
+    - systemcontracts.GOV_MASTER_MINTER_PARAM_MAX_MINTER_ALLOWANCE
+    - systemcontracts.DefaultMaxMinterAllowance
+    - systemcontracts.GetMaxMinterAllowance
+    - systemcontracts.SLOT_GOV_MASTER_MINTER_maxMinterAllowance
+    - systemcontracts.TestDefaultMaxMinterAllowance
+    - systemcontracts.TestGetMaxMinterAllowance
+scoring: { recall_min: 1.0, precision_min: 1.0 }

@@ -1,0 +1,6 @@
+id: MCKV03-exact-handler-dispatch-ts
+description: |
+  Mirror of ckv fixture q13 (exact-symbol lookup, TypeScript): Handler.dispatch.
+probe: { tool: find_symbol, args: { name: "Handler.dispatch", exact: false } }
+expected: { symbols: [ "Handler.dispatch" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

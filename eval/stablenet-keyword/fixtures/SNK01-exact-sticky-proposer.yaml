@@ -1,0 +1,7 @@
+id: SNK01-exact-sticky-proposer
+description: |
+  Stage 2 (real go-stablenet corpus @ 0bf2f4d1b, tests-included filter).
+  Exact-symbol lookup: the sticky proposer selection policy.
+probe: { tool: find_symbol, args: { name: "validator.stickyProposer", exact: true } }
+expected: { symbols: [ "validator.stickyProposer" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

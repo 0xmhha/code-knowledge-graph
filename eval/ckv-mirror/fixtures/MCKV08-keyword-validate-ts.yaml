@@ -1,0 +1,7 @@
+id: MCKV08-keyword-validate-ts
+description: |
+  Mirror of ckv fixture q30 (intent -> keyword, TypeScript): "reject empty or
+  unsafe paths". Keyword "validate" -> validatePath.
+probe: { tool: search_text, args: { query: "validate", language: "ts", top_k: 20 } }
+expected: { symbols: [ "validatePath" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

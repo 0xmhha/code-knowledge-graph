@@ -1,0 +1,7 @@
+id: MCKV06-keyword-evict-go
+description: |
+  Mirror of ckv fixture q19 (vague intent -> keyword, Go): "where state gets
+  cleared". Keyword "evict" -> Cache.EvictAll.
+probe: { tool: search_text, args: { query: "evict", language: "go", top_k: 20 } }
+expected: { symbols: [ "sample.Cache.EvictAll" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

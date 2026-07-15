@@ -1,0 +1,11 @@
+id: SNK04-and-proposer-sticky
+description: |
+  Multi-keyword AND (Go): "proposer sticky" narrows to the sticky-proposer
+  cluster — policy factory, the selection fn, and its test.
+probe: { tool: search_text, args: { query: "proposer sticky", mode: "and", language: "go", top_k: 15 } }
+expected:
+  symbols:
+    - validator.stickyProposer
+    - wbft.NewStickyProposerPolicy
+    - validator.testStickyProposer
+scoring: { recall_min: 1.0, precision_min: 1.0 }

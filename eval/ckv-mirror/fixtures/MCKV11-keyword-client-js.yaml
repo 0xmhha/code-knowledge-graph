@@ -1,0 +1,8 @@
+id: MCKV11-keyword-client-js
+description: |
+  Mirror of ckv fixture q39 (intent -> keyword, JavaScript): "build an HTTP
+  client bound to a base URL". Keyword "client" -> the createClient export and
+  the client.js File node (both carry the "client" token).
+probe: { tool: search_text, args: { query: "client", language: "ts", top_k: 20 } }
+expected: { symbols: [ "file:client.js", "createClient" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }
