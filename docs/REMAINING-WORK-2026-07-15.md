@@ -12,8 +12,9 @@
   먼저 존재(`git merge-base --is-ancestor` 확인). 즉 07-11 문서가 완료 항목을 open으로 잘못 표기.
 - **신규**: #55 `scripts/index-project.sh`의 `MAIN_PKG` 모드가 정본 그래프 빌드의 **동적·정밀
   스코핑**을 제공 → 기존 정적 필터(`eval/stablenet/stablenet-files-with-tests.json`)를 대체.
-- **CKG에 남은 실제 코드 작업은 B2(Stage B eval harness 확장) 하나뿐**이고, 그것도 eval·LLM
-  의존 서피스 확장(필수 블로커 아님).
+- **B2(Stage B / ckg-NEW-5)도 완료됨(#57, 2026-07-15)** — ckv fixture 미러(`eval/ckv-mirror`,
+  12/12) + go-stablenet 실전 코퍼스 키워드 eval(`eval/stablenet-keyword`, 8/8). → **CKG에 남은
+  코드 작업 없음.**
 
 ## A. 문서 오류 (stale) — ✅ 이번에 확인/정정
 
@@ -25,9 +26,11 @@
 
 ## B. 실제 미완료 (코드로 확인된 열린 항목)
 
-| # | 항목 | 근거 | 성격 | 우선순위 |
-|---|---|---|---|---|
-| B1 | **Stage B eval harness 확장** — ckv fixture 12개의 ckg-side mirror(`ckg-NEW-5/8`) + 14-task×4-baseline 측정 | `eval/stablenet/CKS-INTEGRATION-2026-05-23.md:27,62`. harness(`make eval-stage-b`, `Makefile:219`) + 일반 stable-net task 30개(`eval/stablenet/tasks/T01–T30`)는 존재. 단 **ckv-mirror 12개 태스크 미작성**(`grep ckv|mirror tasks/` = 0) + 런타임 측정(LLM 의존) 미실시 | eval 서피스 확장 (YAML 저작 + LLM 측정) | P1 (블로커 아님) |
+**없음** — 07-15 스냅샷의 유일한 열린 항목이던 B2(Stage B / ckg-NEW-5)가 #57로 완료됨.
+
+| # | 항목 | 근거 | 판정 |
+|---|---|---|---|
+| ~~B1~~ | ~~Stage B eval harness 확장 (ckv fixture mirror + 측정)~~ | LLM-free `eval-retrieval` 기반 2단계로 구현: `eval/ckv-mirror`(12 fixture, `make eval-ckv-mirror`, 12/12) + `eval/stablenet-keyword`(8 fixture, `make eval-stablenet-keyword GRAPH=<dir>`, 8/8). #57 | ✅ **완료 (2026-07-15)** |
 
 ## C. 선택·설계상 defer (버그 아님)
 
@@ -55,7 +58,8 @@
 
 ## 권장 실행 순서
 
-1. **B1(Stage B harness 확장)** — 유일한 코드성 잔여. eval·LLM 필요 → 우선순위·리소스 확인 후 착수.
-2. C1/D1–D3는 defer 또는 타 세션 대기.
+**CKG 코드 잔여 없음** — B2(#57)까지 완료. 남은 항목은 전부 선택(C1) 또는 타 세션(D1–D3):
+1. C1(`canonical_id` 커버리지) — defer 유지(by-design + published 그래프 파급).
+2. D1(CKV pr-77-2 재정렬·매칭률), D2(coding-agent D-5), D3(ckv/cks 은퇴 코드) — 타 세션 대기/추적.
 
 **CKG 필수/블로킹 작업 없음** — 코드 상태 클린. B1은 eval 서피스 확장(선택적).
