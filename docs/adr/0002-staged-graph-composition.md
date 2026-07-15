@@ -9,7 +9,7 @@
 CKG must produce a **deterministic** graph: the same source tree at the same
 commit must yield the same graph on any machine. This is foundational — the
 CKG↔CKV match-rate and the coding-agent PR-77 A/B (see
-`docs/coordination-response-ckg-2026-06-29.md`) are only valid if the measured
+`docs/archive/coordination-response-ckg-2026-06-29.md`) are only valid if the measured
 graph is reproducible.
 
 The Go loader sets `Tests:true` in `packages.Load`
@@ -87,7 +87,7 @@ columns: **bump the cache-key `SchemaVersion`** in `internal/buildpipe/cache.go`
   is lost; it is simply prevented from shadowing the production core.
 - Existing cached graphs are invalidated by the cache-key bump and rebuild
   deterministically. Live status / measurement numbers: Tier 3
-  `docs/coordination-response-ckg-2026-06-29.md` and
+  `docs/archive/coordination-response-ckg-2026-06-29.md` and
   `docs/archive/symbol-identity-remaining-work.md`.
 - Stage 2's explicit test-scope semantics are deferred; Stage 1 already stops the
   pollution by giving primary packages ownership.

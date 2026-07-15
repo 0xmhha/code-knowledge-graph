@@ -1,6 +1,6 @@
 # Continuity — cross-session / cross-machine entry point
 
-> Updated 2026-07-11. *Single entry point* for a new session or new machine
+> Updated 2026-07-15. *Single entry point* for a new session or new machine
 > picking up the ckg work. Deliberately short — every section links to the
 > authoritative source. **For project purpose read `docs/VISION.md`; for the
 > doc map read `docs/DOC-MAP.md`; "what is true now" = code + git.**
@@ -21,11 +21,31 @@
 - **Canonical corpus build**: `--files-from` filters under `eval/stablenet/`
   (`stablenet-files.json` = no tests; `stablenet-files-with-tests.json` = binary
   scope + tests). See README "Building a graph".
+- **graph_digest pin anchor + atomic cold rebuild (#53)**: `internal/buildpipe/graph_digest.go`
+  publishes a deterministic code-graph digest to the manifest (json + in-db row);
+  cold rebuild is atomic via `graph.db.building` → `os.Rename`. Canonical pr-77-2
+  graph digest = `4be26516…`.
+- **Keyword-retrieval eval (#57)**: LLM-free `eval-retrieval` fixtures —
+  `eval/ckv-mirror` (CKV fixture mirror, `make eval-ckv-mirror`, 12/12) and
+  `eval/stablenet-keyword` (real corpus, `make eval-stablenet-keyword GRAPH=<dir>`, 8/8).
 - **Eval framework (LLM-driven)**: production-ready. Metrics: `docs/eval-trajectory.md`.
 - **Schema**: 1.23 (authoritative: `docs/SCHEMA.md` → `internal/buildpipe/cache.go`).
-- **Active cross-repo coordination (2026-06-29/30)**: canonical graph published
-  to CKV/CKS/coding-agent; live doc = `docs/coordination-response-ckg-2026-06-29.md`.
-  Open on others' side: CKV match-rate re-measure, coding-agent D-5.
+
+## 1b. Remaining work — **no open CKG code items** (2026-07-15)
+
+The reindex/graph_digest coordination and the ckg_node_id retirement closed; the
+status/coordination docs are archived under `docs/archive/` (see the archive
+notes there). What's left is not CKG code work:
+
+- **C1 (optional, deferred)**: widen `goCanonicalID` coverage
+  (`internal/parse/golang/declarations.go`). Deferred by design — empty
+  `canonical_id` is mostly by-design (promoted/synthetic methods, function-local
+  var/const), and changing it bumps the schema and re-digests the published graph
+  (CKV/coding-agent ripple) for ~zero gain.
+- **Other sessions (track only)**: D1 CKV re-align + graph_digest end-to-end on
+  pr-77-2 (CKG published the digest; `ckgalign.ReadCoords` auto-consumes);
+  D2 coding-agent "~23% recall" source (D-5); D3 ckv/cks `ckg_node_id` removal
+  (ckv done 07-11, cks 07-12).
 
 ## 2. Where to read next
 
@@ -71,24 +91,12 @@ Expected outcome (cycle 9 baseline): α score ~0.4, β ~0.75, γ ~0.69, δ ~0.83
 
 ## 5. Next-action priority queue
 
-> The 2026-05 Lane X / ckg-NEW queue is retired — those items (mcphandlers
-> surface, node_prs, search_text AND/OR + precision) all landed. The current,
-> code-verified remaining list is **`docs/REMAINING-WORK-2026-07-11.md`**.
-
-Live remaining work (see that doc for `file:line` evidence):
-
-- **Done since the last snapshot (do not re-open)**: the graph-digest pin anchor
-  (Q1), atomic cold rebuild (Q2), and the incremental-comment fix (Q6) all landed
-  in #53; the `awaits`/`overrides` detectors are **emitted** (verified in a built
-  graph), not deferred slots.
-- **Optional / independent**: `canonical_id` coverage widening
-  (`goCanonicalID`) — intentionally deferred (would bump the schema and re-sha the
-  published graph for near-zero yield); per the `retire-ckg-node-id.md` pointer,
-  not required.
-- **Actually open (CKG)**: Korean/CJK query graceful-degradation test (P1,
-  test-only); `internal/mcp` → `pkg/mcphandlers` shim migration (T-14b, low).
-- **Other sessions**: CKV re-align + match-rate on the `pr-77-2` canonical graph
-  (now that `graph_digest` is published); coding-agent D-5.
+**No open CKG code items — see §1b.** The 2026-05 Lane X / ckg-NEW queue and the
+07-11/07-15 remaining-work snapshots are all resolved (mcphandlers surface,
+node_prs, search_text AND/OR + precision, Korean/CJK test, T-14b shim, awaits/
+overrides emission, graph_digest + atomic rebuild #53, keyword-retrieval eval
+#57). What remains is C1 (deferred) and other-session items (D1–D3), listed in
+§1b. Their archived evidence: `docs/archive/REMAINING-WORK-2026-07-15.md`.
 
 ## 6. What was just found (B-Phase 1 cks audit, 2026-05-23)
 

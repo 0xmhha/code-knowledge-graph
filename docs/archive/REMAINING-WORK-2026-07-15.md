@@ -1,5 +1,7 @@
 # CKG 남은 작업 — 문서 vs 코드 대조 (2026-07-15)
 
+> **ARCHIVED 2026-07-15 — 잔여 없음.** CKG 코드 작업이 모두 완료되어(B1/B2/B3, A1/A2) 이 추적 문서의 목적이 끝났다. 남은 선택/타세션 항목(C1 canonical_id 커버리지 defer, D1 CKV 재정렬, D2 coding-agent D-5, D3 ckv/cks 은퇴)은 `docs/CONTINUITY.md`에 승계. Provenance용 보존.
+
 > Tier 3 (dated snapshot). 상태 문서를 **코드+git에 대조**해 실제 미완료·오류만 추린
 > 목록. 근거는 `file:line`/commit으로 인용 — 다음 세션이 재검증 없이 신뢰할 수 있게.
 > Ground truth = code + git. **Supersedes `REMAINING-WORK-2026-07-11.md`**: 그 스냅샷의

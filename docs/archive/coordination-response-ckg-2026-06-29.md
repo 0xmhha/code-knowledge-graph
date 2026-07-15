@@ -1,5 +1,7 @@
 # CKG → CKV 협의 회신 — canonical_id join · 2026-06-29
 
+> **ARCHIVED 2026-07-15 — 협의 종결.** canonical_id join key(=canonical_id)·graph_digest 공표 합의 완료. 결정은 ADR-0001 + `archive/coordination-reindex-migration-2026-07-10.md`로 승계. Provenance용 보존.
+
 > Tier 3 (dated snapshot). CKG 세션이 CKV의
 > `code-knowledge-vector/docs/coordination-prompts-2026-06-29.md` §1(→ CKG)에
 > 회신한 내용의 CKG 측 사본. 권위: `docs/adr/0001-canonical-symbol-id.md`(why),
