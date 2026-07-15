@@ -52,11 +52,7 @@ Tier 1 wins.
 
 | Doc | Covers |
 |---|---|
-| [CONTINUITY.md](CONTINUITY.md) | Cross-session cold-start entry point: snapshot + next-action queue |
-| [coordination-response-ckg-2026-06-29.md](coordination-response-ckg-2026-06-29.md) | CKG → CKV 협의 회신: canonical_id join key (=canonical_id), population gate >= 1.19 정정, BM25 소유권, flow-corpus control-flow 제공 |
-| [retire-ckg-node-id.md](retire-ckg-node-id.md) | [포인터] `ckg_node_id` 은퇴 → `canonical_id` 단일화 (마스터: cks `docs/retire-ckg-node-id.md`). CKG는 코드 변경 없음 — canonical_id 커버리지만 선택 과제 |
-| [REMAINING-WORK-2026-07-15.md](REMAINING-WORK-2026-07-15.md) | 문서 vs 코드 대조로 추린 미완료·오류만 (supersedes -07-11): Korean/CJK 테스트·shim 이전(T-14b)도 이미 완료 확인, #55 index-project.sh 반영, 실제 열린 항목은 Stage B eval harness 확장(B1) 하나뿐 |
-| [coordination-reindex-migration-2026-07-10.md](coordination-reindex-migration-2026-07-10.md) | CKG → CKV 회신(재인덱싱·마이그레이션·무중단 6문항): Q1 graph 다이제스트 신규·Q2 cold 원자성 개선·Q6 증분 주석 정정이 실작업; Q3/Q4/Q5는 충족. 구현은 협의 완료 후 |
+| [CONTINUITY.md](CONTINUITY.md) | **Cross-session cold-start entry point** — snapshot + remaining-work (the sole live Tier 3 status doc) |
 | [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
 | [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
 | [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | North-star → capability gap mapping (requirements reference) |
@@ -87,3 +83,10 @@ Archived in the 2026-06-30 cleanup (symbol-identity effort complete):
 
 - `symbol-identity-remaining-work.md` — all items done/resolved; decisions in ADR-0001/0002/0003
 - `HANDOFF-2026-06-19-symbol-identity.md` — canonical_id effort merged; resume doc no longer needed
+
+Archived in the 2026-07-15 cleanup (coordination closed, no open CKG work):
+
+- `REMAINING-WORK-2026-07-15.md` — all CKG code items done; residual C1/D1–D3 carried into CONTINUITY
+- `coordination-response-ckg-2026-06-29.md` — canonical_id join / graph_digest coordination closed
+- `coordination-reindex-migration-2026-07-10.md` — reindex/zero-downtime coordination closed; Q1/Q2/Q6 shipped in #53
+- `retire-ckg-node-id.md` — CKG portion closed (no code change); ckv/cks did the removal

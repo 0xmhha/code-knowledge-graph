@@ -1,5 +1,7 @@
 # [포인터] `ckg_node_id` 은퇴 · `canonical_id` 단일화 — CKG 작업분
 
+> **ARCHIVED 2026-07-15 — CKG 작업분 마감.** ckg는 `ckg_node_id` 참조 0건(외부 이름)이라 코드 변경 없음. 실제 통합은 ckv(완료 07-11)·cks(마감 07-12). 마스터: cks `docs/retire-ckg-node-id.md`. Provenance용 보존.
+
 - 상태: **CKG 작업분 마감** (검증 2026-07-10) — 코드 변경 없음 확정
 - 작성일: 2026-07-08
 - **마스터 문서**: `code-knowledge-system/docs/retire-ckg-node-id.md` (전체 배경·판정·세 repo 체크리스트)

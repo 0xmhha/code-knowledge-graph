@@ -1,5 +1,7 @@
 # CKG 회신 — 재인덱싱·DB마이그레이션·무중단 설계 검토 (2026-07-10)
 
+> **ARCHIVED 2026-07-15 — 협의 종결 + 구현 완료.** Q1/Q2/Q6는 #53에서 구현(graph_digest는 `internal/buildpipe/graph_digest.go`·SCHEMA·manifest에 반영), Q3/Q4/Q5는 기충족. 3자 협의 종료. Provenance용 보존.
+
 > Tier 3 (dated). CKV의 "재인덱싱·DB마이그레이션·무중단 설계 검토 요청"(6문항)에
 > CKG가 **코드 대조**로 회신. Ground truth = code + git. 관련: ADR-0002(결정성),
 > `docs/coordination-response-ckg-2026-06-29.md`(정본 그래프 공표).
