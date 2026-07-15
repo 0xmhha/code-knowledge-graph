@@ -1,0 +1,10 @@
+id: SNK05-and-future-preprepare
+description: |
+  Multi-keyword AND (Go): "future preprepare" resolves to the future-view
+  preprepare timer pair on the WBFT core.
+probe: { tool: search_text, args: { query: "future preprepare", mode: "and", language: "go", top_k: 15 } }
+expected:
+  symbols:
+    - core.Core.futurePreprepareTimer
+    - core.Core.stopFuturePreprepareTimer
+scoring: { recall_min: 1.0, precision_min: 1.0 }

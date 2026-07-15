@@ -1,0 +1,8 @@
+id: SNK07-and-quorum-dedup
+description: |
+  Multi-keyword AND (Go): "quorum deduplication" — a discriminative pair that
+  pins the quorum-after-dedup validator test. Demonstrates AND precision on a
+  183k-node corpus (single, exact target).
+probe: { tool: search_text, args: { query: "quorum deduplication", mode: "and", language: "go", top_k: 15 } }
+expected: { symbols: [ "systemcontracts.TestQuorumAfterDeduplication" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

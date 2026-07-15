@@ -1,4 +1,4 @@
-.PHONY: all build build-full build-no-viewer viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update eval-ckv-mirror
+.PHONY: all build build-full build-no-viewer viewer test test-race lint lint-viewer fmt fmt-check install-hooks audit clean eval eval-baseline-update eval-ckv-mirror eval-stablenet-keyword
 
 GO ?= go
 
@@ -166,6 +166,20 @@ eval-ckv-mirror: build-no-viewer
 	./bin/ckg build --src=eval/ckv-mirror/corpus --out=eval/ckv-mirror/.index --lang=auto
 	./bin/ckg eval-retrieval --graph=eval/ckv-mirror/.index --fixtures=eval/ckv-mirror/fixtures \
 	    --output=eval/ckv-mirror/.index/results.json
+
+# eval-stablenet-keyword: Stage 2 — the same keyword-retrieval eval over the
+# REAL go-stablenet corpus (not the tiny vendored sample). Unlike the mirror,
+# the corpus is external and huge, so this cannot vendor it: it runs the
+# committed fixtures against a pre-built go-stablenet graph. Point GRAPH at a
+# graph dir built from analysis-test-3 @ 0bf2f4d1b with the tests-included
+# filter (see docs + scripts/index-project.sh); the expected qnames are pinned
+# to that commit. Example:
+#   make eval-stablenet-keyword GRAPH=/path/to/knowledge-data/pr-77-2
+eval-stablenet-keyword: build-no-viewer
+	@[ -n "$(GRAPH)" ] || { echo "ERROR: set GRAPH=<go-stablenet graph dir> (pinned to 0bf2f4d1b, tests-included). See eval/stablenet-keyword/README.md"; exit 1; }
+	@[ -f "$(GRAPH)/graph.db" ] || { echo "ERROR: $(GRAPH)/graph.db not found"; exit 1; }
+	./bin/ckg eval-retrieval --graph=$(GRAPH) --fixtures=eval/stablenet-keyword/fixtures \
+	    --output=eval/stablenet-keyword/results.json
 
 # Machine-local paths — override via environment or .env.local:
 #   STABLENET_SRC  path to go-stablenet checkout

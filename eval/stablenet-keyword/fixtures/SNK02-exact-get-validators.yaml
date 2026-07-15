@@ -1,0 +1,6 @@
+id: SNK02-exact-get-validators
+description: |
+  Exact-symbol lookup of the WBFT backend validator-set accessor.
+probe: { tool: find_symbol, args: { name: "backend.API.GetValidators", exact: true } }
+expected: { symbols: [ "backend.API.GetValidators" ] }
+scoring: { recall_min: 1.0, precision_min: 1.0 }

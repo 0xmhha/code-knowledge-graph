@@ -88,3 +88,6 @@ docs/CODE-AUDIT-*.md
 
 # make eval-ckv-mirror writes the regenerable graph here (corpus + fixtures are tracked)
 eval/ckv-mirror/.index/
+
+# make eval-stablenet-keyword output (fixtures are tracked, results are per-run)
+eval/stablenet-keyword/results.json

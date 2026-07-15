@@ -1,0 +1,21 @@
+id: SNK08-and-effective-gasprice
+description: |
+  Multi-keyword AND (Go): "effective gasprice" -> every EffectiveGasPrice
+  bearer across the tx/receipt types. A coherent broad cluster (recall-first
+  keyword topic search still precise because both tokens must co-occur).
+probe: { tool: search_text, args: { query: "effective gasprice", mode: "and", language: "go", top_k: 20 } }
+expected:
+  symbols:
+    - types.Receipt.EffectiveGasPrice
+    - types.receiptMarshaling.EffectiveGasPrice
+    - types.storedReceiptRLP.EffectiveGasPrice
+    - rawdb.storedReceiptRLP.EffectiveGasPrice
+    - graphql.Transaction.EffectiveGasPrice
+    - types.LegacyTx.effectiveGasPrice
+    - types.BlobTx.effectiveGasPrice
+    - types.AccessListTx.effectiveGasPrice
+    - types.SetCodeTx.effectiveGasPrice
+    - types.DynamicFeeTx.effectiveGasPrice
+    - types.FeeDelegateDynamicFeeTx.effectiveGasPrice
+    - ethapi.effectiveGasPrice
+scoring: { recall_min: 1.0, precision_min: 1.0 }
