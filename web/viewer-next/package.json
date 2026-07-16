@@ -29,7 +29,7 @@
     "@typescript-eslint/parser": "^8.63.0",
     "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
-    "typescript": "^5.5.4",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.63.0"
   },
   "overrides": {
