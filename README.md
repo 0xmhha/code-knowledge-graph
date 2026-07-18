@@ -4,17 +4,17 @@
 [![CI](https://github.com/0xmhha/code-knowledge-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/0xmhha/code-knowledge-graph/actions/workflows/ci.yml)
 
 Build a queryable **knowledge graph** from a code path. Point CKG at a
-directory and it parses the source (Go / TypeScript / Solidity) into a
-graph of files, symbols, and relationships you can query from the CLI,
+directory and it parses the source (Go / TypeScript / Solidity / Protobuf)
+into a graph of files, symbols, and relationships you can query from the CLI,
 an MCP-enabled LLM, or a 3D web viewer.
 
 ## Features
 
-- **Multi-language parsing** — Go, TypeScript, Solidity via tree-sitter
+- **Multi-language parsing** — Go (`go/packages`), TypeScript & Solidity (tree-sitter), Protobuf
 - **Persistent graph store** — SQLite (the maintained backend; the PostgreSQL backend is deprecated, see [ADR-0003](docs/adr/0003-deprecate-postgres-backend.md))
-- **Multiple query surfaces** — REST API, MCP server, 3D viewer
-- **Incremental builds** — file-level caching for fast re-indexing
-- **Rich schema** — 33 node kinds, dependency / call / git-history edges
+- **Multiple query surfaces** — REST API, MCP server (10 tools), 3D viewer
+- **Incremental builds** — file-level caching (cold / short-circuit / partial) for fast re-indexing
+- **Rich schema** — 37 node kinds + 43 edge kinds across six axes (structural, semantic, execution, concurrency, distributed, temporal); see [SCHEMA](docs/SCHEMA.md)
 
 ## Quick start
 
@@ -30,7 +30,7 @@ make build-full   # viewer + binary; `make build` = binary only (no 3D viewer UI
 ./bin/ckg serve --graph=/tmp/ckg --open      # http://localhost:8080
 
 # 3. Query from Claude Code via MCP
-claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/tmp/ckg"
+claude mcp add ckg -- ./bin/ckg mcp --graph=/tmp/ckg
 ```
 
 ## Building a graph
@@ -73,17 +73,27 @@ Run `ckg build --help` for the full flag list.
 
 ## Commands
 
+The five production surfaces:
+
 | Command | Purpose |
 |---|---|
 | `ckg build`           | Parse a code path into a graph database |
 | `ckg serve`           | HTTP API + embedded 3D viewer |
 | `ckg mcp`             | MCP server for LLM agents (Claude Code, etc.) |
+| `ckg eval-retrieval`  | Keyword-retrieval accuracy eval against gold fixtures |
+| `ckg audit`           | `go/packages`-vs-DB parity / graph-integrity check |
+
+Supporting commands:
+
+| Command | Purpose |
+|---|---|
+| `ckg benchmark`       | Compare graph-context vs raw-file context on LLM tasks |
+| `ckg validate`        | Schema + (optional) LLM validation of a graph |
 | `ckg export-static`   | Export viewer + chunked JSON for static hosting |
 | `ckg export-postgres` | Migrate a SQLite graph to PostgreSQL (deprecated, ADR-0003) |
-| `ckg eval`            | Compare graph-context vs raw-file context on benchmark tasks |
-| `ckg audit`           | Validate graph integrity |
+| `ckg watch`           | Rebuild the graph incrementally on file changes |
 
-Run `ckg <command> --help` for flags.
+Run `ckg <command> --help` for flags. `ckg --help` lists every subcommand.
 
 ## Production deployment
 
@@ -99,10 +109,14 @@ Front both with a reverse proxy: `/api/* → :8080`, `/* → /srv/ckg/static`.
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — pipeline + subcommand overview
-- [`docs/SCHEMA.md`](docs/SCHEMA.md) — node and edge enumeration
+- [`docs/VISION.md`](docs/VISION.md) — **start here**: purpose, the CKG/CKV/CKS triangle, retrieval-accuracy north star
+- [`docs/DOC-MAP.md`](docs/DOC-MAP.md) — documentation index + tier map (which doc is authoritative)
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 1-page architecture; [`ARCHITECTURE-DETAILED.md`](docs/ARCHITECTURE-DETAILED.md) for the full pipeline
+- [`docs/SCHEMA.md`](docs/SCHEMA.md) — authoritative node/edge enumeration + schema version history
 - [`docs/EVAL.md`](docs/EVAL.md) — eval harness and scoring
 - [`docs/STUDY-GUIDE.md`](docs/STUDY-GUIDE.md) — background on Leiden, MCP, tree-sitter, 3D layout
+
+"What is true now" = code + git. For decisions, see [`docs/adr/`](docs/adr/).
 
 ## Contributing
 
