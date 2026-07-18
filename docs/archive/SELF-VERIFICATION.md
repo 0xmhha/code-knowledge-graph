@@ -1,5 +1,10 @@
 # Self-Verification Manual
 
+> **ARCHIVED 2026-07-18.** The command *flows* still work, but the expected
+> values are stale (schema was 1.6, now 1.23; "7 MCP tools", now 10; fixed
+> node/edge counts drift every commit). `docs/CONTINUITY.md` is the sole live
+> status doc. Kept for provenance and as a self-verification recipe reference.
+
 > **목적**: ckg 프로젝트가 자기 자신의 코드를 분석한 결과(self-graph)로 7가지 사용자 검토항목이 충족되는지 수동으로 확인하기 위한 명령 모음.
 > **대상 corpus**: CKG repo 루트 (`$REPO_ROOT`) — CKG 자기 자신.
 > **선행 문서**: `docs/archive/analysis/SELF-GRAPH-COMPARISON.md` (변경 이력) / `docs/archive/analysis/CKS-SPEC-COMPLIANCE.md` (spec 충실도).

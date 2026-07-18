@@ -1,9 +1,9 @@
-# CKG Architecture (2026-05-04)
+# CKG Architecture (2026-07-18)
 
-**Document Date**: 2026-05-04  
-**Status**: Current (post-Wave 7, G6 v3 D4 escape hatch executed)  
-**Schema Version**: 1.15 (authoritative: docs/SCHEMA.md)  
-**Scope**: Single-binary `ckg` CLI, 5 subcommands, 37 node types (authoritative: docs/SCHEMA.md), 43 edge types (authoritative: docs/SCHEMA.md), 6 graph axes
+**Document Date**: 2026-07-18  
+**Status**: Current (post-#55 binary-reachable rescoping; G6 v4 incremental path live)  
+**Schema Version**: 1.23 — authoritative in `internal/buildpipe/cache.go` (`const SchemaVersion`, cache-key contributor) and mirrored in docs/SCHEMA.md  
+**Scope**: Single-binary `ckg` CLI — ~20 cobra subcommands (`cmd/ckg/root.go:30`) of which **five are production surfaces** (build, serve, mcp, eval, audit); 37 node types + 43 edge types (authoritative: `pkg/types/enums.go` `AllNodeTypes()`/`AllEdgeTypes()`, counts in docs/SCHEMA.md); 6 graph axes
 
 ---
 
@@ -14,23 +14,29 @@ CKG is a single-binary, self-contained code knowledge graph builder and server:
 ```
 Input (source code) → CLI build pipeline → SQLite graph.db → Multiple query surfaces
                            ↓ (build)              ↓          ├─ HTTP API + viewer
-                      3 language parsers      Persist layer  ├─ MCP server (9 tools)
-                      (Go/TS/Sol)             (SQLite)       ├─ Audit (verify parity)
+                      4 language parsers      Persist layer  ├─ MCP server (10 tools)
+                      (Go/TS/Sol/Proto)       (SQLite)       ├─ Audit (verify parity)
                                                               └─ Export (static JSON)
 ```
 
 ### 1.1 Entry Points
 
-**CLI**: `cmd/ckg/main.go` → `newRootCmd()` → 5 subcommands:
+**CLI**: `cmd/ckg/main.go` → `newRootCmd()` registers ~20 cobra subcommands
+(`cmd/ckg/root.go:30-36`). Most are utilities (query, path, report, benchmark,
+watch, export-*, bench-*, quickstart, evidence, validate). **Five are the
+production surfaces** — everything else is a helper or a benchmark harness:
 
-| Subcommand | Purpose | Output | Key Package |
-|---|---|---|---|
-| `build` | Parse all files → graph.db | SQLite database + manifest.json | `internal/buildpipe` |
-| `serve` | HTTP server + embedded viewer | localhost:8080 (default) | `internal/server` |
-| `mcp` | Model Context Protocol stdio server | 9 MCP tools | `internal/mcp` |
-| `export-static` | Chunked JSON export for static hosting | /out/*.json + viewer assets | `internal/persist` |
-| `eval` | Run baseline comparisons on task YAML | CSV + report.md | `internal/eval` |
-| `audit` | Verify graph completeness vs. source | exit 0/1/2 | `internal/audit` |
+| Surface | Command | Purpose | Output | Key Package |
+|---|---|---|---|---|
+| `build` | `newBuildCmd` | Parse all files → graph.db | SQLite database + manifest.json | `internal/buildpipe` |
+| `serve` | `newServeCmd` | HTTP server + embedded viewer | localhost:8080 (default) | `internal/server` |
+| `mcp` | `newMCPCmd` | Model Context Protocol stdio server | 10 MCP tools | `internal/mcp` + `pkg/mcphandlers` |
+| `eval` | `newEvalRetrievalCmd` (`ckg eval-retrieval`, `cmd/ckg/eval_retrieval.go`) | Keyword-retrieval accuracy eval | CSV + report.md | `internal/eval` |
+| `audit` | `newAuditCmd` | Verify graph completeness vs. source | exit 0/1/2 | `internal/audit` |
+
+> There is no `ckg eval` command and no `cmd/ckg/eval.go` — the eval surface is
+> exposed as `eval-retrieval`. Static export is a utility subcommand
+> (`export-static`, `export-json`, `export-postgres`), not a production surface.
 
 ### 1.2 Core Execution Model
 
@@ -38,8 +44,8 @@ Each build follows the **7-Pass Architecture** (spec §4.7):
 
 | Phase | Name | Input | Output | Implementation |
 |---|---|---|---|---|
-| P1 | Detect | srcRoot | file list (Go/TS/Sol) | `internal/detect.Walk()` + `detect.GoFiles()` |
-| P2 | Parse (per-lang) | files | nodes, edges, pending refs | Language parsers (Go/TS/Solidity) |
+| P1 | Detect | srcRoot | file list (Go/TS/Sol/Proto) | `internal/detect.Walk()` + `detect.GoFiles()` |
+| P2 | Parse (per-lang) | files | nodes, edges, pending refs | Language parsers (Go/TS/Solidity/Proto — `internal/parse/{golang,typescript,solidity,proto}`) |
 | P3 | Resolve (per-lang) | pending refs + nodes | resolved edges | `internal/parse.Resolve()` per language |
 | P4 | Graph Build | per-lang ResolvedGraphs | unified graph (dedup) | `internal/graph.Build()` |
 | P5 | Cross-Lang Link (G5) | Sol ABI + TS nodes | binds_to edges | `internal/link.SolToTS()` |
@@ -52,43 +58,48 @@ Each build follows the **7-Pass Architecture** (spec §4.7):
 
 ### 2.1 Cache Routing Decision Tree
 
+Routing lives in `Run()` → the tail of `pipeline.go` (`pipeline.go:250-265`):
+
 ```
 Run(Options) called
     │
-    ├─ Is --no-cache set? → YES → runCold (full rebuild)
+    ├─ Is --no-cache set OR manifest unusable? → YES → runCold (full rebuild)
     │
-    ├─ Is manifest usable? (version + schema match)
-    │   │
-    │   ├─ NO → runCold
-    │   │
-    │   └─ YES: DiffManifest() classifies each file as:
-    │       ├─ classDirty (SHA256 mismatch) ──┐
-    │       ├─ classCached (hit) ─────────────┼→ IsAllCached()?
-    │       └─ classRemoved (gone) ───────────┤
-    │                                    ├─ YES: runShortCircuit
-    │                                    │ (manifest timestamp refresh only)
-    │                                    │
-    │                                    └─ NO (partial hit):
-    │                                        Cold fallback (D4 escape hatch)
-    │                                        Root cause: NodesByFilePath order ≠
-    │                                        AST declaration order → ambiguous
-    │                                        qname winner differs → phantom edges
+    └─ Manifest usable (ManifestUsable): DiffManifest() classifies each file as:
+        ├─ classDirty (SHA256 mismatch) ──┐
+        ├─ classCached (hit) ─────────────┼→ IsAllCached()?
+        └─ classRemoved (gone) ───────────┤
+                                     ├─ YES: runShortCircuit
+                                     │ (manifest timestamp refresh only)
+                                     │
+                                     └─ NO (partial hit):
+                                         runIncremental  (pipeline.go:260)
+                                         G6 v4 + C1 reverse-reference invalidation
+                                         — LIVE, not a cold fallback
 ```
 
-**Key Constants** (cache.go):
-- `SchemaVersion = "1.15"` (authoritative: docs/SCHEMA.md) — bumped by A3 (CASCADE), E3 (Endpoint/MessageType), E4 (Commit), G6 v3 (pending_refs)
-- Cache key = SHA256(file_content + "|ckg:VERSION|parser:VERSION|schema:1.15")
-- Parser version: Go ties to `runtime.Version()`; TS/Sol ties to tree-sitter binding version
+The earlier D4 cold-fallback escape hatch is **retired**: `runIncremental` is now
+the live partial-hit path (`incremental.go:154`, dispatched at `pipeline.go:260`).
+The old phantom-edge root cause (NodesByFilePath order ≠ AST declaration order) is
+fixed — `NodesByFilePath` now sorts `ORDER BY start_line`
+(`internal/persist/sqlite_reader.go:592`). See §2.4.
+
+**Key Constants** (`internal/buildpipe/cache.go`):
+- `const SchemaVersion = "1.23"` (`cache.go:166`) — the cache-key contributor.
+  This is authoritative for the extraction schema; docs/SCHEMA.md mirrors it.
+- Cache key = SHA256(file_content + "|ckg:VERSION|parser:VERSION|schema:1.23") (`cache.go:205`, `cache.go:217`)
+- Parser version: Go ties to `runtime.Version()`; TS/Sol/Proto tie to the parser binding version
 
 ### 2.2 runCold Path (Full Rebuild)
 
 **Main steps** (pipeline.go:143-251):
 
-1. **Detect** → file lists for Go (go/packages.Load), TS (walk .{ts,js,tsx,jsx}), Sol (walk .sol)
-2. **Parse per-language** → `runGoPipeline()`, `runTSPipeline()`, `runSolPipeline()`
+1. **Detect** → file lists for Go (go/packages.Load), TS (walk .{ts,js,tsx,jsx}), Sol (walk .sol), Proto (walk .proto)
+2. **Parse per-language** → Go / TS / Solidity / Proto pipelines (`pipeline.go:347-360` runs the proto pass for schema 1.9+)
    - Go: `golang.org/x/tools/go/packages` + types.Info (build constraints honored)
-   - TS/JS: tree-sitter `v0.25.0` + grammars
-   - Solidity: vendored grammar (JoranHonig v1.2.11, ABI 14)
+   - TS/JS: tree-sitter + grammars
+   - Solidity: vendored tree-sitter grammar + ABI extraction
+   - Proto: hand-rolled lexer + recursive-descent parser (`internal/parse/proto/`, schema 1.9)
 3. **Resolve** (Pass 2) → cross-file qname resolution, pending_refs → edges
 4. **Graph Build** → `graph.Build()` (node dedup by ID, edge dedup by (Type, Src, Dst, Line))
 5. **Derived Passes** → `emitDerivedPasses()`:
@@ -99,7 +110,7 @@ Run(Options) called
 6. **Persist** (cold wipes DB first):
    - `openColdStore()` → `os.Remove(graph.db)` + reopen + migrate
    - `persistColdArtifacts()` → InsertNodes/Edges/PkgTree/TopicTree/Blobs
-   - `InsertPendingRefs()` (G6 v3, schema 1.15 — authoritative: docs/SCHEMA.md) → per-file unresolved refs for next partial build
+   - `InsertPendingRefs()` (schema 1.23) → per-file unresolved refs consumed by the next incremental build
    - `SetManifest()` → compute FileEntry[] (SHA256 + cache key per file)
 
 ### 2.3 runShortCircuit Path (Cache Hit, No Changes)
@@ -110,95 +121,98 @@ Run(Options) called
 - Refresh manifest timestamp only (no Files recomputation).
 - Load-bearing for CI re-runs on unchanged source.
 
-### 2.4 runIncremental Path (Dead Code, D4 Executed)
+### 2.4 runIncremental Path (Live — G6 v4 + C1)
 
-**Status**: DEAD CODE (routing reverted to cold fallback 2026-05-04).
+**Status**: LIVE. Dispatched at `pipeline.go:260` for every partial cache hit;
+implemented in `internal/buildpipe/incremental.go:154`.
 
-**Root cause** (confirmed):
-- H3: `NodesByFilePath()` returns nodes in rowid order (ID sorted) ≠ AST declaration order
-- Ambiguous qname resolution: 826 pending_refs, same simple name (e.g. String), cold picks valueNode.String, partial picks fullNode.String
-- Edge key (Type, Src, Dst, Line) differs → both edges survive dedup → +2675 phantom edges on go-stablenet
+**What it does** (`incremental.go` header + `runIncremental` flow comment):
+- Parse only dirty files; reload cached node sets from the DB for untouched files;
+  rerun Pass 2 / cluster / score across the merged graph.
+- **C1 reverse-reference invalidation (implemented):** `store.ReverseDepsForFiles`
+  (`sqlite_reader.go`) re-resolves cached files whose `pending_refs` target a
+  dirty/removed file, while unaffected files keep their DB edges.
 
-**Fix direction** (v4): Sort `NodesByFilePath` by `start_line ASC`.
+**H3 phantom-edge bug — fixed.** The former root cause (`NodesByFilePath` returning
+nodes in rowid order rather than declaration order, which made ambiguous simple-name
+resolution pick a different winner than cold and leak duplicate edges past
+`(Type,Src,Dst,Line)` dedup) is resolved: `NodesByFilePath` now sorts
+`ORDER BY start_line` (`internal/persist/sqlite_reader.go:592`). This is the "G6 v4"
+fix referenced throughout `incremental.go`.
 
-**Preserved as dead code** for future v4 (incremental.go, pending_refs schema, cache diffing logic).
+**Determinism caveat (ADR-0002):** incremental aims for the same logical graph as a
+cold rebuild, but the guaranteed-identical artifact is the cold build. Canonical
+measurement graphs must be built cold (`--no-cache` or a fresh out dir); incremental
+serves `serve`-freshness. Remaining simplifications: PageRank/Leiden recompute on any
+dirt; Sol↔TS link rebuilt whenever any TS/Sol file is dirty.
 
 ---
 
 ## 3. Package Architecture
 
 ```
-cmd/ckg/
-  ├─ main.go (entry point)
-  ├─ root.go (CLI setup)
-  ├─ build.go (ckg build)
-  ├─ serve.go (ckg serve + options)
-  ├─ mcp.go (ckg mcp)
-  ├─ export_static.go (ckg export-static)
-  ├─ eval.go (ckg eval)
-  └─ audit.go (ckg audit)
+cmd/ckg/                 ← ~20 subcommands (root.go:30-36); production surfaces starred
+  ├─ main.go, root.go    (entry point + CLI setup)
+  ├─ build.go *          (ckg build)
+  ├─ serve.go *          (ckg serve + options)
+  ├─ mcp.go *            (ckg mcp — thin wrapper over internal/mcp)
+  ├─ eval_retrieval.go * (ckg eval-retrieval — the eval surface; there is no eval.go)
+  ├─ audit.go *          (ckg audit)
+  ├─ export_static.go / export_json.go / export_postgres.go  (utility exports)
+  └─ query.go, path.go, report.go, benchmark.go, watch.go, quickstart.go,
+     evidence.go, validate.go, bench_*.go                    (utilities + harnesses)
 
 internal/
   ├─ buildpipe/          ← Orchestration (P1-P7)
   │   ├─ pipeline.go     (Run, runCold, runShortCircuit, emitDerivedPasses)
-  │   ├─ cache.go        (DiffManifest, ComputeCacheKey, schema version)
-  │   └─ incremental.go  (DEAD CODE — D4 escape hatch)
+  │   ├─ cache.go        (DiffManifest, ComputeCacheKey, const SchemaVersion="1.23")
+  │   └─ incremental.go  (LIVE — runIncremental: G6 v4 + C1 reverse-ref invalidation)
   │
-  ├─ detect/             ← File discovery (P1)
-  │   ├─ walk.go         (extension-based for TS/Sol)
-  │   └─ go.go           (go/packages.Load for Go)
+  ├─ detect/             ← File discovery (P1) — Go via go/packages, TS/Sol/Proto via walk
   │
   ├─ parse/              ← Parser interface + dispatch
-  │   ├─ parser.go       (Parser interface, ResolvedGraph)
-  │   ├─ dispatch.go     (per-language pipeline runner)
+  │   ├─ parser.go, dispatch.go, idgen.go
   │   ├─ golang/         (Go AST parser)
   │   ├─ typescript/     (TS/JS tree-sitter)
-  │   └─ solidity/       (Sol tree-sitter + ABI)
+  │   ├─ solidity/       (Sol tree-sitter + ABI)
+  │   └─ proto/          (.proto: hand-rolled lexer + recursive-descent parser)
   │
-  ├─ graph/              ← Graph construction (P4)
-  │   └─ builder.go      (Build: dedup nodes by ID, edges by key)
+  ├─ graph/              ← Graph construction (P4) — Build: dedup nodes by ID, edges by key
   │
-  ├─ link/               ← Cross-language linker (G5, P5)
-  │   └─ sol_to_ts.go    (ABI → TS binds_to edges)
+  ├─ link/               ← Cross-language linker (G5, P5) — sol_to_ts.go (ABI → binds_to)
   │
-  ├─ temporal/           ← Git history (G6, P6)
-  │   └─ temporal.go     (git log → changed_in/blame edges)
+  ├─ temporal/           ← Git history (G6, P6) — changed_in/blame edges
   │
   ├─ cluster/            ← Package/topic tree (P7)
-  │   └─ clustering.go   (Leiden clustering, pkg/topic edges)
+  │   └─ leiden.go, pkg_tree.go, topic_tree.go, naming.go, persist_adapter.go
   │
   ├─ score/              ← Metrics (P7)
-  │   └─ pagerank.go     (PageRank + usage_score)
+  │   └─ score.go, centrality.go (PageRank / centrality + usage_score)
   │
-  ├─ persist/            ← Storage layer (SQLite)
+  ├─ persist/            ← Storage layer (SQLite default; Postgres deprecated, see §9.3)
   │   ├─ store_interface.go (StoreReader / StoreWriter / Store ISP)
-  │   ├─ sqlite.go       (sqliteStore implementation)
-  │   ├─ schema.sql      (8 tables + FTS5)
-  │   └─ manifest.go     (FileEntry, Manifest)
+  │   ├─ sqlite.go + sqlite_{reader,writer,fts,helpers,migrate}.go (split sqliteStore)
+  │   ├─ postgres_{store,exporter}.go (deprecated backend — ADR-0003)
+  │   ├─ schema.sql      (tables + FTS5)
+  │   └─ manifest.go     (FileEntry, Manifest, SchemaVersion back-compat policy)
   │
-  ├─ server/             ← HTTP server + viewer
-  │   ├─ server.go       (Server struct, routes, ListenAndServe)
-  │   ├─ api.go          (7 API handlers: manifest, hierarchy, nodes, edges, blob, search)
-  │   ├─ options.go      (Options{DevViewerDir, NoViewer})
-  │   ├─ staleness.go    (freshness check: DB timestamp vs source mtime)
-  │   └─ web_assets/     (embedded Next.js viewer)
+  ├─ server/             ← HTTP server + viewer (server.go, api.go, options.go, staleness.go, web_assets/)
   │
-  ├─ mcp/                ← Model Context Protocol
-  │   ├─ server.go       (Run: stdio MCP server, 9 tool registration; authoritative tool list: pkg/mcphandlers/registerall.go)
-  │   ├─ tools.go        (granular tools: find_symbol/callers/callees/get_subgraph/search_text)
-  │   └─ get_context.go  (smart tools: get_context_for_task, impact_of_change, concurrency_impact, evidence_for_intent)
+  ├─ mcp/                ← MCP stdio entry point only
+  │   └─ server.go       (Run: builds MCPServer, calls mcphandlers.RegisterAll(s, store);
+  │                       the tool bodies moved to pkg/mcphandlers — tools.go/get_context.go are gone)
   │
-  ├─ eval/               ← Evaluation framework
-  │   ├─ eval.go         (baseline runner)
-  │   └─ baseline_*.go   (α/β/γ/δ implementations)
-  │
-  └─ audit/              ← Graph verification
-      └─ audit.go        (compare go/packages.Load vs DB)
+  ├─ eval/               ← Evaluation framework (keyword-retrieval accuracy)
+  ├─ audit/              ← Graph verification (compare go/packages.Load vs DB)
+  ├─ filterlist/         ← path include/exclude filtering (MAIN_PKG rescoping, #55)
+  └─ validate/           ← graph validation helpers
+  (also: detect/, e2e/)
 
-pkg/types/
-  ├─ enums.go            (37 NodeTypes + 43 EdgeTypes + Confidence; authoritative: docs/SCHEMA.md)
-  ├─ node.go             (Node struct)
-  └─ edge.go             (Edge struct)
+pkg/                     ← public contract consumed by CKV/CKS (11 packages)
+  ├─ types/              (enums.go: 37 NodeTypes / 43 EdgeTypes via AllNodeTypes()/AllEdgeTypes(); node.go, edge.go)
+  ├─ mcphandlers/        (the 10 MCP tool handlers + RegisterAll — moved out of internal/mcp)
+  ├─ store/              (public Reader/store surface)
+  ├─ bm25/, smartctx/, evidence/, impact/, concurrency/, hunkmodifies/, policy/, security/
 ```
 
 ### 3.1 Dependency Flow
@@ -212,7 +226,8 @@ cmd/ckg/build.go
         │
         ├─→ parse.golang.Parser.ParseFile() + Resolve()
         ├─→ parse.typescript.Parser.ParseFile() + Resolve()
-        └─→ parse.solidity.Parser.ParseFile() + Resolve()
+        ├─→ parse.solidity.Parser.ParseFile() + Resolve()
+        └─→ parse.proto.Parser.ParseFile() + Resolve()
             │
             └─→ graph.Build() (dedup)
                 │
@@ -266,10 +281,20 @@ manifest (key, value)
   └─ Stores: schemaVersion, ckgVersion, buildTime, statistics, Files[] (with SHA256/cacheKey)
 
 pending_refs (file_path, src_id, target_qname, edge_type, line, hint_file)
-  ├─ Schema 1.15 (G6 v3; authoritative: docs/SCHEMA.md): per-file unresolved cross-file refs
+  ├─ Per-file unresolved cross-file refs, consumed by the incremental build path
   ├─ FK: src_id → nodes(id) ON DELETE CASCADE
   └─ PK: (file_path, src_id, target_qname, edge_type, line)
+
+node_prs (node_id, number, title, summary, base_sha, head_sha, merged_at, repo)
+  ├─ schema.sql:152 — merged pull-request provenance per node (backs change_history MCP tool)
+  ├─ merged_at kept so retrieval can answer "what did we know at base_sha?" (no hindsight leak)
+  ├─ FK: node_id → nodes(id) ON DELETE CASCADE
+  ├─ Index: idx_node_prs_merged on merged_at
+  └─ PK: (node_id, number)
 ```
+
+Full table/column list and exact counts live in docs/SCHEMA.md — treat it as the
+single source; the tables above are illustrative, not exhaustive.
 
 ### 4.2 ON DELETE CASCADE (A3 Incremental Cache)
 
@@ -298,7 +323,9 @@ type Store interface {
 }
 ```
 
-Consumers depend on interface (not concrete sqliteStore), enabling future PostgreSQL backend.
+Consumers depend on the interface (not the concrete `sqliteStore`). A PostgreSQL
+implementation exists behind the same interface but is **deprecated** (ADR-0003) —
+SQLite is the sole maintained backend. See §9.3.
 
 ---
 
@@ -307,26 +334,29 @@ Consumers depend on interface (not concrete sqliteStore), enabling future Postgr
 ### 5.1 MCP Server Architecture
 
 ```
-cmd/ckg/mcp.go → internal/mcp/server.go
+cmd/ckg/mcp.go → internal/mcp/server.go (Run)
   │
-  └─→ mcp.Run(context.Background(), store)
-      │
-      ├─→ registerFindSymbol(s, store)         [Tool 1]
-      ├─→ registerFindCallers(s, store)        [Tool 2]
-      ├─→ registerFindCallees(s, store)        [Tool 3]
-      ├─→ registerGetSubgraph(s, store)        [Tool 4]
-      ├─→ registerSearchText(s, store)         [Tool 5]
-      ├─→ registerGetContextForTask(s, store)  [Tool 6 — smart]
-      ├─→ registerImpactOfChange(s, store)     [Tool 7 — smart]
-      ├─→ registerConcurrencyImpact(s, store)  [Tool 8 — smart]
-      └─→ registerEvidenceForIntent(s, store)  [Tool 9 — smart]
+  └─→ mcphandlers.RegisterAll(s, store)   (pkg/mcphandlers/registerall.go)
+      │  (wraps store in the §11.3 H3-safe reader inside each Register*)
+      ├─→ RegisterFindSymbol            [Tool 1]
+      ├─→ RegisterFindCallers           [Tool 2]
+      ├─→ RegisterFindCallees           [Tool 3]
+      ├─→ RegisterGetSubgraph           [Tool 4]
+      ├─→ RegisterSearchText            [Tool 5]
+      ├─→ RegisterGetContextForTask     [Tool 6 — smart]
+      ├─→ RegisterImpactOfChange        [Tool 7 — smart]
+      ├─→ RegisterConcurrencyImpact     [Tool 8 — smart]
+      ├─→ RegisterChangeHistory         [Tool 9 — smart]
+      └─→ RegisterEvidenceForIntent     [Tool 10 — smart, one evidence.Cache per Run]
           │
           └─→ server.ServeStdio() (stdio MCP protocol)
 ```
 
-Authoritative tool list: `pkg/mcphandlers/registerall.go`.
+The tool bodies live in `pkg/mcphandlers/` (public, so cks/ckv can mount the same
+set); `internal/mcp/server.go` is now a thin stdio entry point that delegates to
+`RegisterAll`. **Authoritative tool list: `pkg/mcphandlers/registerall.go`.**
 
-### 5.2 Nine MCP Tools
+### 5.2 Ten MCP Tools
 
 | # | Tool | Input | Output | Graph Axes Used | Algorithm |
 |---|---|---|---|---|---|
@@ -336,11 +366,15 @@ Authoritative tool list: `pkg/mcphandlers/registerall.go`.
 | 4 | `get_subgraph` | seed_qname (str), depth (int=2), include_blobs (bool) | nodes[] + edges[] + blobs (opt) | All (bidirectional) | Bidirectional BFS from seed, both directions, 1-hop neighbors |
 | 5 | `search_text` | query (str), top_k (int=10), language (opt), include_blobs (bool) | nodes[] + blobs (opt) | G1 (FTS) | FTS5 BM25 (auto-prefix ASCII / LIKE CJK) → top-K |
 | 6 | `get_context_for_task` | task_description (str), budget_tokens (int=8000), language (opt), include_blobs (bool), max_bodies (int=5) | {subgraph, bodies[], summaries[], tokens_estimated, trimmed, not_found} | All (multi-strategy) | BM25 retrieve (30) → 1-hop expand → score-fuse (0.5 BM25 + 0.3 PR + 0.2 usage) → diversify → pack within token budget |
-| 7 | `impact_of_change` | qname (str) + options | impacted nodes/edges + blast radius | G2/G3 (reverse deps) | Reverse-dependency traversal to estimate change blast radius |
+| 7 | `impact_of_change` | qname (str) + options | impacted nodes/edges + blast radius | G2/G3 (reverse deps) | Reverse-dependency closure (broader than callers) to estimate blast radius |
 | 8 | `concurrency_impact` | qname (str) + options | concurrency-related nodes/edges | G4 (concurrency) | Concurrency-axis traversal (goroutine/channel/mutex relations) |
-| 9 | `evidence_for_intent` | intent/task (str) + options | evidence-ranked nodes/snippets | All (evidence) | Evidence collection + ranking for a stated intent |
+| 9 | `change_history` | qname/name (str) + options | merged PRs touching the node | G6 (temporal) | Resolve node → `node_prs` provenance, ordered by merged_at |
+| 10 | `evidence_for_intent` | intent/task (str) + options | evidence-ranked nodes/snippets | All (evidence) | H3 EvidencePack assembler over the commit/hunk corpus (BM25-backed) |
 
-**Note**: Tools 1-5 are "granular" (single-axis). Tools 6-9 are "smart" (multi-axis retrieval/analysis orchestration). Authoritative tool list: `pkg/mcphandlers/registerall.go`.
+**Note**: Tools 1-5 are "granular" (single-axis). Tools 6-10 are "smart" (multi-axis
+retrieval/analysis orchestration). `change_history` (Tool 9) is easy to miss in older
+docs — it is registered by `RegisterAll` and backed by the `node_prs` table.
+Authoritative tool list: `pkg/mcphandlers/registerall.go`.
 
 ### 5.3 get_context_for_task Algorithm (Tool 6)
 
@@ -416,7 +450,7 @@ This section compares CKS spec (from `04-cks-deep-dive.md`) vs CKG current imple
 | Aspect | CKS Spec | CKG Current | Gap | Status |
 |---|---|---|---|---|
 | **Edge types** | contains, defines, imports, exports, configures | contains, defines, imports, exports | configures (config key → function) | **PARTIAL** — no config tracking |
-| **Node types** | Package, File, Symbol (struct/func/type), ConfigKey | Package, File, + 29 other symbols | ConfigKey node type | **MISSING** — ConfigKey not emitted |
+| **Node types** | Package, File, Symbol (struct/func/type), ConfigKey | Package, File, + the rest of the 37 node types (docs/SCHEMA.md) | ConfigKey node type | **MISSING** — ConfigKey not emitted |
 | **Query capability** | repo→module→package→file→symbol hierarchy | pkg_tree edges (parent_id, child_id, level) | No explicit repo/module nodes | **PARTIAL** — file-to-symbol OK, repo-level limited |
 | **Storage** | Graph DB | SQLite with nodes/edges/pkg_tree tables + indices | FTS5 for symbol lookup | **FULL** |
 
@@ -445,7 +479,7 @@ This section compares CKS spec (from `04-cks-deep-dive.md`) vs CKG current imple
 | **Edge types** | spawns, sends_to, receives_from, locks, unlocks, waits_for, shares_state_with | spawns (✓), sends_to (✓), recvs_from (✓), acquires_lock (✓), releases_lock (✓), accessed_under_lock (✓) | waits_for, shares_state_with (data-flow analysis) | **PARTIAL** — synchronization OK, data-flow deferred |
 | **Node types** | Goroutine, Channel, Mutex | Goroutine, Channel, Mutex (schema 1.1+) | — | **FULL** |
 | **Implementation** | Flow-sensitive analysis | AST pattern matching (Go only) + underlock pass (G8 + G9) | No happens-before inference | **PARTIAL** — pattern-based, not SSA |
-| **Accuracy** | Ideally 100% (SSA) | Mutex detection: 170 nodes, 781 acquires_lock, 2916 accessed_under_lock (go-stablenet) | False negatives on local mutexes (1 known edge case) | **PARTIAL** — 99.4% accuracy (G9 improvement) |
+| **Accuracy** | Ideally 100% (SSA) | Pattern-based mutex/acquires_lock/accessed_under_lock detection on go-stablenet (runtime counts — re-measure; predate the #55 binary-reachable rescoping) | False negatives on local mutexes (1 known edge case) | **PARTIAL** — pattern-based, not SSA |
 
 ### 7.5 G5: Distributed Interaction Graph
 
@@ -468,16 +502,21 @@ This section compares CKS spec (from `04-cks-deep-dive.md`) vs CKG current imple
 
 ### 7.7 Summary: CKS Coverage Matrix
 
+Per-axis gaps (structural, stable):
+
 ```
-G1 Structural   ████░░░░░░ 50% (missing ConfigKey node/edge)
-G2 Semantic     ███████░░░ 70% (missing overrides, tests, consumes, handles)
-G3 Execution    ██████░░░░ 60% (missing returns, branches, modifies, flow paths)
-G4 Concurrency  ████████░░ 80% (missing waits_for, shares_state_with)
-G5 Distributed  ███████░░░ 70% (missing P2P/consensus; custom routers)
-G6 Temporal     █████████░ 90% (missing line-level blame)
-─────────────────────────────────
-Overall         ███████░░░ 71%
+G1 Structural   missing ConfigKey node/edge
+G2 Semantic     missing overrides, tests, consumes, handles
+G3 Execution    missing returns, branches, modifies, flow paths
+G4 Concurrency  missing waits_for, shares_state_with
+G5 Distributed  missing P2P/consensus; custom routers
+G6 Temporal     missing line-level blame
 ```
+
+> The former percentage bars (e.g. "Overall 71%") were runtime coverage figures —
+> re-measure; they predate the #55 binary-reachable rescoping (commit `bf59fdb`),
+> which changes the node/edge population the percentages are computed against. Keep
+> the per-axis gap list above (which is structural) as the durable signal.
 
 ---
 
@@ -493,11 +532,11 @@ User-defined success conditions (from session context):
 - **Output**: SQLite graph.db with 37 node types, 43 edge types (authoritative: docs/SCHEMA.md)
 - **Verification**: `ckg audit --src=<path> --graph=<path>` compares go/packages.Load set vs DB (exit 0 = parity)
 
-**Metric** (go-stablenet, 2142 files):
-- go/packages.Load files: 1259 ✅
-- DB nodes: 217K
-- DB edges: 669K
-- audit result: **exit 0 (PARITY)**
+**Metric** (go-stablenet): node/edge counts and file totals here are runtime figures —
+re-measure; they predate the #55 binary-reachable rescoping (commit `bf59fdb`), which
+scopes the graph to binary-reachable code via `MAIN_PKG` and therefore shrinks the
+populated node/edge set versus the older whole-tree numbers. The structural claim
+holds: audit reports **exit 0 (PARITY)** on a clean build.
 
 ### Condition 2: 6 Graph Structures (G1-G6) ✅ IMPLEMENTED (PARTIAL)
 
@@ -526,7 +565,8 @@ User-defined success conditions (from session context):
   - Temporal graph (git history) → **tree-sitter doesn't provide**
 
 **Speed**:
-- Cold build (go-stablenet, 2142 files): ~115s (parsing + graph + temporal + clustering)
+- Cold build (go-stablenet): parsing + graph + temporal + clustering (wall-clock is a
+  runtime figure — re-measure; predates the #55 binary-reachable rescoping)
 - Short-circuit (no changes): <1s (manifest refresh only)
 - MCP tool execution: <100ms per query (index-backed)
 
@@ -555,7 +595,7 @@ User-defined success conditions (from session context):
 
 **Build pipeline logs** (pipeline.go):
 ```go
-log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount)
+log.Info("detected files", "go", goCount, "ts", tsCount, "sol", solCount, "proto", protoCount) // pipeline.go:239
 log.Info("Cache: ...", ...) // decision rationale
 log.Info("xlang linked", "binds_to", len(xlEdges))
 log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
@@ -565,14 +605,18 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
 
 ## 9. Known Limitations & Future Work
 
-### 9.1 Critical Path (Handoff § 4.1, D4 escape hatch executed)
+### 9.1 Incremental Build (resolved — was the critical path)
 
-**G6 v3 Partial-Cache** (DEAD CODE, routing reverted to cold fallback):
-- Root cause: H3 (NodesByFilePath order ≠ AST declaration order) → +2675 phantom edges on go-stablenet
-- Fix direction (v4): Sort `NodesByFilePath` by `start_line ASC`
-- Preserved: incremental.go, pending_refs schema (1.15 — authoritative: docs/SCHEMA.md), cache diffing logic
+**G6 v4 partial-cache is LIVE** (`incremental.go:154`, dispatched `pipeline.go:260`),
+so this is no longer a limitation:
+- The old H3 phantom-edge root cause (NodesByFilePath order ≠ AST declaration order)
+  is fixed by sorting `NodesByFilePath` `ORDER BY start_line`
+  (`internal/persist/sqlite_reader.go:592`).
+- C1 reverse-reference invalidation is implemented (`store.ReverseDepsForFiles`).
 
-**Until fixed**: Partial hits fall back to cold rebuild for correctness. No performance gain on mixed dirty/cached.
+**Remaining caveat** (not a bug): the canonical, bit-identical artifact is the cold
+build (ADR-0002); incremental targets `serve` freshness. Build canonical measurement
+graphs cold (`--no-cache`). PageRank/Leiden still recompute on any dirt.
 
 ### 9.2 Minor Issues (Handoff § 4.6)
 
@@ -583,15 +627,24 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
 | G6-temporal: Line-level blame | E4 (temporal phase) | Implemented file-level; line-level deferred (Phase 2) | Low |
 | B1-1: Local mutex literal (`var mu sync.Mutex{}`) | G9 (underlock) | 1 false negative known | Very Low |
 
-### 9.3 Next Priority (Handoff § 4.2+)
+### 9.3 PostgreSQL Backend — Implemented but Deprecated
 
-| Phase | Group | Task | Depends On | Est. |
-|---|---|---|---|---|
-| v0.2.1 | B2 | PostgreSQL export (`ckg export-postgres`) | A4 ISP (✅) | M (1-2h) |
-| v0.2.1 | B3 | Tree.Edit() incremental parsing infra | A1/A3 (✅) | M |
-| v0.2.2 | C1 | Reverse-reference invalidation (Phase 2) | A3 (✅) + G6 redesign | L (>4h) |
-| v0.3.0 | D1 | SSA-based concurrency (--deep opt-in) | B1 (✅) | XL (>8h) |
-| v0.3.0 | D2 | pgvector + Apache AGE integration | C2 | XL |
+The PostgreSQL backend and `ckg export-postgres` are **implemented**
+(`cmd/ckg/export_postgres.go`, `internal/persist/postgres_{store,exporter}.go`) —
+this is no longer future work. However, per **ADR-0003 (Accepted, 2026-06-29)** the
+Postgres backend is **deprecated**: it is unused, untested in CI, and already lags the
+SQLite schema (no `canonical_id`/`simple_name`; `FindByCanonicalID` is a not-found
+stub). **SQLite is the sole supported and maintained storage backend.** New schema
+columns are NOT required to mirror to `pgStore` — those gaps are accepted deprecation
+gaps, not bugs.
+
+### 9.4 Other Future Work
+
+| Group | Task | Depends On | Status |
+|---|---|---|---|
+| C1 | Reverse-reference invalidation | G6 redesign | DONE — live in `runIncremental` (§9.1) |
+| D1 | SSA-based concurrency (`--deep` opt-in) | B1 | Not started (would replace pattern matching) |
+| D2 | pgvector + Apache AGE integration | — | Not started; note Postgres backend is deprecated (see §9.3) |
 
 ---
 
@@ -610,6 +663,7 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
    - Honors build constraints (// +build tags)
    - Find all .ts, .js, .tsx, .jsx files → extension-only discovery
    - Find all .sol files → extension-only discovery
+   - Find all .proto files → extension-only discovery
    - Output: DiscoveredFile[] with Path (srcRoot-relative) and Language
 
 3. **Cache routing** (ManifestUsable check)
@@ -692,20 +746,21 @@ log.Info("build complete", "nodes", len(g.Nodes), "edges", len(g.Edges), ...)
      - InsertPkgTreeFromCluster(pkgTree.edges)
      - InsertTopicTree(topicTree)
      - RebuildFTS() → index nodes_fts for search
-   - InsertPendingRefs(allPending) (G6 v3, schema 1.15 — authoritative: docs/SCHEMA.md)
+   - InsertPendingRefs(allPending) (schema 1.23 — consumed by the incremental path)
    - Manifest:
      - computeColdFileEntries(srcRoot, discovery, nodes, edges) → FileEntry[] (SHA256, CacheKey per file)
      - setStaleness(&manifest, log) → compute DB timestamp, source mtime max
      - SetManifest(manifest) → serialize to DB
      - writeManifestJSON(manifest.json) → human-readable copy
 
-10. **Log output**:
+10. **Log output** (shape only; the specific counts are runtime figures that predate
+    the #55 binary-reachable rescoping — re-measure rather than trusting these):
     ```
-    detected files go=1259 ts=145 sol=42
+    detected files go=… ts=… sol=… proto=…
     Cache: bypassed (--no-cache); full rebuild
-    xlang linked binds_to=17
-    Cache: temporal edge emission complete changed_in=344946
-    build complete nodes=217513 edges=669421 pkg_tree_edges=1844 topic_resolutions=356
+    xlang linked binds_to=…
+    Cache: temporal edge emission complete changed_in=…
+    build complete nodes=… edges=… pkg_tree_edges=… topic_resolutions=…
     ```
 
 11. **Return**: persist.Manifest with statistics
@@ -859,9 +914,10 @@ store.Search(query, limit=10)
 - Output: A ⊆ B (every source file represented in graph)
 - Exit codes: 0 (parity), 1 (drift detected), 2 (error)
 
-**Result on go-stablenet** (1259 builds):
-- Pre-E2: 41 file over-includes (smacker false positives)
-- Post-E2: **exit 0 (PARITY)**
+**Result on go-stablenet** (file counts are runtime figures — re-measure; predate the
+#55 binary-reachable rescoping):
+- Historically E2 removed a set of file over-includes (smacker false positives)
+- Current clean build: **exit 0 (PARITY)**
 
 ---
 
@@ -909,7 +965,7 @@ ckg serve --graph=/path/to/graph.db --port=8080 --no-viewer
 claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 ```
 
-**Result**: 9 MCP tools available in Claude Code for code-aware assistance.
+**Result**: 10 MCP tools available in Claude Code for code-aware assistance (see §5.2).
 
 ---
 
@@ -939,20 +995,24 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 
 ## 17. Performance Characteristics
 
-### 17.1 Build Times (go-stablenet, 2142 files, M2 Mac)
+### 17.1 Build Times (go-stablenet, M2 Mac — illustrative)
 
-| Phase | Metric | Time |
+> Per-file counts and wall-clock times below are runtime figures — re-measure; they
+> predate the #55 binary-reachable rescoping (commit `bf59fdb`). Keep the phase
+> **ordering and relative cost** (Go parse dominates) as the durable takeaway.
+
+| Phase | Metric | Relative cost |
 |---|---|---|
-| Detect | go/packages.Load + walk | ~5s |
-| Parse (Go) | 1259 files | ~80s (types.Info traversal) |
-| Parse (TS) | 145 files | ~15s |
-| Parse (Sol) | 42 files | ~5s |
-| Resolve (per-lang) | Cross-file linking | ~2s |
+| Detect | go/packages.Load + walk | small |
+| Parse (Go) | types.Info traversal | dominant |
+| Parse (TS) | tree-sitter | moderate |
+| Parse (Sol) | tree-sitter + ABI | small |
+| Parse (Proto) | lexer + recursive descent | small |
+| Resolve (per-lang) | Cross-file linking | small |
 | Graph Build | Merge + dedup | <1s |
-| Temporal | git log + edge emit | ~5s |
-| Cluster/Score | PageRank + Leiden | ~2s |
+| Temporal | git log + edge emit | small |
+| Cluster/Score | PageRank + Leiden | small |
 | Persist | Bulk insert + FTS index | ~1s |
-| **Total Cold** | | ~115s |
 | **Total Short-Circuit** | (manifest refresh) | <1s |
 
 ### 17.2 Query Performance (MCP tools, go-stablenet graph)
@@ -966,7 +1026,7 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 | search_text | "handler" | <100ms | FTS5 BM25 |
 | get_context_for_task | task desc (100 words) | <300ms | Retrieve + expand + score-fuse |
 
-### 17.3 Storage Size (go-stablenet)
+### 17.3 Storage Size (go-stablenet — illustrative, re-measure post-#55)
 
 | Artifact | Size | Notes |
 |---|---|---|
@@ -982,11 +1042,11 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 |---|---|
 | **Cold rebuild** | Full parse, resolve, build, persist (all files processed from scratch) |
 | **Short-circuit** | Manifest hit + no dirty files (manifest timestamp refresh only) |
-| **Partial hit** | Mixed dirty/cached files (D4: falls back to cold for correctness) |
+| **Partial hit** | Mixed dirty/cached files → `runIncremental` (G6 v4 + C1); reparses dirty files, reloads cached node sets, reruns Pass 2/cluster/score |
 | **Node ID** | Deterministic hash(file:name:startLine:startByte) |
 | **Edge key** | (Type, Src, Dst, Line) — semantic identity for dedup |
 | **Pending ref** | Unresolved cross-file reference from Pass 1, resolved/marked AMBIGUOUS in Pass 2 |
-| **PendingRefRow** | Schema 1.15 table (authoritative: docs/SCHEMA.md): per-file cross-file refs persisted for partial-cache rebuild |
+| **PendingRefRow** | `pending_refs` table (schema 1.23): per-file cross-file refs persisted for the incremental rebuild path |
 | **G1–G6** | CKS 6-graph axes: Structural, Semantic, Execution, Concurrency, Distributed, Temporal |
 | **FTS5** | SQLite full-text search (Okapi BM25 + auto-prefix) |
 | **PageRank** | Iterative scoring: importance proxy (used in tool 6) |
@@ -996,6 +1056,6 @@ claude mcp add ckg --command ./bin/ckg --args "mcp,--graph=/path/to/graph.db"
 
 ---
 
-**Document Generated**: 2026-05-04  
+**Document Generated**: 2026-07-18 (rewrite-in-place against current tree)  
 **Maintainer**: CKG Team  
-**Next Review**: Post-B2 (PostgreSQL export)
+**Next Review**: after the next runtime re-measurement of node/edge/coverage figures (post-#55)

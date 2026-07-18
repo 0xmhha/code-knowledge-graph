@@ -1,8 +1,10 @@
 # Incremental Build Cache
 
-> Operator-facing guide to the A3 file-level incremental cache (CKG v0.2,
-> spec §4 Phase 1). Phase 2 (reverse-reference invalidation, partial Pass 2)
-> is C1's job and not in this document.
+> Operator-facing guide to the A3 file-level incremental cache. Covers the cold
+> / short-circuit / partial (`runIncremental`) routing. The partial path is live
+> and includes C1 reverse-reference invalidation — see "Partial-cache" below.
+> Schema version + cache-key contract: authoritative in `internal/buildpipe/cache.go`
+> (mirrored in `docs/SCHEMA.md`).
 
 ## What it does
 
@@ -33,10 +35,10 @@ Any change in any contributor invalidates the cache for that file:
 | `file_content` | the file bytes | every edit |
 | `ckg_version` | `cmd/ckg/root.go: ckgVersion` | every CKG release |
 | `parser_version` | `runtime.Version()` for Go; tree-sitter module version for TS/Sol | toolchain or grammar bump |
-| `schema_version` | `internal/buildpipe/cache.go: SchemaVersion` (currently `"1.15"`; current value: internal/buildpipe/cache.go SchemaVersion, see docs/SCHEMA.md) | extraction schema bump |
+| `schema_version` | `internal/buildpipe/cache.go: SchemaVersion` (authoritative value lives there — see `docs/SCHEMA.md`; do not hardcode it here) | extraction schema bump |
 
 The schema_version is global — bumping it forces a full rebuild for every
-file (silent corruption defense; see decision D9 in `spec-ckg-v0.2.md`).
+file (silent corruption defense; see decision D9 in `archive/spec-ckg-v0.2.md`).
 
 ## Build modes
 
@@ -50,35 +52,41 @@ Routing inside `buildpipe.Run`:
 
 | Condition | Path |
 |---|---|
-| `--no-cache`, OR no prior manifest, OR schema/version mismatch | **cold** — wipe DB + parse all files |
-| All discovered files match cache, no removals | **short-circuit** — refresh manifest timestamp only |
-| Mixed dirty/cached/removed | **cold (fallback for correctness)** — see "Partial-cache fallback" below |
+| `--no-cache`, OR no prior manifest, OR schema/version mismatch | **cold** — wipe DB + parse all files (`runCold`) |
+| All discovered files match cache, no removals | **short-circuit** — refresh manifest timestamp only (`runShortCircuit`) |
+| Mixed dirty/cached/removed | **partial (incremental)** — `runIncremental`: parse dirty only, reverse-ref invalidation |
 
-The short-circuit log line (`Cache: H hits, M misses, R removed; parsed N files`)
-fires for the all-cached case. Partial-cache cases emit
-`Cache: partial hit; falling back to cold rebuild for correctness`.
+Routing lives in `internal/buildpipe/pipeline.go` (the all-cached branch calls
+`runShortCircuit`; the mixed branch calls `runIncremental` at `pipeline.go:260`).
 
-### Partial-cache fallback (correctness over speed)
+### Partial-cache (`runIncremental`, G6 v4 + C1) — LIVE
 
-The original A3 design routed mixed dirty/cached/removed cases through
-`runIncremental` (parse dirty only, reload cached node sets, rerun Pass 2).
-Empirical testing surfaced a silent edge-loss class: cross-file `calls`
-edges where the **caller is cached and callee is dirty** were dropped
-because cached files are not re-parsed and therefore do not re-emit their
-pending refs; meanwhile the dirty callee's new node IDs (content-hash
-based) don't match the cached caller's recorded edge endpoints, so
-`reloadCachedEdges` correctly drops the stale edge — leaving no one to
-re-emit it.
+The mixed dirty/cached/removed case is served by `runIncremental`
+(`internal/buildpipe/incremental.go:154`): parse only the dirty files, reload
+cached node sets from the DB, then rerun Pass 2 / cluster / score across the
+merged graph. This path is **live**, not a cold fallback.
 
-Until a reverse-reference index (WORK-PLAN C1) or persisted pending refs
-restore correctness, partial cache cases fall back to cold rebuild.
-`runIncremental` and its helpers are kept as dead code (referenced via
-`_runIncrementalRef` to satisfy gopls) so the eventual re-enable lands
-as a single routing change, not a rewrite.
+The original A3 attempt dropped cross-file `calls` edges when the **caller was
+cached and callee dirty** (cached files aren't re-parsed, so their pending refs
+aren't re-emitted). Two fixes closed that class:
 
-The genuinely load-bearing speedup — full cache hit on a CI re-run with
-zero source changes — is the **short-circuit** path and remains intact.
-Measured on go-stablenet-latest (2142 files): 40s cold → 1s short-circuit.
+1. **C1 reverse-reference invalidation (IMPLEMENTED).** `runIncremental` queries
+   `store.ReverseDepsForFiles`, so cached files whose `pending_refs` target a
+   dirty/removed file get their refs re-resolved; unaffected files keep their DB
+   edges (`incremental.go:8`).
+2. **H3 phantom-edge fix.** `NodesByFilePath` now returns nodes in
+   `ORDER BY start_line` (`internal/persist/sqlite_reader.go:592`) so the qIndex
+   winner for ambiguous simple names matches the cold path — no +phantom edges.
+
+**Determinism caveat (ADR-0002):** incremental aims for the same logical graph
+as a cold rebuild, but the guaranteed-identical artifact is the cold build.
+**Canonical measurement graphs must be built cold** (`--no-cache` or a fresh out
+dir); incremental is for `serve` freshness. Known perf caveat: mass file removal
+can stall `ReverseDepsForFiles` — prefer `--no-cache` when the file set shrinks
+sharply.
+
+The load-bearing speedup on a zero-change CI re-run is the **short-circuit**
+path: measured on go-stablenet-latest (2142 files), 40s cold → 1s short-circuit.
 
 ## Manifest v2 schema
 
@@ -106,24 +114,16 @@ Measured on go-stablenet-latest (2142 files): 40s cold → 1s short-circuit.
 `files` is added by A3 and absent on pre-1.2 manifests; old manifests
 reload as `files: nil` and force the next build through the cold path.
 
-## Phase 1 limitations (intentional)
+## Phase 1 simplifications (intentional, current)
 
-- **Partial-cache deferred (D4, 2026-05-04).** Three v1/v2/v3 attempts to
-  implement partial-cache (parse dirty only, reload cached nodes + pending
-  refs, reuse cached edge sets) all failed the § 7 validation gate on the
-  real corpus (go-stablenet, 2142 files). v3 root cause (H3): `NodesByFilePath`
-  returns nodes in DB rowid/ID-sorted order, not AST declaration order.
-  For ambiguous simple names with multiple candidates, the qIndex winner
-  differs between cold and partial paths — both edges survive dedup because
-  Dst differs, producing +2675 phantom edges. Fix direction for a future
-  v4 attempt: sort `NodesByFilePath` by `start_line ASC`. Partial-cache
-  requires B3 (tree-sitter `Tree.Edit()`) or C1 (reverse-reference index)
-  as a prerequisite to be economical. The `runIncremental` function and
-  `pending_refs` table (schema 1.5) are preserved as dead code.
-- **Pass 2 always re-runs** when any file is dirty. Cross-file edges from
-  cached files are reloaded from DB (not re-derived), and pending refs
-  from dirty files are re-resolved against the merged node set. Phase 2
-  (C1) will introduce a reverse-reference index for partial Pass 2.
+Partial-cache is now live (see above); the D4 deferral and the v1/v2/v3 phantom-
+edge saga are history (the H3 `start_line` fix + C1 reverse-ref invalidation
+closed them). What remains intentionally simplified:
+
+- **Pass 2 always re-runs** when any file is dirty. Cross-file edges from cached
+  files are reloaded from DB (not re-derived), and pending refs from dirty files
+  are re-resolved against the merged node set; C1 reverse-ref invalidation
+  re-resolves cached files that pointed at a now-dirty/removed file.
 - **Cluster + score recompute on any dirt.** PageRank/Leiden are not
   preserved across incremental rebuilds. The `<1% change-ratio reuse`
   optimisation in spec §4 is deferred. `--rebuild-metrics` exists as a

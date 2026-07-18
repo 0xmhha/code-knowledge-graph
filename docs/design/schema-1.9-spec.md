@@ -7,9 +7,16 @@
 > §6의 8개 결정 항목에 사용자 답변을 받은 다음 W 시리즈 구현으로
 > 진입한다.
 >
-> **Status**: design draft 2026-05-11. 코드 변경 없음.
-> **Audience**: 다음 세션 / 사용자와 §6 결정 합의 후 W1 first commit
-> 받는 subagent.
+> **Status** (updated 2026-07-18): **W1–W3 LANDED**, W4 PENDING.
+> - W1 (TS HTTP server, reuses `NodeEndpoint`), W2 (`http_calls` — TS+Go HTTP
+>   client), W3a/b/c (proto parser + `grpc_listens_on`/`grpc_calls`) are all
+>   emitted (`internal/parse/{typescript,proto,golang}`, `internal/link/http_match.go`).
+> - The "next schema bump = 1.9" framing is **superseded** — schema is now
+>   **1.23** (`internal/buildpipe/cache.go`; history in `docs/SCHEMA.md`).
+> - **W4 message-queue / pub-sub (Kafka/NATS/RabbitMQ/SQS + `Topic` node +
+>   `publishes_to`/`consumes_from` edges) is NOT implemented** — no `NodeTopic`
+>   / `EdgePublishesTo` in `pkg/types/enums.go`. This is the sole remaining
+>   backlog item from this spec; tracked in `docs/CONTINUITY.md`.
 
 ---
 

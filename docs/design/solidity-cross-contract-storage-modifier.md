@@ -22,8 +22,13 @@
 >    affects reentrancy guards) and (b) modifier inheritance (`override` on
 >    `modifier` definitions). Both matter for any security-property check.
 >
-> **Status**: design draft 2026-05-17. No implementation yet. Sub-tracks
-> execute sequentially after this doc lands.
+> **Status**: **LANDED** (header updated 2026-07-18; the original "no
+> implementation yet" draft note is superseded). W7.1 low-level call dispatch
+> (`internal/parse/solidity/low_level_call.go` → `invokes`), W7.2 storage-location
+> metadata (SubKind in `declarations.go` `runStateVarDecl`), and W7.3 modifier
+> composition + `override` (`modifier_composition_test.go`, `overrides.go`) are
+> all emitted. This doc is now a historical design record. V1+ deferrals remain
+> in §5a (function-pointer dispatch, bit-packing, mapping-slot derivation, Yul).
 >
 > **Prerequisites**: W-C W1 (inheritance), W-C W2 (override), W-C W6 (using-for
 > resolver infrastructure) — all landed.

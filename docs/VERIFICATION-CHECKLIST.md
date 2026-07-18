@@ -14,7 +14,7 @@
 |----|------|------|
 | **Options struct** | `pkg/evidence/evidence.go::Options` (또는 동등) | 필드 추가 + godoc 한 줄 |
 | **HTTP** | `internal/server/api.go::handle*` | query param 파싱 + 입력 검증 + 400 negative |
-| **MCP** | `internal/mcp/<tool>.go::register*` | `mcp.WithString/Number(...)` schema + handler 매핑 |
+| **MCP** | `pkg/mcphandlers/<tool>.go::Register*` (public surface; `internal/mcp/server.go` calls `RegisterAll`) | `mcp.WithString/Number(...)` schema + handler 매핑 |
 | **CLI** | `cmd/ckg/<cmd>.go` | `cmd.Flags().*Var()` + allow-list guard + `--help` 텍스트 |
 
 **실패 사례**: `2982864` (mode=and) — Options/HTTP/MCP/CLI 4축 모두 wired했지만 라이브는 CLI 1축만 검증. 후속 `85af082` 보강.
@@ -92,7 +92,7 @@
 ## 6. PR-ready 체크리스트 (요약)
 
 ```
-[ ] go test ./... → 23/23 ok
+[ ] go test ./... → all packages ok (match CI: `go test -race ./...`)
 [ ] 추가/수정한 surface 4축 (Options/HTTP/MCP/CLI) 모두 cover
 [ ] 새 axis 가 기존 N axis와 만들 수 있는 N개 조합 중 의미 있는 것 단위 테스트
 [ ] negative path: 필수-input-누락, allow-list-violation, 존재하지-않는-리소스
@@ -107,4 +107,4 @@
 ## 7. 참조
 
 - 이번 세션 사례별 회고: `docs/SESSION-HANDOFF-2026-05-10.md` §1
-- 평가 fixture / 회귀 안전망: `internal/buildpipe/h3h4_integration_test.go`, `internal/temporal/issueid_test.go::TestExtractIssueIDs_CorpusPrecisionRecall`, `internal/mcp/h3_filter_test.go::TestLLMSafeStoreReader_AllReadMethods_DropAmbiguousMeta`
+- 평가 fixture / 회귀 안전망: `internal/buildpipe/h3h4_integration_test.go`, `internal/temporal/issueid_test.go::TestExtractIssueIDs_CorpusPrecisionRecall`, `pkg/mcphandlers/safety_test.go` (`llmSafeStoreReader` AMBIGUOUS-drop coverage)

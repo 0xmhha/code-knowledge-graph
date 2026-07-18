@@ -32,7 +32,7 @@ W-C W11 V7 (1.10 → 1.11) added the `nodes.attrs` JSON-blob column
 internal bumps; P1 #4 (1.13 → 1.14) added `NodePolicy` + edge `governed_by`
 (`pkg/policy`, opt-in `--policy-file`); P1 #5 (1.14 → 1.15) added
 `NodeSecurityPattern` + edge `has_security_pattern` (`pkg/security`, opt-in
-`--security-pattern-file`). `uses_for` (Solidity using-for, W-C) is also
+`--security-pattern-file`). `using_for` (Solidity using-for, W-C) is also
 present in the current edge set. PR #23 (1.15 → 1.18) added full Go
 signatures + qualified call resolution (1.16), promoted-method nodes (1.17),
 and `writes_field` edges (1.18); symbol-identity Phase 1 (1.18 → 1.19)
@@ -72,7 +72,7 @@ function-body locals, embedded mutexes). `sub_kind ∈ {mutex, rwmutex}`.
 `qualified_name` is `pkg.Type.field#mutex` for struct fields (the
 `#mutex` suffix disambiguates from the same-position Field node) or
 `pkg.func.localVar` for locals. Confidence is `EXTRACTED` with
-typesInfo, `INFERRED` in AST-only mode. See `spec-ckg-v0.2.md` § 2 and
+typesInfo, `INFERRED` in AST-only mode. See `archive/spec-ckg-v0.2.md` § 2 and
 `internal/parse/golang/concurrency_test.go`.
 
 `Endpoint` (E3): an HTTP/RPC route entry point. `qualified_name`
@@ -122,14 +122,14 @@ to `confidence='EXTRACTED'` so the LLM never sees code paths that were
 rolled back by force-push; the human Recovery panel surfaces AMBIGUOUS
 explicitly.
 
-`AwaitPoint` (W-B, schema 1.10): **slot-reserved** statement-level node
-for TypeScript `await` expressions. One node per `await` site so graph
-queries can answer "where does control yield, and to which
-AsyncCallSite?". The Phase 4 bump (2026-05-11) only reserves the enum
-slot — the TS parser does not emit AwaitPoint nodes yet; the detector
-lands in Phase 5 (W-B W2). See
-`docs/design/ts-async-await-and-interface.md §2.1 + §3.2` and
-`docs/archive/DISPATCH-WITHIN-LANG-SEMANTICS.md §2 Phase 4`.
+`AwaitPoint` (W-B, schema 1.10): statement-level node for TypeScript
+`await` expressions. One node per `await` site so graph queries can
+answer "where does control yield, and to which AsyncCallSite?". The
+schema-1.10 bump reserved the enum slot; the Phase 5 detector has since
+**shipped** — the TS parser emits one `NodeAwaitPoint` per
+`await_expression` (`internal/parse/typescript/async.go:56,98,114`),
+paired 1:1 with an inbound `awaits` edge. See
+`docs/design/ts-async-await-and-interface.md §2.1 + §3.2`.
 
 `Policy` (P1 #4, schema 1.14): a governance/policy node loaded from an
 opt-in `--policy-file` YAML (`pkg/policy`), linked to governed symbols via
@@ -155,14 +155,14 @@ timeout_path, cancellation_path,
 has_hunk, adjacent, modifies,
 http_calls,
 grpc_listens_on, grpc_calls,
-awaits, overrides, uses_for, governed_by, has_security_pattern`
+awaits, overrides, using_for, governed_by, has_security_pattern`
 
 `acquires_lock` / `releases_lock` (B1 Stage 1): `Function`/`Method` →
 `Mutex` for `mu.Lock()` / `mu.Unlock()` / `mu.RLock()` / `mu.RUnlock()`
 calls. Receiver resolution uses `types.Info.ObjectOf` to confirm the
 receiver's declaration object is the Mutex node — this defeats the
 false-positive case where an unrelated type defines its own `Lock()`
-method (`spec-ckg-v0.2.md` § 2 R2.1). Read/write distinction lives on
+method (`archive/spec-ckg-v0.2.md` § 2 R2.1). Read/write distinction lives on
 the destination Mutex's `sub_kind`, not the edge type.
 
 `accessed_under_lock` (B1 Stage 1): `Field` → `Mutex` for struct-field
@@ -250,20 +250,22 @@ matcher synthesises an `AMBIGUOUS` placeholder Endpoint
 typesInfo-confirmed → `EXTRACTED`, AST-only suffix-matcher → `INFERRED`,
 unresolved stub type → `AMBIGUOUS` placeholder.
 
-`awaits` (W-B, schema 1.10): **slot-reserved** edge for TypeScript
-async-suspension flow. `Function`/`Method` → `AwaitPoint`, and
-`AwaitPoint` → `AsyncCallSite`. No emission yet — Phase 5 (W-B W2) will
-populate the slot. Direction encodes "this function suspends here" /
-"this suspension awaits that call". See
+`awaits` (W-B, schema 1.10): edge for TypeScript async-suspension flow,
+`Function`/`Method` → `AwaitPoint`. **Emitted** by the Phase 5 detector
+(`internal/parse/typescript/async.go:120`), one per `AwaitPoint` (pair
+invariant: `#AwaitPoint == #awaits`). Direction encodes "this function
+suspends here". See
 `docs/design/ts-async-await-and-interface.md §2.1 + §3.2`.
 
-`overrides` (W-C, schema 1.10): **slot-reserved** edge for Solidity
-virtual/override semantics. `Method` → `Method` between a child
-contract's method that overrides a parent's `virtual` method.
-Direction = child → parent (Q4 decision in solidity-inheritance spec
-§5.0). Distinct from `implements` (interface satisfaction) because
-`overrides` is concrete-to-concrete virtual dispatch resolution. No
-emission yet — Phase 5 (W-C W2) will populate the slot. See
+`overrides` (W-C, schema 1.10): edge for Solidity virtual/override
+semantics. `Method` → `Method` between a child contract's method that
+overrides a parent's `virtual` method (also modifier→modifier for
+overridden modifiers). Direction = child → parent (Q4 decision in
+solidity-inheritance spec §5.0). Distinct from `implements` (interface
+satisfaction) because `overrides` is concrete-to-concrete virtual
+dispatch resolution. **Emitted** by the Phase 5 detector
+(`internal/parse/solidity/overrides.go`, PendingRefs from
+`declarations.go`). See
 `docs/design/solidity-inheritance-and-interface-dispatch.md §2.1 + §3.3`.
 
 ## Edge metadata: `dispatch_kind` (schema 1.7)

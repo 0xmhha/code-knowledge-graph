@@ -43,12 +43,12 @@ Concretely, for a keyword (e.g. `"GovStaking deposit"`) CKG returns:
 > metric.** The standing north star is: **6-axis graph build + keyword-query
 > retrieval at high accuracy**, measured by the `eval` surface against a gold
 > set. (The *current* score is a Tier 3 status fact, tracked in
-> `docs/eval-trajectory.md` and `eval/baseline/`, not here.)
+> `docs/archive/eval-trajectory.md` and `eval/baseline/`, not here.)
 
 ## Core values
 
 Three user-articulated values shape every design trade-off (moved here from
-`PROJECT-BLUEPRINT-ALIGNMENT.md` §1.2 so they are not lost in cleanups):
+`docs/archive/PROJECT-BLUEPRINT-ALIGNMENT.md` §1.2 so they are not lost in cleanups):
 
 1. **Accuracy** — return precisely the right code; wrong-answer is worse than
    no-answer (this is why retrieval accuracy is the first-class metric).
@@ -82,6 +82,7 @@ contract changes.
 
 ---
 
-*Source basis: `docs/PROJECT-OVERVIEW.md`, `docs/PROJECT-BLUEPRINT-ALIGNMENT.md`,
-`docs/ARCHITECTURE.md`. Those remain the fuller references; this file is the
-distilled, timeless statement of intent.*
+*Source basis: `docs/archive/PROJECT-OVERVIEW.md`,
+`docs/archive/PROJECT-BLUEPRINT-ALIGNMENT.md` (both archived 2026-07-18),
+`docs/ARCHITECTURE.md`. This file is the distilled, timeless statement of
+intent; the fuller status references it drew from are now in `docs/archive/`.*

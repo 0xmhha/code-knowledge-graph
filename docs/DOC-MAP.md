@@ -24,17 +24,14 @@ Tier 1 wins.
 
 | Doc | Covers |
 |---|---|
-| [VISION.md](VISION.md) | **Start here.** Purpose, CKG/CKV/CKS triangle, retrieval-accuracy north star, public boundary |
-| [PROJECT-OVERVIEW.md](PROJECT-OVERVIEW.md) | Fuller single-page overview (note: dated status numbers inside are Tier 3) |
-| [PROJECT-BLUEPRINT-ALIGNMENT.md](PROJECT-BLUEPRINT-ALIGNMENT.md) | CKG's role in the cross-repo blueprint, E2E scenario |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1-page architecture: 7-pass pipeline, five surfaces, six-graph axis |
+| [VISION.md](VISION.md) | **Start here.** Purpose, CKG/CKV/CKS triangle, retrieval-accuracy north star, public boundary. Absorbs the durable prose from the now-archived PROJECT-OVERVIEW / PROJECT-BLUEPRINT-ALIGNMENT |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1-page architecture: 7-pass pipeline, five surfaces, six-graph axis, four languages |
 
 ## Tier 2 — Design / specs (authoritative for "how/why decided")
 
 | Doc | Covers |
 |---|---|
 | [ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md) | Full architecture: pipeline, cache routing, storage abstraction, CLI |
-| [spec-ckg-v0.2.md](spec-ckg-v0.2.md) | Foundation spec: parser migration, concurrency analysis, Postgres, incremental cache |
 | [SCHEMA.md](SCHEMA.md) | **Authoritative** node/edge enumeration + schema version history |
 | [CODE-STRUCTURE.md](CODE-STRUCTURE.md) | Visual index: package structure, pipeline, six-graph axis, cache routing |
 | [INCREMENTAL.md](INCREMENTAL.md) | Incremental build cache: cache key, manifest v2, invalidation rules |
@@ -45,17 +42,14 @@ Tier 1 wins.
 | [design/solidity-inheritance-and-interface-dispatch.md](design/solidity-inheritance-and-interface-dispatch.md) | Solidity inheritance/dispatch spec (W-C) |
 | [design/solidity-cross-contract-storage-modifier.md](design/solidity-cross-contract-storage-modifier.md) | Solidity low-level call / storage / modifier spec (W7) |
 | [design/solidity-storage-slot-index.md](design/solidity-storage-slot-index.md) | Solidity EVM storage slot indexing (W9) |
-| [design/schema-1.9-spec.md](design/schema-1.9-spec.md) | Cross-language interop spec (HTTP/gRPC, W1–W4) |
-| [design/track-c-detector-gap.md](design/track-c-detector-gap.md) | Detector gap diagnosis / priority matrix |
+| [design/schema-1.9-spec.md](design/schema-1.9-spec.md) | Cross-language interop spec — W1–W3 (HTTP/gRPC) landed; **W4 message-queue pending** (see CONTINUITY) |
+| [design/track-c-detector-gap.md](design/track-c-detector-gap.md) | Detector gap diagnosis / priority matrix (P0/P1 gaps closed in `7b32031`; historical) |
 
 ## Tier 3 — State / status / remaining-work (dated, disposable)
 
 | Doc | Covers |
 |---|---|
 | [CONTINUITY.md](CONTINUITY.md) | **Cross-session cold-start entry point** — snapshot + remaining-work (the sole live Tier 3 status doc) |
-| [eval-trajectory.md](eval-trajectory.md) | 11-cycle eval trajectory + metrics progression |
-| [SELF-VERIFICATION.md](SELF-VERIFICATION.md) | Self-verification manual / checklist |
-| [CAPABILITY-AUDIT.md](CAPABILITY-AUDIT.md) | North-star → capability gap mapping (requirements reference) |
 | [VERIFICATION-CHECKLIST.md](VERIFICATION-CHECKLIST.md) | PR-ready surface fan-out checklist |
 | [STUDY-GUIDE.md](STUDY-GUIDE.md) | External concept primer (Leiden, MCP, tree-sitter, …) |
 | [HYDRATION-PATTERN.md](HYDRATION-PATTERN.md) | Viewer hydration pattern (React) |
@@ -90,3 +84,12 @@ Archived in the 2026-07-15 cleanup (coordination closed, no open CKG work):
 - `coordination-response-ckg-2026-06-29.md` — canonical_id join / graph_digest coordination closed
 - `coordination-reindex-migration-2026-07-10.md` — reindex/zero-downtime coordination closed; Q1/Q2/Q6 shipped in #53
 - `retire-ckg-node-id.md` — CKG portion closed (no code change); ckv/cks did the removal
+
+Archived in the 2026-07-18 docs cleanup (stale status/spec docs; verified against code):
+
+- `PROJECT-OVERVIEW.md` — superseded by VISION (purpose) + CONTINUITY (status); schema/tool-count/T-14 facts stale
+- `PROJECT-BLUEPRINT-ALIGNMENT.md` — every "Tier A — needed" item shipped (Policy/SecurityPattern nodes, 1-shot API, PR "why" history); role now in VISION
+- `CAPABILITY-AUDIT.md` — all tracked capability gaps closed in code
+- `eval-trajectory.md` — frozen C18–C37 eval history; metrics mirrored in CONTINUITY §3
+- `SELF-VERIFICATION.md` — command flows valid but expected values stale (schema 1.6, 7 tools); CONTINUITY is sole live status
+- `spec-ckg-v0.2.md` — foundation spec superseded: Postgres roadmap → ADR-0003, schema 1.0/1.1 → 1.23; residual pending items (concurrency Stage 2, cache Phase 2) carried into CONTINUITY

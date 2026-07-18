@@ -1,5 +1,11 @@
 # CKG Capability Audit — 2026-05-25
 
+> **ARCHIVED 2026-07-18.** Every capability gap and open decision this audit
+> tracked is now closed in code (W-B `awaits` + W-C `overrides` emission,
+> Korean/CJK `search_text` test, `ckg-NEW-9` bm25 external-import test, Stage-B
+> ckv-mirror 12/12). Retained as the historical north-star → gap mapping.
+> Live status → `docs/CONTINUITY.md`.
+
 > **Goal of this document**: map the user-articulated north star
 > (*"build a 6-axis graph DB + answer keyword queries at 100% accuracy"*)
 > against what the code does today, and enumerate the concrete work that
