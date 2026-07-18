@@ -1,5 +1,9 @@
 # Eval framework 11-cycle trajectory
 
+> **ARCHIVED 2026-07-18.** Frozen historical record of the C18–C37 eval series
+> (2026-05-19 ~ 05-23). The cycle-9 baseline metrics are mirrored in
+> `docs/CONTINUITY.md §3`. Kept for provenance; not a live status doc.
+
 > 2026-05-19 ~ 2026-05-23. *Single-source-of-truth* metrics + cycle catalogue
 > for the T-04 hallucination-validator series and the 4-axis evaluation
 > roadmap. Read this alongside `eval/stablenet/HANDOFF.md` (T-04/T-05

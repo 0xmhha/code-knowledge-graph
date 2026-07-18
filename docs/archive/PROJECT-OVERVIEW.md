@@ -1,5 +1,11 @@
 # CKG Project Overview — 2026-05-25
 
+> **ARCHIVED 2026-07-18.** Superseded by `docs/VISION.md` (purpose) +
+> `docs/CONTINUITY.md` (live status). Dated facts here are stale (schema was
+> 1.15, now 1.23; "9 tools", now 10; "T-14 pending", now shipped;
+> awaits/overrides "slot-only", now emitted). Kept for provenance only —
+> ground truth = code + git.
+
 > Single-page entry for **figuring out what CKG is, what it does today, and
 > what direction it's heading**. Written for a cold reader who has not seen
 > any of the 11-cycle eval trajectory, the cks integration plan, or the

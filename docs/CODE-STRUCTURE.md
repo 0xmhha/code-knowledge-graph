@@ -1,32 +1,33 @@
 # CKG — 코드 설계 구조 종합 정리
 
-> **목적**: `docs/` 16개 문서의 위계와 소스코드 패키지 구조를 한 문서에서 빠르게 조망.
-> ARCHITECTURE.md(1-page) ↔ ARCHITECTURE-DETAILED.md(994 lines) 사이의 시각적·구조적 인덱스 역할.
+> **목적**: 소스코드 패키지 구조 · 빌드 파이프라인 · 6-graph axis · 캐시 라우팅을
+> 한 문서에서 다이어그램으로 조망하는 **visual + structural index**.
+> ARCHITECTURE.md(1-page) ↔ ARCHITECTURE-DETAILED.md 사이의 시각적 인덱스 역할.
+> **문서 목록/위계는 이 문서가 아니라 [docs/DOC-MAP.md](DOC-MAP.md)가 authoritative.**
 >
 > **대상 독자**: cold-read 신규 합류자 / 다음 세션 시작 시 / external reviewer
-> **마지막 갱신**: 2026-05-05 (refresh 7 — G6 v4 + C1 + C2 + real-corpus parity ✅)
+> **마지막 갱신**: 2026-07-18 (full refresh — schema 1.23 / eval-retrieval surface /
+> pkg/mcphandlers 10 tools / binary-reachable rescoping PR #55 반영)
 
 ---
 
 ## 목차
 
 1. [프로젝트 개요](#1-프로젝트-개요)
-2. [`docs/` 문서 맵](#2-docs-문서-맵)
+2. [문서 맵 (→ DOC-MAP.md)](#2-문서-맵--doc-mapmd)
 3. [시스템 개요 (High-Level Architecture)](#3-시스템-개요-high-level-architecture)
 4. [패키지 구조 (Source Layout)](#4-패키지-구조-source-layout)
 5. [7-Pass Build Pipeline](#5-7-pass-build-pipeline-cold-path)
 6. [6-Graph Axis (CKS Deep-Dive Mapping)](#6-6-graph-axis-cks-deep-dive-mapping)
-7. [Storage Schema](#7-storage-schema-sqlite-schema-115)
-8. [MCP Tool Surface](#8-mcp-tool-surface-6-tools)
+7. [Storage Schema](#7-storage-schema-sqlite-schema-123)
+8. [MCP Tool Surface](#8-mcp-tool-surface-10-tools)
 9. [HTTP Server API + Viewer](#9-http-server-api--viewer)
 10. [Cache Routing (A3 Phase 1 + G6 v4)](#10-cache-routing-a3-phase-1--g6-v4)
 11. [Cache Key & 무효화](#11-cache-key--무효화)
 12. [의존 그래프 (Dependency Flow)](#12-의존-그래프-dependency-flow)
 13. [Subcommand 요약](#13-subcommand-요약-5-production-surfaces--cobra-root-약-20개-등록)
 14. [검증된 동작 (Capability)](#14-검증된-동작-capability)
-15. [다음 작업 (Wave 9)](#15-다음-작업-wave-9-진입-가능)
-16. [운영 함정](#16-운영-함정-handoffmd--5에서-누적)
-17. [핵심 설계 원칙](#17-핵심-설계-원칙)
+15. [핵심 설계 원칙](#15-핵심-설계-원칙)
 
 ---
 
@@ -35,78 +36,35 @@
 | Field | Value |
 |---|---|
 | **이름** | CKG (Code Knowledge Graph) |
-| **버전** | v0.2.x (schema 1.15, authoritative: docs/SCHEMA.md) |
-| **언어** | Go 1.25.5 (single binary, CGO-free default) |
-| **목적** | Go/TypeScript/Solidity 소스 → 코드 지식 그래프 (37 NodeType × 43 EdgeType, schema 1.15, authoritative: docs/SCHEMA.md) |
-| **활용** | 3D viewer + MCP server + Eval framework + audit |
-| **검증 corpus** | go-stablenet-latest 2,142 files → 217K nodes / 669K edges, audit PARITY ✅ |
-| **저장소** | SQLite (default, modernc) / PostgreSQL (`--db postgres://...`, pgxpool) |
+| **버전** | `ckgVersion = "0.1.0"` (`cmd/ckg/root.go:5`), extraction schema **1.23** (`internal/buildpipe/cache.go:166`) |
+| **언어** | Go 1.25.x (single binary, CGO-free default) |
+| **목적** | Go / TypeScript / Solidity / Protobuf 소스 → 코드 지식 그래프. NodeType/EdgeType 카탈로그와 schema 이력은 **docs/SCHEMA.md**가 authoritative (→ `pkg/types/enums.go` `AllNodeTypes()` / `AllEdgeTypes()`) |
+| **활용** | 3D viewer + MCP server + keyword-retrieval eval + audit(parity) |
+| **검증 corpus** | go-stablenet + synthetic fixtures. 노드/엣지 절대 수치는 PR #55(binary-reachable 재범위화, commit bf59fdb) 이후 변동 — 아래 수치는 **재측정 필요** |
+| **저장소** | SQLite (default, modernc) / PostgreSQL (`--db postgres://…`, pgxpool; ADR-0003에서 deprecate 결정) |
 
 ---
 
-## 2. `docs/` 문서 맵
+## 2. 문서 맵 (→ DOC-MAP.md)
 
-| 문서 | 역할 | 핵심 내용 | 갱신 빈도 |
-|---|---|---|---|
-| **SESSION-HANDOFF-2026-05-10.md** | 현재 세션 경계 snapshot | schema 1.8 + H1-H4 + perf 8 누적 상태 (cold-read 5분) | 세션마다 |
-| **SESSION-HANDOFF-2026-05-08.md** | 직전 세션 경계 | viewer UX 개편 + Track C/D + spec 정합 (이전 진입점) | snapshot |
-| **NEXT-CANDIDATES-2026-05-10.md** | 후보 inventory | 10개 항목 상세 분석, 대부분 완료 | 세션마다 |
-| **PERF-BASELINE-2026-05-10.md** | bench 측정 baseline | bench-server/mcp/mcp-stdio 결과 | bench 갱신마다 |
-| **VERIFICATION-CHECKLIST.md** | PR-ready 체크리스트 | 4축 surface 매트릭스 + negative path + 5종 누락 패턴 | 안정 |
-| **HYDRATION-PATTERN.md** | viewer hydration 패턴 | React #418 anti-pattern + usePersistedState 사용법 | 안정 |
-| **ARCHITECTURE.md** | 1-page overview | 7-pass 파이프라인 한 줄 요약 | 안정 |
-| **ARCHITECTURE-DETAILED.md** | 전체 설계서 (994줄) | 17 sections — 패키지/스키마/MCP/CKS gap 분석 | 분기마다 |
-| **CODE-STRUCTURE.md** (본 문서) | 시각적·구조적 인덱스 | doc map + 패키지 layout + 다이어그램 모음 | 분기마다 |
-| **SCHEMA.md** | 노드/엣지 카탈로그 (authoritative, → pkg/types/enums.go) | 37 NodeTypes × 43 EdgeTypes, schema 버전 history (1.0~1.15) | schema bump마다 |
-| **INCREMENTAL.md** | A3 캐시 가이드 | cache_key 공식, manifest v2, 무효화 규칙, partial-cache D4 fallback | A3/G6 변경시 |
-| **EVAL.md** | 평가 사용법 | 4 baseline (α/β/γ/δ), 가설 H1/H2 | 안정 |
-| **STUDY-GUIDE.md** | 외부 개념 학습 | Leiden, MCP, tree-sitter, 3D layout 학습 경로 | 안정 |
-| **SELF-VERIFICATION.md** | 자기검증 매뉴얼 | self-graph로 사용자 7개 검토항목 만족 확인 명령 | 안정 |
-| **spec-ckg-v0.2.md** | foundation spec (497줄) | parser 마이그레이션·동시성·PG·incremental 설계 원전 | 안정 |
-| **design/hunk-graph.md** | Hunk-graph 설계 원본 | H1-H4 단계 + §11 8 결정 + acceptance criteria | 안정 (구현 완료) |
-| **design/track-c-detector-gap.md** | Track C 진단 | 0건/희소 edge type 분석 + 우선순위 (구현 완료) | 안정 |
-| **archive/HANDOFF-2026-05-04.md** | 보존 — 2026-05-04 hand-off | refresh 7 시점 snapshot (post-Wave 5 / G6 v4 / C1/C2) | archived |
-| **archive/WORK-PLAN-2026-05-04.md** | 보존 — 2026-05-04 work tracker | V0 + Group A~G + Wave 1~9 진행 history | archived |
-| **archive/STATUS-REPORT-2026-05-04.md** | 보존 — 시점 status | refresh 7 시점 측정 metric + S0 spec gap | archived |
-| **archive/G6-INCREMENTAL-REDESIGN.md** | 보존 — G6 v3 design spec | partial-cache 재설계 (v4로 해결됨) | archived |
-| **archive/G6-V3-VALIDATION-FINDINGS.md** | 보존 — v3 실패 분석 | H3 root cause 추적, v4 fix 방향 | archived |
-| **archive/VIEWER-PERF-CLUSTERING.md** | 보존 — viewer 마이그레이션 노트 | Next.js viewer Phase 0-3 + 마이그레이션 background | archived |
+문서 목록·위계·authoritative 판정은 **[docs/DOC-MAP.md](DOC-MAP.md)** 하나가 소유한다.
+여기서 병렬 인덱스를 유지하지 않는다(중복 = 두 곳이 서로 stale 해지는 원인).
 
-**문서 위계** (post-Hunk-graph, 2026-05-11 정리):
+빠른 방향만:
 
-```
-spec-ckg-v0.2.md (설계 원전)
-        │
-        ▼
-ARCHITECTURE.md ─────► ARCHITECTURE-DETAILED.md ─────► CODE-STRUCTURE.md (본 문서)
-   (1-page)               (deep dive 994줄)               (visual + index)
-        │
-        ├──► SCHEMA.md         (data model, schema 1.15, authoritative: docs/SCHEMA.md)
-        ├──► INCREMENTAL.md    (cache 운영)
-        ├──► EVAL.md           (평가 사용)
-        ├──► SELF-VERIFICATION.md (자기검증 매뉴얼)
-        └──► STUDY-GUIDE.md    (외부 개념)
+| 질문 | 정답 문서 |
+|---|---|
+| "지금 무엇이 참인가" (current state) | **코드 + git** (ground truth). 상태 스냅샷은 **[CONTINUITY.md](CONTINUITY.md)** — 유일한 live Tier 3 status |
+| "왜 그렇게 결정했나" (why decided) | `docs/adr/` ADR + Tier 2 design 문서 |
+| "무엇을 지향하나" (vision) | **[VISION.md](VISION.md)** |
+| 노드/엣지 카탈로그 · schema 이력 | **[SCHEMA.md](SCHEMA.md)** (authoritative) |
+| 캐시 동작 | **[INCREMENTAL.md](INCREMENTAL.md)** |
+| 전체 설계 deep-dive | **[ARCHITECTURE-DETAILED.md](ARCHITECTURE-DETAILED.md)** |
 
-설계 원본 (구현 완료, 추적 참조):
-design/hunk-graph.md          (H1-H4, §11 결정)
-design/track-c-detector-gap.md (G2/G4/G5 detector 강화)
-
-세션 진입점 (운영 tracker):
-SESSION-HANDOFF-2026-05-10.md (현재) ◄── SESSION-HANDOFF-2026-05-08.md (직전)
-        │
-        ├──► NEXT-CANDIDATES-2026-05-10.md (후보 inventory)
-        ├──► PERF-BASELINE-2026-05-10.md  (bench baseline)
-        ├──► VERIFICATION-CHECKLIST.md    (PR workflow)
-        └──► HYDRATION-PATTERN.md         (viewer 패턴)
-
-archive/ (V0 완료 시점 + G6 v3 design history):
-        ├──► HANDOFF-2026-05-04.md
-        ├──► WORK-PLAN-2026-05-04.md
-        ├──► STATUS-REPORT-2026-05-04.md
-        ├──► G6-INCREMENTAL-REDESIGN.md
-        ├──► G6-V3-VALIDATION-FINDINGS.md
-        └──► VIEWER-PERF-CLUSTERING.md
-```
+> **주의**: 과거 이 문서가 나열하던 SESSION-HANDOFF / NEXT-CANDIDATES /
+> PROJECT-OVERVIEW / SELF-VERIFICATION / spec-ckg-v0.2 / eval-trajectory /
+> CAPABILITY-AUDIT / PROJECT-BLUEPRINT-ALIGNMENT 등은 `docs/archive/`로 이동됨.
+> live 문서로 취급하지 말 것. 최신 목록은 항상 DOC-MAP.md를 볼 것.
 
 ---
 
@@ -115,18 +73,18 @@ archive/ (V0 완료 시점 + G6 v3 design history):
 ```
                      ┌───────────────────────────────────────────┐
                      │           ckg (Single Go Binary)          │
-                     │   build / serve / mcp / export-* / eval / │
-                     │   audit  ─  cobra rootCmd                 │
+                     │   build / serve / mcp / eval-retrieval /  │
+                     │   audit  ─  cobra rootCmd (~20 subcmds)   │
                      └──────────────┬──────────────┬─────────────┘
                                     │              │
                                     ▼              ▼
         ┌─────────────────────────────────┐   ┌──────────────────────┐
         │   buildpipe.Run() (orchestrator) │   │   Query surfaces     │
         └─────────────────────────────────┘   │  - HTTP API + viewer │
-                                    │          │  - MCP (6 tools)    │
+                                    │          │  - MCP (10 tools)   │
         ┌─── 7-Pass build pipeline ──┴────┐    │  - audit (parity)   │
-        │                                 │    │  - export-static    │
-        │  P1 detect  → P2 parse (3 lang) │    │  - export-postgres  │
+        │                                 │    │  - eval-retrieval   │
+        │  P1 detect  → P2 parse (4 lang) │    │  - export-*         │
         │  → P3 resolve → P4 graph build  │    └──────────────────────┘
         │  → P5 xlang link (G5)            │              │
         │  → P6 temporal (G6, git log)     │              │
@@ -140,12 +98,15 @@ archive/ (V0 완료 시점 + G6 v3 design history):
                └────┬─────────┬───┘         └─────────────────────────┘
                     │         │
               SQLite│         │PostgreSQL (--db)
-              (default)       │ pgxpool  (C2)
+              (default)       │ pgxpool  (ADR-0003 deprecated)
                     │         │
                     ▼         ▼
                   graph.db  ckg schema
                   + manifest.json
 ```
+
+파서 4종: Go (`internal/parse/golang`), TypeScript (`typescript`), Solidity
+(`solidity`), Protobuf (`proto`).
 
 ---
 
@@ -153,89 +114,89 @@ archive/ (V0 완료 시점 + G6 v3 design history):
 
 ```
 code-knowledge-graph/
-├── cmd/ckg/                ← CLI entry (cobra)
+├── cmd/ckg/                ← CLI entry (cobra); ~20 subcommand 등록 (root.go:30-36)
 │   ├── main.go             root → Execute()
-│   ├── root.go             persistent flags (--verbose, --log-file)
+│   ├── root.go             ckgVersion="0.1.0", persistent flags (--verbose, --log-file)
 │   ├── build.go            buildpipe.Run()
 │   ├── serve.go            server.NewWithOptions()
-│   ├── mcp.go              mcp.Run() — stdio
+│   ├── mcp.go              mcphandlers.RegisterAll — stdio
+│   ├── watch.go            fsnotify 기반 재빌드 watcher
 │   ├── export_static.go    StoreReader.ExportChunked()
-│   ├── export_postgres.go  pgx COPY (B2)
-│   ├── eval.go             eval framework (4 baselines)
+│   ├── export_postgres.go  pgx COPY
+│   ├── export_json.go      JSON dump
+│   ├── eval_retrieval.go   keyword-retrieval eval (구 "eval" surface; eval.go는 없음)
 │   ├── audit.go            go/packages.Load vs DB diff
+│   ├── validate.go         graph 무결성 검증
+│   ├── evidence.go         evidence-for-intent 조회
+│   ├── query.go / path.go / report.go / quickstart.go   유틸
+│   ├── benchmark.go / bench_server.go / bench_mcp.go /
+│   │   bench_mcp_stdio.go / bench_index.go               벤치 표면
 │   └── logging.go          slog multiHandler (text+JSON)
 │
-├── pkg/types/              ← public type system
-│   ├── enums.go            37 NodeTypes + 43 EdgeTypes + Confidence (authoritative: docs/SCHEMA.md)
-│   ├── node.go             Node struct
-│   └── edge.go             Edge struct
+├── pkg/                    ← public API / stable contract (CKV·CKS 소비; 11 packages)
+│   ├── types/              enums.go(NodeType/EdgeType — authoritative: docs/SCHEMA.md),
+│   │                       node.go, edge.go
+│   ├── bm25/               BM25 랭킹
+│   ├── concurrency/        동시성 영향 분석 (concurrency_impact tool)
+│   ├── evidence/           evidence-for-intent + cache
+│   ├── hunkmodifies/       Hunk-graph 파생
+│   ├── impact/             impact-of-change 분석
+│   ├── mcphandlers/        ★ MCP tool 구현 (registerall.go → RegisterAll)
+│   ├── policy/             정책/필터
+│   ├── security/           보안 규칙
+│   ├── smartctx/           get_context_for_task 스마트 패킹
+│   └── store/              store.Reader 등 public store 계약
 │
 ├── internal/
 │   ├── buildpipe/          ← 7-pass orchestrator
-│   │   ├── pipeline.go     Run / runCold / runShortCircuit
-│   │   ├── language_runners.go  per-lang dispatcher
-│   │   ├── cache.go        SchemaVersion="1.15", DiffManifest, cache_key
-│   │   ├── incremental.go  D4 escape hatch (dead code preserved)
-│   │   ├── temporal.go     P6 git log emit
+│   │   ├── pipeline.go     Run / runCold / runShortCircuit / runIncremental (dispatch)
+│   │   ├── cache.go        const SchemaVersion="1.23", DiffManifest, cache_key
+│   │   ├── incremental.go  runIncremental — LIVE (pipeline.go:260에서 호출)
+│   │   ├── temporal.go     P6 git log emit (temporalDepthDefault=10)
 │   │   └── staleness.go    DB timestamp vs source mtime
 │   │
-│   ├── detect/             ← P1 file discovery
-│   │   ├── walk.go         extension-based (TS/Sol)
-│   │   └── go.go           go/packages.Load (Go, build constraints)
-│   │
+│   ├── detect/             ← P1 file discovery (walk + go/packages.Load)
 │   ├── parse/              ← P2/P3 parsing + resolve
 │   │   ├── parser.go       Parser interface, ResolvedGraph
 │   │   ├── dispatch.go     per-lang pipeline runner
 │   │   ├── idgen.go        deterministic node ID
 │   │   ├── golang/         go/packages + types.Info
-│   │   ├── typescript/     tree-sitter v0.25
-│   │   └── solidity/       vendored grammar v1.2.11 (ABI 14)
+│   │   ├── typescript/     tree-sitter
+│   │   ├── solidity/       vendored grammar
+│   │   └── proto/          protobuf (.proto) 파서   ← 4번째 언어
 │   │
-│   ├── graph/              ← P4 graph build
-│   │   └── builder.go      Build (dedup nodes by ID, edges by key)
-│   │
-│   ├── link/               ← P5 cross-language
-│   │   └── sol_to_ts.go    Sol ABI → TS binds_to
-│   │
-│   ├── temporal/           ← P6 (git → G6 edges)
-│   │
+│   ├── graph/              ← P4 graph build (dedup nodes by ID, edges by key)
+│   ├── link/               ← P5 cross-language (Sol ABI → TS binds_to)
+│   ├── temporal/           ← P6 git → G6 edges
 │   ├── cluster/            ← P7a Leiden + pkg tree
 │   ├── score/              ← P7b PageRank + usage
+│   ├── filterlist/         ← include/exclude 필터 목록 처리
+│   ├── validate/           ← 그래프 무결성 검증 (validate 서브커맨드)
 │   │
 │   ├── persist/            ← Storage (ISP)
 │   │   ├── store_interface.go  StoreReader / StoreWriter / Store
-│   │   ├── sqlite.go       sqliteStore (modernc/sqlite)
-│   │   ├── postgres_store.go   pgStore (pgxpool, C2)
-│   │   ├── postgres_exporter.go  COPY-based bulk push (B2)
+│   │   ├── sqlite*.go       sqliteStore (modernc/sqlite) + reader/writer/migrate
+│   │   ├── postgres_*.go    pgStore (pgxpool) + COPY exporter (ADR-0003 deprecated)
 │   │   ├── chunked_export.go   static JSON
-│   │   ├── manifest.go     FileEntry, Manifest
-│   │   └── schema.sql      8 tables + FTS5
+│   │   ├── manifest.go     Manifest / SchemaVersion(back-compat policy — cache.go와 별개)
+│   │   └── schema.sql      tables + FTS5
 │   │
-│   ├── server/             ← HTTP API + embedded viewer
-│   │   ├── server.go       Server, NewWithOptions
-│   │   ├── api.go          7 handlers
-│   │   ├── viewer.go       go:embed web_assets
-│   │   ├── community.go    cluster query helpers
-│   │   ├── staleness.go    freshness banner
-│   │   └── web_assets/     ← Next.js out/ mirror
-│   │
-│   ├── mcp/                ← MCP stdio server
-│   │   ├── server.go       6 tool registration
-│   │   ├── tools.go        find_symbol/callers/callees/get_subgraph/search_text
-│   │   └── get_context.go  smart 1-shot tool 6
-│   │
-│   ├── eval/               ← α/β/γ/δ runner
+│   ├── server/             ← HTTP API + embedded viewer (go:embed web_assets)
+│   ├── mcp/                ← MCP stdio 진입점 (server.go → mcphandlers.RegisterAll)
+│   ├── eval/retrieval/     ← keyword-retrieval eval + fixtures
 │   ├── audit/              ← parity check
 │   └── e2e/                ← end-to-end tests
 │
-├── web/
-│   ├── viewer-next/        ← Next.js 14 + react-force-graph-3d + zustand
-│   └── viewer/             ← legacy esbuild (slated for removal)
-│
-├── eval/tasks/             ← YAML eval scenarios
-├── testdata/synthetic/     ← Go 3 + TS 3 + Sol 2 fixtures
-└── docs/                   ← 14+ markdown docs
+├── web/viewer-next/        ← Next.js 3D force-graph viewer (embedded)
+├── eval/                   ← YAML eval scenarios / corpora
+├── testdata/               ← synthetic fixtures
+└── docs/                   ← DOC-MAP.md가 index (본 문서 포함)
 ```
+
+> **두 개의 SchemaVersion 구분** (CLAUDE.md 규약): `internal/persist/manifest.go`의
+> `SchemaVersion`(manifest 후방호환 정책, BREAKING 시에만 bump) ≠
+> `internal/buildpipe/cache.go`의 `SchemaVersion="1.23"`(cache-key 기여자, bump 시
+> 캐시 무효화 → 전체 reindex). 둘을 혼동하지 말 것.
 
 ---
 
@@ -248,25 +209,24 @@ code-knowledge-graph/
       │  buildpipe.Run(Options)
       ▼
 ┌──────────────────────────┐
-│ [Cache routing]          │
-│  ├─ --no-cache?          │  YES → runCold
-│  ├─ Manifest usable?     │  NO  → runCold
-│  ├─ All cached?          │  YES → runShortCircuit (1s, manifest refresh)
-│  └─ Mixed dirty/cached?  │      → runCold (D4 fallback for correctness)
+│ [Cache routing]          │  (pipeline.go dispatch)
+│  ├─ --no-cache / no manifest / schema mismatch  → runCold
+│  ├─ 100% cached, no removals                    → runShortCircuit (~1s)
+│  └─ partial hit (dirty+cached 혼재)             → runIncremental (LIVE)
 └─────┬────────────────────┘
       ▼ runCold
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ P1 Detect           detect.Walk + detect.GoFiles (go/packages.Load)     │
+│ P1 Detect           detect.Walk + go/packages.Load                       │
 │   ↓ DiscoveredFile[]                                                    │
-│ P2 Parse (per-lang) Go (types.Info) │ TS (tree-sitter) │ Sol (vendored) │
+│ P2 Parse (per-lang) Go │ TS │ Sol │ Proto  (4 languages)                │
 │   ↓ ParseResult{Nodes, Edges, Pending}                                  │
 │ P3 Resolve          Pass 2 — qname → node ID (suffix match)             │
 │   ↓ ResolvedGraph per language                                          │
-│ P4 Graph Build      graph.Build → dedup nodes by ID, edges by 4-tuple   │
+│ P4 Graph Build      graph.Build → dedup nodes by ID, edges by key       │
 │   ↓ unified Graph{Nodes, Edges}                                         │
 │ P5 G5 Distributed   link.SolToTS(ABI) → binds_to edges                  │
 │ P6 G6 Temporal      git log --raw → Commit nodes + changed_in/blame     │
-│ P7a Cluster         cluster.BuildPkgTree + BuildTopicTree (Leiden γ∈{0.5,1,2}) │
+│ P7a Cluster         cluster.BuildPkgTree + BuildTopicTree (Leiden)      │
 │ P7b Score           score.Compute → PageRank, usage_score               │
 │   ↓                                                                      │
 │ Persist             openColdStore → wipe → InsertNodes/Edges/Blobs/      │
@@ -277,7 +237,10 @@ code-knowledge-graph/
    graph.db + manifest.json + manifest blob
 ```
 
-**라우팅 결과 (실측 go-stablenet 2142 files)**: cold ~115s · short-circuit <1s · partial=cold-fallback
+**라우팅 3-way**: cold(전체) · short-circuit(100% hit, manifest refresh) ·
+incremental(부분 hit — dirty만 파싱 + cached reload). 세 경로 모두 live
+(`internal/buildpipe/pipeline.go:258-265`). 런타임 소요 수치는 corpus·머신 의존이며
+PR #55 이후 재측정 필요.
 
 ---
 
@@ -285,35 +248,37 @@ code-knowledge-graph/
 
 ```
 ┌─────────────────────────┬────────────────────────────────────────────────┐
-│ G1 Structural   (50%)   │ contains, defines, imports, exports            │
+│ G1 Structural           │ contains, defines, imports, exports            │
 │                         │ Node: Package, File, Struct, Class, Interface… │
 ├─────────────────────────┼────────────────────────────────────────────────┤
-│ G2 Semantic     (70%)   │ references, implements, extends, uses_type,    │
+│ G2 Semantic             │ references, implements, extends, uses_type,    │
 │                         │ instantiates, reads/writes_field, reads/writes │
 │                         │ _mapping, emits_event, has_modifier/decorator  │
 ├─────────────────────────┼────────────────────────────────────────────────┤
-│ G3 Execution    (60%)   │ calls, invokes                                 │
+│ G3 Execution            │ calls, invokes                                 │
 │                         │ Node: IfStmt, LoopStmt, CallSite, ReturnStmt,  │
 │                         │       SwitchStmt                               │
 ├─────────────────────────┼────────────────────────────────────────────────┤
-│ G4 Concurrency  (80%)   │ spawns, sends_to, recvs_from,                  │
+│ G4 Concurrency          │ spawns, sends_to, recvs_from,                  │
 │                         │ acquires_lock, releases_lock, accessed_under_lock│
 │                         │ Node: Goroutine, Channel, Mutex                │
-│                         │ B1+G8+G9: Mutex 8→170, accessed_under_lock 0→2916│
 ├─────────────────────────┼────────────────────────────────────────────────┤
-│ G5 Distributed  (70%)   │ listens_on, handles_message, rpc_calls, binds_to│
+│ G5 Distributed          │ listens_on, handles_message, rpc_calls, binds_to│
 │                         │ Node: Endpoint, MessageType                    │
 │                         │ Sol↔TS xlang via ABI heuristic (INFERRED)      │
 ├─────────────────────────┼────────────────────────────────────────────────┤
-│ G6 Temporal     (90%)   │ changed_in, blame                              │
+│ G6 Temporal             │ changed_in, blame                              │
 │                         │ Node: Commit (git log --raw, depth 10)         │
 └─────────────────────────┴────────────────────────────────────────────────┘
-       Overall CKS coverage: 71%   (cf. ARCHITECTURE-DETAILED.md §7.7)
 ```
+
+축 정의(edge/node type 매핑)는 `pkg/types/enums.go` + docs/SCHEMA.md가 authoritative.
+CKS coverage 비율·축별 edge/node **절대 수치**는 런타임 측정치이며 PR #55(binary-reachable
+재범위화) 이후 stale — 정확한 값은 `ckg audit` / 재빌드로 재측정할 것.
 
 ---
 
-## 7. Storage Schema (SQLite, schema 1.15, authoritative: docs/SCHEMA.md)
+## 7. Storage Schema (SQLite, schema 1.23, authoritative: docs/SCHEMA.md)
 
 ```
 ┌────────────────────────────┐         ┌──────────────────────────┐
@@ -327,7 +292,7 @@ code-knowledge-graph/
 │ signature, doc_comment     │         └──────────────────────────┘
 │ complexity, in_/out_degree │
 │ pagerank, usage_score      │         ┌──────────────────────────┐
-│ confidence, sub_kind       │ 1     1 │ blobs                    │
+│ confidence, sub_kind …     │ 1     1 │ blobs                    │
 └──┬─────────────────────────┘────────▶│ node_id ─FK CASCADE      │
    │                                   │ source (BLOB)            │
    │                                   └──────────────────────────┘
@@ -337,40 +302,43 @@ code-knowledge-graph/
    │                                   │ resolution, topic_label  │
    │                                   └──────────────────────────┘
    │                                   ┌──────────────────────────┐
-   │  1                                │ pending_refs (schema 1.5)│
+   │  1                                │ pending_refs             │
    ├────────────────────────▶│ src_id (FK CASCADE), target_qname  │
    │                                   │ edge_type, line, hint    │
    │                                   └──────────────────────────┘
    │
    │  FTS5 virtual table: nodes_fts(name, qualified_name, signature, doc_comment)
    ▼
-manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
+manifest table { schema_version, ckg_version, buildTime, statistics, Files[] }
 ```
 
-**Schema bump 이력**: 1.0 → 1.1 (lock slots) → 1.2 (ON DELETE CASCADE) → 1.3 (Endpoint/MessageType) → 1.4 (Commit) → 1.5 (pending_refs persistence, partial-cache infra) → … → **1.15 (current)**. 전체 이력 + 노드/엣지 카탈로그는 docs/SCHEMA.md가 authoritative (→ pkg/types/enums.go).
+**Schema 버전**: 현재 **1.23** (`internal/buildpipe/cache.go:166`). 전체 bump 이력 +
+NodeType/EdgeType 카탈로그는 **docs/SCHEMA.md**가 단일 authoritative 소스
+(→ `pkg/types/enums.go`). 이 문서는 수치를 복제하지 않는다.
 
 ---
 
-## 8. MCP Tool Surface (6 tools)
+## 8. MCP Tool Surface (10 tools)
+
+authoritative 등록 목록: `pkg/mcphandlers/registerall.go` `RegisterAll` (내부적으로
+`internal/mcp/server.go`가 호출). 과거의 `internal/mcp/{tools.go,get_context.go}`는
+제거됨 — 모든 tool 구현은 `pkg/mcphandlers/`로 이동.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│ Granular tools (single-axis)                          Smart tool (★) │
-│                                                                       │
-│ 1. find_symbol     name → nodes[]                  6. get_context_   │
-│ 2. find_callers    qname,depth → reverse BFS          for_task       │
-│ 3. find_callees    qname,depth → forward BFS                          │
-│ 4. get_subgraph    seed,depth → bidir BFS         (a) FTS5 retrieve  │
-│ 5. search_text     q,topK → BM25 + LIKE-CJK       (b) 1-hop expand  │
-│                                                    (c) score-fuse:    │
-│                                                        0.5·BM25 +     │
-│                                                        0.3·PageRank + │
-│                                                        0.2·usage      │
-│                                                    (d) diversify     │
-│                                                    (e) pack ≤budget  │
+│ 1. find_symbol            name → nodes[]                              │
+│ 2. find_callers           qname,depth → reverse BFS                   │
+│ 3. find_callees           qname,depth → forward BFS                   │
+│ 4. get_subgraph           seed,depth → bidir BFS                      │
+│ 5. search_text            q,topK → BM25 + FTS5                        │
+│ 6. get_context_for_task   ★ smart 1-shot (retrieve→expand→fuse→pack) │
+│ 7. impact_of_change       변경 파급 분석 (pkg/impact)                 │
+│ 8. concurrency_impact     동시성 영향 (pkg/concurrency)               │
+│ 9. change_history         G6 temporal 이력                            │
+│10. evidence_for_intent    의도별 근거 (pkg/evidence, NewCache)        │
 └──────────────────────────────────────────────────────────────────────┘
-   transport: stdio JSON-RPC (mark3labs/mcp-go v0.49)
-   eval baselines: α(none) β(get_subgraph) γ(granular) δ(smart 1-shot ★)
+   transport: stdio JSON-RPC (mark3labs/mcp-go)
+   §11.3 H3 retrieval boundary는 각 Register* 내부에서 강제됨
 ```
 
 ---
@@ -404,6 +372,9 @@ manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
         └────────────────────────────────────────────────────────────┘
 ```
 
+> viewer는 `make build-full` 시에만 실제로 빌드됨. `make build`는 Go 바이너리만
+> 만들고 embedded viewer는 tracked stub으로 남는다.
+
 ---
 
 ## 10. Cache Routing (A3 Phase 1 + G6 v4)
@@ -429,21 +400,18 @@ manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
                        ▼              ▼                 ▼                  ▼
                   ┌─────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────────┐
                   │ runCold │  │ all cached   │  │ partial hit  │  │ all dirty  │
-                  │  (full) │  │ + no removal │  │ (D4 fallback)│  │ (full)     │
-                  └─────────┘  │              │  │              │  │            │
-                               ▼              │  ▼              │  ▼
-                          runShortCircuit     │ runCold (safe)  │ runCold
-                          1s manifest refresh │ phantom-edge    │
-                          ─ load-bearing CI   │ correctness     │
-                                              │                 │
-                                              └─ runIncremental │
-                                                  (DEAD CODE,   │
-                                                   schema 1.15  │
-                                                   preserved    │
-                                                   for v4 reuse)│
+                  │  (full) │  │ + no removal │  │              │  │ (full)     │
+                  └─────────┘  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘
+                                      ▼                 ▼                ▼
+                              runShortCircuit    runIncremental       runCold
+                              (~1s manifest      (LIVE — dirty만       (full)
+                               refresh;           파싱 + cached
+                               load-bearing CI)   reload; pipeline.go:260)
 ```
 
-**측정 (go-stablenet, 2142 files)**: cold 40s → short-circuit 0.99s | partial=cold-fallback (correctness ≫ speed)
+partial hit는 이제 **runIncremental**로 처리된다 (LIVE, `internal/buildpipe/pipeline.go:260`).
+과거 문서의 "partial=cold-fallback / runIncremental=DEAD CODE" 서술은 폐기됨.
+cache-key contributor는 `internal/buildpipe/cache.go` `SchemaVersion="1.23"`.
 
 ---
 
@@ -452,9 +420,9 @@ manifest table { schemaVersion, ckgVersion, buildTime, statistics, Files[] }
 ```
 cache_key = sha256(
     file_content
-    + "|ckg:"     + ckg_version       // cmd/ckg/root.go 0.1.0
-    + "|parser:"  + parser_version    // Go: runtime.Version() / TS,Sol: TS module
-    + "|schema:"  + schema_version    // internal/buildpipe/cache.go "1.15"
+    + "|ckg:"     + ckg_version       // cmd/ckg/root.go:5  "0.1.0"
+    + "|parser:"  + parser_version    // Go: runtime.Version() / TS,Sol,Proto: module ver
+    + "|schema:"  + schema_version    // internal/buildpipe/cache.go:166  "1.23"
 )
 ```
 
@@ -464,9 +432,9 @@ cache_key = sha256(
 |---|---|
 | 파일 내용 수정 | 그 파일만 dirty |
 | ckgVersion bump | 전체 dirty (= 전체 cold) |
-| schema_version bump | 전체 dirty |
+| schema_version bump (cache.go) | 전체 dirty |
 | Go toolchain 변경 | 전체 Go file dirty |
-| tree-sitter 모듈 bump | 전체 TS/Sol dirty |
+| tree-sitter / grammar 모듈 bump | 해당 언어 파일 dirty |
 | 파일 추가/삭제 | 해당 파일 dirty/removed |
 
 ---
@@ -474,10 +442,10 @@ cache_key = sha256(
 ## 12. 의존 그래프 (Dependency Flow)
 
 ```
-cmd/ckg/{build,serve,mcp,eval,audit,export-*}.go
+cmd/ckg/{build,serve,mcp,eval-retrieval,audit,validate,export-*}.go
    ├──► internal/buildpipe (build)
    │     ├──► internal/detect            (P1)
-   │     ├──► internal/parse/{golang,ts,sol}  (P2/P3)
+   │     ├──► internal/parse/{golang,typescript,solidity,proto}  (P2/P3)
    │     ├──► internal/graph             (P4)
    │     ├──► internal/link              (P5)
    │     ├──► internal/temporal          (P6)
@@ -485,33 +453,43 @@ cmd/ckg/{build,serve,mcp,eval,audit,export-*}.go
    │     ├──► internal/score             (P7b)
    │     └──► internal/persist           (write)
    │
+   ├──► internal/mcp     (mcp)           ──► pkg/mcphandlers ──► pkg/store.Reader
    ├──► internal/server  (serve)         ──► persist.StoreReader
-   ├──► internal/mcp     (mcp)           ──► persist.StoreReader
-   ├──► internal/eval    (eval)          ──► persist.StoreReader + Anthropic SDK
+   ├──► internal/eval/retrieval (eval-retrieval) ──► StoreReader (keyword-retrieval)
    ├──► internal/audit   (audit)         ──► persist.StoreReader + go/packages
-   └──► internal/persist (export-static / export-postgres)
+   ├──► internal/validate (validate)     ──► persist.StoreReader
+   └──► internal/persist (export-static / export-postgres / export-json)
 
-pkg/types  ←  공통 enum/struct (NodeType, EdgeType, Confidence, Node, Edge)
+pkg/  ←  public contract (types, store, bm25, smartctx, impact, concurrency,
+         evidence, hunkmodifies, policy, security, mcphandlers) — CKV/CKS 소비
 ```
 
-**ISP 분리**: `StoreReader` (read consumers) ⊂ `Store` ⊃ `StoreWriter` (buildpipe only)
-**Backend 교체점**: `--db postgres://...` → `pgStore` (pgxpool ~1160 LOC) vs `sqliteStore` (default)
+**ISP 분리**: `StoreReader` (read consumers) ⊂ `Store` ⊃ `StoreWriter` (buildpipe only).
+**Backend 교체점**: `--db postgres://…` → `pgStore` (pgxpool) vs `sqliteStore` (default).
+PostgreSQL 백엔드는 ADR-0003에서 deprecate 결정 — SQLite가 유일 유지 대상.
 
 ---
 
 ## 13. Subcommand 요약 (5 production surfaces · cobra root 약 20개 등록)
 
-cobra root는 약 20개 subcommand를 등록한다 (`cmd/ckg/root.go`의 `AddCommand`). 그중 **5 production surfaces** (build/serve/mcp/eval/audit)가 1차 표면이고 나머지는 export/bench/report/query 등 유틸리티. 아래는 대표 surface 발췌.
+cobra root는 약 20개 subcommand를 등록한다 (`cmd/ckg/root.go:30-36`의 `AddCommand`).
+그중 **5 production surfaces** (build / serve / mcp / eval-retrieval / audit)가 1차 표면이고
+나머지는 export / bench / report / query / validate / watch 등 유틸리티. 대표 발췌:
 
 | Subcommand | 용도 | 입력 | 출력 |
 |---|---|---|---|
 | `build` | 그래프 생성 | `--src` | `graph.db` + `manifest.json` |
 | `serve` | HTTP API + viewer | `--graph` (or `--db`) | `:8080` |
-| `mcp` | stdio MCP server | `--graph` | 6 tools |
+| `mcp` | stdio MCP server | `--graph` | 10 tools |
+| `eval-retrieval` | keyword-retrieval eval | `--graph`, tasks | 측정 리포트 |
+| `audit` | 파일 누락 검증 (parity) | `--src`, `--graph` | exit 0/1/2 |
 | `export-static` | 정적 호스팅용 chunked JSON | `--graph` | `out/*.json` + viewer |
 | `export-postgres` | SQLite → PG one-shot | `--dsn`, `--source` | PG schema |
-| `eval` | 4-baseline 비교 | `--tasks`, `--graph` | CSV + report.md |
-| `audit` | 파일 누락 검증 | `--src`, `--graph` | exit 0/1/2 |
+| `validate` | 그래프 무결성 검증 | `--graph` | pass/fail |
+| `watch` | 소스 변경 감시 재빌드 | `--src` | fsnotify loop |
+
+> 구 `eval` 서브커맨드/`cmd/ckg/eval.go`는 존재하지 않는다 — 실제 커맨드는
+> `eval-retrieval` (`cmd/ckg/eval_retrieval.go`).
 
 **Persistent flags (모든 subcommand)**: `--verbose`, `--log-file <path>`, `CKG_LOG_LEVEL=debug`
 
@@ -520,85 +498,36 @@ cobra root는 약 20개 subcommand를 등록한다 (`cmd/ckg/root.go`의 `AddCom
 ## 14. 검증된 동작 (Capability)
 
 ```
-┌──────────── 사용자 4 완성도 조건 ─────────────────────────────┐
-│ #1 모든 파일 누락없이 DB화         ✅ E2 (go/packages.Load)   │
-│ #2 audit으로 검증 가능             ✅ E1 (ckg audit)          │
-│ #3 CKS 6 graph (G1~G6) 지원        ✅ B1+E3+E4+G8+G9          │
-│ #4 viewer + CLI eval               ✅ E5 + α/β/γ/δ            │
+┌──────────── 사용자 완성도 조건 ───────────────────────────────┐
+│ #1 모든 파일 누락없이 DB화         ✅ go/packages.Load        │
+│ #2 audit으로 검증 가능             ✅ ckg audit               │
+│ #3 CKS 6 graph (G1~G6) 지원        ✅ enums.go 축 매핑        │
+│ #4 viewer + CLI eval               ✅ serve + eval-retrieval  │
 └────────────────────────────────────────────────────────────────┘
-
-go-stablenet 실측 (2142 files):
-  - audit: PARITY (1259/1259, exit 0)
-  - cold:    214,343 nodes / 652,892 edges
-  - partial: 214,343 nodes / 652,892 edges  ← G6 v4 후 diff = 0 ✅
 ```
 
-**측정 가능한 개선 (Wave 5 + Group G)**:
-
-| 메트릭 | Pre | Post | Δ |
-|---|---|---|---|
-| Mutex nodes | 0 (B1 전) | 170 (G9 후) | — |
-| acquires_lock edges | 0 | 781 | — |
-| accessed_under_lock edges | 0 | 2916 | — |
-| Field-misclassified acquires_lock | 157 | 1 | -99.4% |
-| changed_in edges (E4) | 0 | 344,946 | — |
-| audit drift (E2) | 41 over-include | 0 | PARITY |
-| pipeline.go LOC (G4) | 596 | 359 | -40% |
+> **수치 주의**: 과거 스냅샷의 노드/엣지/edge-type 절대 수치(예: Mutex nodes,
+> acquires_lock / accessed_under_lock / changed_in edge 수, 파일별 parity 카운트)는
+> PR #55(binary-reachable 재범위화, commit bf59fdb)로 그래프가 MAIN_PKG-도달 코드로
+> 좁혀지면서 모두 변동됨. 이 문서는 임의 수치를 재기재하지 않는다 — 최신 값은
+> `ckg build` 후 `ckg audit` / `/api/manifest`로 재측정할 것.
 
 ---
 
-## 15. 다음 작업 (Wave 9 진입 가능)
-
-| 우선 | 작업 | 추정 |
-|---|---|---|
-| 1 | **B3** Tree.Edit() incremental parsing | M |
-| 2 | E2-FU `go.work` 회귀 테스트 | S |
-| 2 | Wave1 DoD viewer dead-key 정리 (`reads/writes/…`) | S |
-| 3 | E3-FU httprouter / Ethereum RPC client.Call | S |
-| 3 | E4-FU line-level blame | M |
-| 4 | **D1** SSA 정밀 동시성 (`--deep` opt-in) | XL |
-| 4 | **D2** pgvector + Apache AGE | XL |
-
-**의존성 그래프 (현재)**:
-```
-A1 ──► A2 (병렬 가능)                               ✅
-A1 ──► B3 (incremental parsing)                    ← next
-A3 ──► C1 (Pass 2 invalidation)                    ✅
-A4 ──► B2 ──► C2 ──► D2                            ✅ (C2까지)
-A5 ──► B1 ──► D1                                   ✅ (B1까지)
-E1 ──► E2                                          ✅
-E3, E4 ──► E5                                      ✅
-F1, F2, F3                                         ✅
-G6 v4 ──► C1 ──► B3                                ✅ (B3 진입 가능)
-```
-
----
-
-## 16. 운영 함정 (archive/HANDOFF-2026-05-04.md § 5에서 누적)
-
-1. **subagent stall**: 큰 task는 token budget 명시(150-200K), real-corpus parity check 강제, 측정 결과 받기 전 commit 금지
-2. **gopls 캐시 지연**: `BrokenImport`/`UndeclaredName` IDE 경고는 false positive, `go test ./...` 그린이면 무시
-3. **commit 컨벤션**: NO Co-Authored-By 헤더, NO emoji, Conventional Commits English subject ≤70 chars, *why* 중심
-4. **Viewer build coupling**: `make build-full` 시 stub-restore 메커니즘으로 `git status` clean 유지 (`make build`는 Go 바이너리만)
-5. **partial-cache D4**: mixed dirty/cached → cold fallback (correctness > speed). G6 v4(`ORDER BY start_line`) + C1(reverse-ref) 후 cold vs partial diff = 0 ✅
-6. **Heredoc commit message**: perl regex 같은 escape-prone tooling 금지 (이전에 archive/WORK-PLAN-2026-05-04.md 망친 사고 있음)
-
----
-
-## 17. 핵심 설계 원칙
+## 15. 핵심 설계 원칙
 
 | 원칙 | 구현 |
 |---|---|
-| **Single binary** | go:embed로 viewer까지 단일 실행파일 |
+| **Single binary** | go:embed로 viewer까지 단일 실행파일 (`make build-full`) |
+| **LLM-free deterministic build** | 그래프 빌드는 LLM 미사용·결정적. LLM은 eval 표면에만 |
 | **CGO-free default** | `modernc.org/sqlite` (cross-platform CI matrix) |
 | **ISP** | Store interface 3분할 — read consumers는 writer 의존 X |
-| **Pluggable backend** | `--db postgres://...` (B2/C2 완성) |
-| **Cache correctness > speed** | partial-hit는 cold fallback (D4) |
+| **Public boundary** | 교차-repo API는 `pkg/`에만. CKV/CKS는 `internal/` 접근 금지 |
+| **Cache correctness > speed** | partial-hit도 정확성 우선 (runIncremental가 phantom-edge 방지) |
 | **Append-only enums** | NodeType/EdgeType 위치 변경 금지 (hash ID stability) |
-| **Schema bump = global cache invalidation** | silent corruption 방어 |
+| **Two SchemaVersions** | manifest(back-compat) ≠ cache(cache-key) — 혼동 금지 |
 | **Confidence triple** | EXTRACTED / INFERRED / AMBIGUOUS — 휴리스틱 정직성 |
-| **CKS 6-graph 분리** | G1~G6 viewer toggle, MCP tool과 1:1 매핑 가능 |
-| **Subagent-driven dev** | impl → review → fix loop, real-corpus parity check 강제 |
+| **Supersede, don't delete (docs)** | 결정=ADR 1개; 변경 시 새 ADR + "Superseded by" |
 
 ---
 
@@ -609,60 +538,62 @@ G6 v4 ──► C1 ──► B3                                ✅ (B3 진입 �
 ```
 module github.com/0xmhha/code-knowledge-graph
 go 1.25.5
+toolchain go1.25.12
 
 require (
-    github.com/0xmhha/cli-wrapper v0.2.1
-    github.com/anthropics/anthropic-sdk-go v1.38.0
-    github.com/jackc/pgx/v5 v5.9.2                          // B2 + C2 (PG)
-    github.com/mark3labs/mcp-go v0.49.0                     // MCP stdio
+    github.com/fsnotify/fsnotify v1.10.1                    // watch 서브커맨드
+    github.com/jackc/pgx/v5 v5.10.0                         // PG (ADR-0003 deprecated)
+    github.com/mark3labs/mcp-go v0.56.0                     // MCP stdio
     github.com/spf13/cobra v1.10.2                          // CLI
-    github.com/tree-sitter/go-tree-sitter v0.25.0           // A1+A2 (smacker 대체)
+    github.com/tree-sitter/go-tree-sitter v0.25.0
     github.com/tree-sitter/tree-sitter-javascript v0.25.0
     github.com/tree-sitter/tree-sitter-typescript v0.23.2
-    golang.org/x/tools v0.44.0                              // go/packages
+    golang.org/x/tools v0.48.0                              // go/packages
     gopkg.in/yaml.v3 v3.0.1
-    modernc.org/sqlite v1.49.1                              // CGO-free
+    modernc.org/sqlite v1.53.0                              // CGO-free
 )
 ```
 
+> extraction schema = **1.23** (`internal/buildpipe/cache.go:166`), ckgVersion =
+> **0.1.0** (`cmd/ckg/root.go:5`). 과거 부록의 `anthropic-sdk-go` /
+> `cli-wrapper` 의존은 현재 `go.mod`에 없음. 위 버전은 현 `go.mod` 기준이며 이후
+> 갱신될 수 있다 — 정확한 값은 `go.mod`가 ground truth.
+
 ### Vendored
 
-- `internal/parse/solidity/binding/` — JoranHonig/tree-sitter-solidity v1.2.11 (LANGUAGE_VERSION=14, ABI 14는 upstream go-tree-sitter v0.25 ABI window 13..15 안에 들어가 regenerate 불요)
+- `internal/parse/solidity/binding/` — vendored tree-sitter-solidity grammar
+  (구체 버전/ABI window는 코드가 ground truth; **버전 문자열 미검증**).
 
 ### Build artifacts (gitignored)
 
 - `bin/ckg` — `make build`
 - `web/viewer-next/{out,.next,node_modules}/`
-- `internal/server/web_assets/_next/`, `404/`, `404.html`, `index.txt` (stub `index.html`만 commit)
-
-### 검증 corpus
-
-- `testdata/synthetic/` — Go 3 + TS 3 + Sol 2 = 8 files (소규모, 빠름)
-- `go-stablenet-latest` — Go 1259 + TS 320 + Sol 563 = 2142 files (Ethereum-derived, 실 corpus)
+- `internal/server/web_assets/_next/`, `404/`, `404.html`, `index.txt`
+  (tracked stub `index.html`만 commit)
 
 ---
 
-## Appendix B: Quick Start (5분)
+## Appendix B: Quick Start
 
 ```bash
 cd <repo root>
 git log --oneline -10
-go test ./...                               # 18 packages PASS
+make test                                   # = go test ./...
 make build-full                             # Next.js viewer + ckg binary
-./bin/ckg build --src=testdata/synthetic --out=/tmp/ckg-synth
+./bin/ckg build --src=testdata --out=/tmp/ckg-synth
 ./bin/ckg serve --graph=/tmp/ckg-synth --port=8080 --open
-./bin/ckg audit --src=testdata/synthetic --graph=/tmp/ckg-synth   # exit 0 = parity
+./bin/ckg audit --src=testdata --graph=/tmp/ckg-synth   # exit 0 = parity
 
-# Wave 7 (Group F) 검증
-./bin/ckg serve --graph=/tmp/ckg-synth --no-viewer --port=8788    # API only
+# API-only / disk viewer
+./bin/ckg serve --graph=/tmp/ckg-synth --no-viewer --port=8788
 make viewer && CKG_DEV_VIEWER_DIR=$(pwd)/internal/server/web_assets \
-  ./bin/ckg serve --graph=/tmp/ckg-synth --port=8789              # disk viewer
-
-# PostgreSQL backend (선택)
-./bin/ckg build --src=testdata/synthetic --db=postgres://user:pass@localhost/ckg
-./bin/ckg serve --db=postgres://user:pass@localhost/ckg --port=8080
+  ./bin/ckg serve --graph=/tmp/ckg-synth --port=8789
 ```
 
 ---
 
-**End of code structure overview.** 본 문서는 visual + structural index 역할로, 깊은 구현 디테일은 `ARCHITECTURE-DETAILED.md` 17 sections 참조.
+**End of code structure overview.** 본 문서는 visual + structural index이며, 문서
+목록은 `docs/DOC-MAP.md`, 노드/엣지·schema는 `docs/SCHEMA.md`, 깊은 설계는
+`docs/ARCHITECTURE-DETAILED.md`가 authoritative.
+</content>
+</invoke>

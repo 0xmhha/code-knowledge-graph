@@ -1,5 +1,13 @@
 # CKG Blueprint Alignment & Refactoring Direction
 
+> **ARCHIVED 2026-07-18.** Every "Tier A — needed" item this doc identified has
+> since shipped: policy-meta nodes (`Policy`) + security-pattern nodes
+> (`SecurityPattern`), 1-shot retrieval (`get_context_for_task` oneshot), and
+> "왜"-history (PR title + cleaned commit body, `pkg/types/pr_ref.go`). Its
+> stated tool count (8) and schema (1.13) are stale (now 10 / 1.23). CKG's role
+> in the CKG/CKV/CKS triangle now lives in `docs/VISION.md`; live status in
+> `docs/CONTINUITY.md`. Kept for the E2E blueprint scenario (§1) as provenance.
+>
 > **목적**: 사용자가 제시한 E2E 청사진을 정리하고, CKG가 그 안에서 맡을
 > 역할을 명확히 한 뒤, 리팩토링 방향을 도출한다.
 > **작성**: 2026-05-29

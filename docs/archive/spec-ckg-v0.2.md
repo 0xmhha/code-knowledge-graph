@@ -1,5 +1,15 @@
 # CKG v0.2 Foundation Spec
 
+> **ARCHIVED 2026-07-18 — superseded.** This May foundation spec mixes shipped
+> work (parser migration, concurrency Stage 1, incremental cache Phase 1) with
+> superseded plans and still-pending items:
+> - **PostgreSQL roadmap → superseded by `docs/adr/0003-deprecate-postgres-backend.md`.**
+> - **Schema 1.0/1.1 references → now 1.23** (`internal/buildpipe/cache.go`; history in `docs/SCHEMA.md`).
+> - **Still-pending:** concurrency Stage 2 (SSA `--deep` / `is_potential_race`) and
+>   incremental cache Phase 2 (reverse-reference index) — carried in `docs/CONTINUITY.md`.
+>
+> Authoritative now: `docs/SCHEMA.md`, `docs/INCREMENTAL.md`, `docs/ARCHITECTURE-DETAILED.md`.
+
 > 적용 범위: smacker → upstream tree-sitter 마이그레이션, Go 동시성 분석,
 > PostgreSQL 스토리지 백엔드, 파일 단위 incremental 캐시.
 > v0 prototype 다음 단계의 기반 작업 4종을 묶는다.

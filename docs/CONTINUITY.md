@@ -28,7 +28,7 @@
 - **Keyword-retrieval eval (#57)**: LLM-free `eval-retrieval` fixtures —
   `eval/ckv-mirror` (CKV fixture mirror, `make eval-ckv-mirror`, 12/12) and
   `eval/stablenet-keyword` (real corpus, `make eval-stablenet-keyword GRAPH=<dir>`, 8/8).
-- **Eval framework (LLM-driven)**: production-ready. Metrics: `docs/eval-trajectory.md`.
+- **Eval framework (LLM-driven)**: production-ready. Metrics: `docs/archive/eval-trajectory.md`.
 - **Schema**: 1.23 (authoritative: `docs/SCHEMA.md` → `internal/buildpipe/cache.go`).
 
 ## 1b. Remaining work — **no open CKG code items** (2026-07-15)
@@ -47,11 +47,23 @@ notes there). What's left is not CKG code work:
   D2 coding-agent "~23% recall" source (D-5); D3 ckv/cks `ckg_node_id` removal
   (ckv done 07-11, cks 07-12).
 
+**Deferred design backlog (not scheduled; surfaced by the 2026-07-18 docs cleanup).**
+These are the only genuinely-unimplemented features left in the design specs; both
+were consciously deferred, not dropped:
+
+- **W4 message-queue / pub-sub** (`docs/design/schema-1.9-spec.md` §W4): Kafka /
+  NATS / RabbitMQ / SQS detection → a `Topic` node + `publishes_to` / `consumes_from`
+  edges. No `NodeTopic` / `EdgePublishesTo` exists in `pkg/types/enums.go`. W1–W3
+  (HTTP/gRPC interop) shipped; W4 is the sole remaining stage of that spec.
+- **Concurrency Stage 2** (`docs/archive/spec-ckg-v0.2.md` §2 Stage 2): SSA-based
+  `--deep` dataflow + `is_potential_race` candidate detection. Stage 1 (Mutex +
+  acquires/releases/accessed_under_lock) shipped; Stage 2 is spec-only.
+
 ## 2. Where to read next
 
 | If you want to … | Read |
 |---|---|
-| Understand the eval-framework series (11 cycles, metrics) | `docs/eval-trajectory.md` |
+| Understand the eval-framework series (11 cycles, metrics) | `docs/archive/eval-trajectory.md` |
 | Cross-project cks integration plan (R9-R13, ckg-NEW-1..9) | `eval/stablenet/CKS-INTEGRATION-2026-05-23.md` |
 | Current P0 task status (closed + open) | `eval/stablenet/HANDOFF.md` |
 | Phase-by-phase dogfood follow-up tracker (archived) | `docs/archive/todo-cks-dogfood-followups-2026-05-20.md` |

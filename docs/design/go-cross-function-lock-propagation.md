@@ -433,7 +433,7 @@ B1 의 기존 accessed_under_lock 카운트가 *증가* 만 하고 감소하지 
   - `internal/parse/golang/statements.go:84` (lock-walk 버그 수정 후 상태)
 - 관련 design doc:
   - `docs/design/track-c-detector-gap.md` §2.9, §2.10
-  - `docs/spec-ckg-v0.2.md` §2 R2.x (concurrency invariants)
+  - `docs/archive/spec-ckg-v0.2.md` §2 R2.x (concurrency invariants)
 - 운영 통계: `docs/archive/STATUS-REPORT-2026-05-04.md` line 29
 - Schema enum (수정 대상 아님): `pkg/types/enums.go:142-145` (lock edge types)
 - 향후 SSA 도입 시 참고: `golang.org/x/tools/go/ssa`,

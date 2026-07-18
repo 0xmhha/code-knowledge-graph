@@ -194,7 +194,7 @@ LLM 은 `tools/list` 결과로 어떤 도구들이 있는지 알고, 자연어 p
 
 - Transport: stdio (V0)
 - 서버: Go 단일 바이너리 `ckg mcp --graph=DIR`
-- 도구 6개: `get_context_for_task` (★) + `find_symbol` / `find_callers` / `find_callees` / `get_subgraph` / `search_text`
+- 도구 10개 (authoritative: `pkg/mcphandlers/registerall.go`): `get_context_for_task` (★) + `find_symbol` / `find_callers` / `find_callees` / `get_subgraph` / `search_text` / `impact_of_change` / `concurrency_impact` / `change_history` / `evidence_for_intent`
 - Eval baseline 별 도구 allowlist 다르게 → 가설 검증 (§9.1)
 - Spec 본문 §8 참조
 
