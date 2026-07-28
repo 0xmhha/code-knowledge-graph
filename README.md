@@ -1,5 +1,12 @@
 # CKG — Code Knowledge Graph
 
+> [!IMPORTANT]
+> **This repository is archived and read-only.** Its code and full commit
+> history have been consolidated into
+> **[knowledge-system](https://github.com/0xmhha/knowledge-system)**, where it
+> lives as the **graph engine** (`graph/`, `internal/graph/`, `pkg/graph/`,
+> `cmd/graph`). Development continues there. See [ARCHIVED.md](./ARCHIVED.md).
+
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![CI](https://github.com/0xmhha/code-knowledge-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/0xmhha/code-knowledge-graph/actions/workflows/ci.yml)
 
